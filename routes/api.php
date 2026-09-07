@@ -90,12 +90,21 @@ Route::get('/public/invoices/{invoice}/data', [InvoiceController::class, 'public
     ->name('invoices.public.data')
     ->middleware('signed.url')->middleware('expires');
 
+// The resolved application access state. Intentionally outside 'subscription.active' so a
+// read-only or blocked Company can still load its own access context and renewal path.
+Route::get('/v1/access', [\App\Http\Controllers\Api\AccessController::class, 'show'])
+    ->middleware(['api.auth']);
+
 // Billing routes intentionally bypass 'subscription.active' so a company whose
 // subscription has lapsed can still view plans and start a new Checkout.
 Route::prefix('v1/billing')->middleware(['api.auth'])->group(function () {
     Route::get('/plans', [\App\Http\Controllers\Api\BillingController::class, 'plans']);
     Route::get('/subscription', [\App\Http\Controllers\Api\BillingController::class, 'subscription']);
     Route::post('/checkout', [\App\Http\Controllers\Api\BillingController::class, 'checkout']);
+    Route::post('/payment-method', [\App\Http\Controllers\Api\BillingController::class, 'paymentMethodPortal']);
+    Route::post('/subscription/change', [\App\Http\Controllers\Api\BillingController::class, 'changeSubscription']);
+    Route::post('/subscription/cancel', [\App\Http\Controllers\Api\BillingController::class, 'cancelSubscription']);
+    Route::post('/subscription/resume', [\App\Http\Controllers\Api\BillingController::class, 'resumeSubscription']);
 });
 
 // Onboarding routes intentionally bypass 'subscription.active' - a Company mid-setup
@@ -334,19 +343,27 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
 
 
 
+    // Points/kilometers batch endpoints use POST for their filter payload but only ever read
+    // and export existing data - they must stay available while an account is read-only.
     Route::post('/batches/points/preview', [PointsExportController::class, 'preview'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/batches/points/download', [PointsExportController::class, 'download'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/batches/points/statement-pdf', [PointsExportController::class, 'statementPdf'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
 
     Route::post('/batches/kilometers/preview', [KilometersExportController::class, 'preview'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/batches/kilometers/download', [KilometersExportController::class, 'download'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/batches/kilometers/statement-pdf', [KilometersExportController::class, 'statementPdf'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
 
     Route::get('/geocode/autocomplete', [GeocodeController::class, 'autocomplete']);
     Route::get('/geocode/details', [GeocodeController::class, 'details']);
@@ -414,7 +431,9 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:manager,superadmin');
 
     Route::post('/documents/generate-pdf', [DocumentController::class, 'generatePdf']);
-    Route::post('/documents/check-exists', [DocumentController::class, 'checkExists']);
+    // Existence check only - reads, never writes.
+    Route::post('/documents/check-exists', [DocumentController::class, 'checkExists'])
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/documents/email', [DocumentController::class, 'emailDocuments']);
     Route::post('/documents/travel/company/create', [DocumentController::class, 'createCompanyTravelDocument'])
         ->middleware('role:manager,superadmin');
@@ -424,8 +443,10 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::get('/documents/travel/company', [DocumentController::class, 'indexTravelDocumentsForCompany']);
     Route::get('/documents/travel', [DocumentController::class, 'indexTravelDocuments']);
 
+    // Timeline is a computed read - POST is only used to carry the filter payload.
     Route::post('/visits/timeline', [VisitsController::class, 'monthTimeline'])
-        ->middleware('role:any');
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::get('/visits/timeline/status', [VisitsController::class, 'checkCalculationStatus'])
         ->middleware('role:any');
     Route::get('/visits', [VisitsController::class, 'index'])

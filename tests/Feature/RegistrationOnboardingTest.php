@@ -764,7 +764,12 @@ class RegistrationOnboardingTest extends TestCase
         $resp->assertStatus(200);
     }
 
-    public function test_expired_trial_without_paid_subscription_is_restricted(): void
+    /**
+     * Phase 2 deliberately softened this case: an expired trial used to hard-block every
+     * request (402). It is now READ_ONLY - the company keeps access to its own data and only
+     * loses the ability to mutate it.
+     */
+    public function test_expired_trial_without_paid_subscription_becomes_read_only(): void
     {
         $this->ensureManagerRole();
         $company = Company::factory()->create([
@@ -777,9 +782,13 @@ class RegistrationOnboardingTest extends TestCase
             'role_id' => Role::where('position', 'manager')->value('id'),
         ]);
 
-        $resp = $this->actingAs($manager)->getJson('/api/v1/my-company');
+        $this->actingAs($manager)->getJson('/api/v1/my-company')->assertStatus(200);
 
-        $resp->assertStatus(402);
+        $this->actingAs($manager)
+            ->patchJson('/api/v1/my-company', ['name' => 'Nový názov'])
+            ->assertStatus(403)
+            ->assertJsonPath('code', 'READ_ONLY')
+            ->assertJsonPath('access_state', 'read_only');
     }
 
     public function test_existing_active_company_without_billing_state_is_still_restricted(): void

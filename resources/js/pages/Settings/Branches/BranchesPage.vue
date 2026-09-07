@@ -9,11 +9,22 @@ import { useToast } from 'primevue/usetoast'
 import useModal from '@/composables/useModal'
 import BranchForm from './BranchForm.vue'
 import api from '@/services/api'
+import Button from 'primevue/button'
+import { useAccessStore } from '@/stores/access'
 import type { DataTableOptions, RemoteTableReturn } from '@/types/datatable'
 
 const toast = useToast()
 const auth = useAuthStore()
+const access = useAccessStore()
 const actionRemote = ref<RemoteTableReturn>({} as RemoteTableReturn)
+
+// Plan allowance resolved by the backend; the API rejects over-limit creation regardless.
+const branchUsage = computed(() => access.usage['branches'] ?? null)
+const branchesExhausted = computed(() => branchUsage.value !== null && !branchUsage.value.can_add_more)
+
+function goToBilling() {
+    router.push({ name: 'billing' })
+}
 
 const { openModal } = useModal()
 
@@ -38,6 +49,7 @@ async function openCreateBranch() {
     if (result) {
         toast.add({ severity: 'success', summary: 'Vytvorené', detail: 'Pobočka bola vytvorená', life: 3000 })
         actionRemote.value?.reload()
+        void access.load()
     }
 }
 
@@ -68,7 +80,7 @@ const options = computed<DataTableOptions<Branch>>(() => ({
     actions: [
         {
             key: 'delete',
-            disabled: ({ selectedRows }) => selectedRows.length === 0,
+            disabled: ({ selectedRows }) => selectedRows.length === 0 || !access.canMutate,
             icon: 'bi bi-eraser',
             class: 'bg-danger!',
             confirm: 'Zmazať vybrané pobočky?',
@@ -81,6 +93,7 @@ const options = computed<DataTableOptions<Branch>>(() => ({
             key: 'add',
             icon: 'bi bi-plus-lg',
             class: 'bg-accent!',
+            disabled: () => !access.canMutate || branchesExhausted.value,
             handler: async () => {
                 await openCreateBranch()
             }
@@ -91,6 +104,25 @@ const options = computed<DataTableOptions<Branch>>(() => ({
 
 <template>
     <div class="h-full flex flex-col overflow-hidden min-h-0">
+        <div v-if="branchUsage" class="mb-4">
+            <span class="text-mini uppercase tracking-wide text-lightgrey">Pobočky</span>
+            <span class="ml-2 text-normal" :class="branchUsage.over_limit ? 'text-danger' : ''">
+                {{ branchUsage.usage }} / {{ branchUsage.unlimited ? 'neobmedzene' : branchUsage.limit ?? '—' }}
+            </span>
+        </div>
+
+        <div
+            v-if="branchUsage && (branchUsage.over_limit || branchesExhausted)"
+            class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-tag3 px-4 py-3 text-normal text-white"
+        >
+            <span v-if="branchUsage.over_limit">
+                Máte {{ branchUsage.usage }} pobočiek, váš balík ich povoľuje {{ branchUsage.limit }}.
+                Existujúce pobočky zostávajú plně funkčné, ďalšie však nie je možné pridať.
+            </span>
+            <span v-else>Dosiahli ste limit {{ branchUsage.limit }} pobočiek vášho aktuálneho balíka.</span>
+            <Button label="Zmeniť balík" size="small" severity="contrast" @click="goToBilling" />
+        </div>
+
         <UniversalDataTable :options="options" />
     </div>
 </template>

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
 import nures from './nurse';
 import managerRoutes from './manager';
 import superadminRoutes from './superadmin';
@@ -63,7 +64,15 @@ router.beforeEach(async (to, _from, next) => {
         return next({ name: 'login', query: { redirect: to.fullPath } });
     }
 
-    if (auth.isAuthenticated && isSubscriptionExpired(auth.user?.company ?? null, auth.currentRole)) {
+    // Only a BLOCKED company loses normal application access. A READ_ONLY company (expired
+    // trial/subscription) stays in the app - its data remains viewable, only mutations are
+    // rejected, and the billing page is its way back to full access.
+    const access = useAccessStore()
+    const isBlocked = access.context
+        ? access.isBlocked
+        : isSubscriptionExpired(auth.user?.company ?? null, auth.currentRole)
+
+    if (auth.isAuthenticated && auth.currentRole !== 'superadmin' && isBlocked) {
         if (to.name !== 'subscription-expired') {
             return next({ name: 'subscription-expired' });
         }

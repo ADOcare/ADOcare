@@ -56,6 +56,17 @@ api.interceptors.response.use(
         if (err.response && err.response.status === 402) {
             window.dispatchEvent(new CustomEvent('subscription-expired'));
         }
+
+        // Backend access/entitlement enforcement (read-only mode, plan limit reached).
+        // Frontend controls are only UX - this is what actually protects the data, so any
+        // rejection that slips past a stale UI still gets explained to the user.
+        const code = err.response?.data?.code;
+        if (err.response?.status === 403 && (code === 'READ_ONLY' || code === 'ENTITLEMENT_LIMIT_REACHED')) {
+            window.dispatchEvent(new CustomEvent('access-restricted', {
+                detail: { code, message: err.response?.data?.message },
+            }));
+        }
+
         return Promise.reject(err);
     }
 );

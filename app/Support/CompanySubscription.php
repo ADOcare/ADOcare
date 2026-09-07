@@ -4,12 +4,21 @@ namespace App\Support;
 
 use App\Exceptions\StudioKristianBillingException;
 use App\Models\Company;
+use App\Services\CompanyAccessService;
 use App\Services\StudioKristianBillingService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class CompanySubscription
 {
+    /**
+     * The seat allowance for a Company.
+     *
+     * The plan entitlement published by StudioKristian is authoritative when the active
+     * plan defines one; a manual superadmin override still wins over everything, and
+     * Companies without a StudioKristian entitlement fall back to the legacy tier limit so
+     * pre-migration customers keep their existing behavior. `null` means "no cap".
+     */
     public static function effectiveUsersLimit(?Company $company): ?int
     {
         if (!$company) {
@@ -19,6 +28,13 @@ class CompanySubscription
         $override = $company->subscription_users_limit_override;
         if ($override !== null) {
             return (int) $override;
+        }
+
+        $entitlements = app(CompanyAccessService::class)->entitlements($company);
+
+        if ($entitlements->has('users')) {
+            // Unlimited entitlements resolve to null (no cap) via limit().
+            return $entitlements->limit('users');
         }
 
         $company->loadMissing('subscriptionTier');
@@ -32,13 +48,15 @@ class CompanySubscription
 
     /**
      * Drop the cached remote trial/subscription lookups for a Company. Call this right
-     * after an action that changes StudioKristian's state for it (e.g. starting a trial)
-     * so the next read isn't served stale cached data from before that action.
+     * after an action that changes StudioKristian's state for it (e.g. starting a trial,
+     * changing/cancelling/resuming a subscription) so the next read - including the resolved
+     * access state and plan entitlements derived from it - isn't served stale cached data.
      */
     public static function forgetRemoteCache(Company $company): void
     {
         Cache::forget("studiokristian_billing:trial_state:{$company->id}");
         Cache::forget("studiokristian_billing:subscription_active:{$company->id}");
+        Cache::forget("studiokristian_billing:subscriptions:{$company->id}");
     }
 
     /**
@@ -231,28 +249,67 @@ class CompanySubscription
 
     private static function hasActiveRemoteSubscription(Company $company): bool
     {
-        $cacheKey = "studiokristian_billing:subscription_active:{$company->id}";
+        $subscriptions = self::cachedSubscriptions($company);
 
-        return (bool) Cache::remember($cacheKey, 60, function () use ($company) {
-            try {
-                $subscriptions = app(StudioKristianBillingService::class)->getCustomerSubscriptions($company);
-            } catch (StudioKristianBillingException $e) {
-                // Fail open on upstream unavailability so a StudioKristian outage does not lock customers out.
-                Log::warning('StudioKristian billing state unavailable, falling back to legacy state.', [
-                    'company_id' => $company->id,
-                    'message' => $e->getMessage(),
-                ]);
+        if ($subscriptions === null) {
+            // Fail open on upstream unavailability so a StudioKristian outage does not lock customers out.
+            return self::hasActiveLegacySubscription($company);
+        }
 
-                return self::hasActiveLegacySubscription($company);
-            }
-
-            return collect($subscriptions)->contains(function ($subscription) {
-                return in_array($subscription['status'] ?? null, ['active', 'trialing'], true);
-            });
+        return collect($subscriptions)->contains(function ($subscription) {
+            return in_array(strtolower((string) ($subscription['status'] ?? '')), ['active', 'trialing'], true);
         });
     }
 
-    private static function hasActiveLegacySubscription(Company $company): bool
+    /**
+     * The Company's StudioKristian subscriptions (including each subscription's plan
+     * entitlements), cached briefly so access-state and entitlement checks on ordinary
+     * application requests never turn into a StudioKristian round trip per request.
+     *
+     * Returns `[]` for a Company without a Customer Credential and `null` when StudioKristian
+     * could not be reached - callers must treat `null` as "unknown", never as "none".
+     */
+    public static function cachedSubscriptions(Company $company): ?array
+    {
+        if (!$company->hasBillingCustomerToken()) {
+            return [];
+        }
+
+        $cacheKey = "studiokristian_billing:subscriptions:{$company->id}";
+        $cached = Cache::get($cacheKey);
+
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        try {
+            $subscriptions = app(StudioKristianBillingService::class)->getCustomerSubscriptions($company);
+        } catch (StudioKristianBillingException $e) {
+            Log::warning('StudioKristian billing state unavailable, falling back to legacy state.', [
+                'company_id' => $company->id,
+                'message' => $e->getMessage(),
+            ]);
+
+            // Deliberately not cached - an outage must not freeze a stale answer for a minute.
+            return null;
+        }
+
+        Cache::put($cacheKey, $subscriptions, 60);
+
+        return $subscriptions;
+    }
+
+    /**
+     * Seed the cache with subscriptions that were just fetched authoritatively (e.g. by the
+     * billing page), so access resolution reads the fresh state instead of a stale cached
+     * one - and without paying for a second identical request.
+     */
+    public static function primeSubscriptionsCache(Company $company, array $subscriptions): void
+    {
+        Cache::put("studiokristian_billing:subscriptions:{$company->id}", $subscriptions, 60);
+    }
+
+    public static function hasActiveLegacySubscription(Company $company): bool
     {
         $status = strtolower(trim((string) $company->subscription_status));
 

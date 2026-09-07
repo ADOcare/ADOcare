@@ -680,6 +680,292 @@ class StudioKristianBillingTest extends TestCase
         $this->assertEquals([], $resp->json('data.subscriptions'));
     }
 
+    public function test_upgrade_request_reaches_studiokristian_and_refreshes_subscription(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/plans' => Http::response([
+                'data' => [
+                    ['id' => 1, 'name' => 'Rast', 'prices' => [['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly']]],
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscription/change' => Http::response([
+                'data' => [
+                    'id' => 4,
+                    'status' => 'active',
+                    'plan' => ['id' => 1, 'name' => 'Rast'],
+                    'price' => ['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly'],
+                    'scheduled_change' => null,
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscriptions' => Http::response([
+                'subscriptions' => [[
+                    'id' => 4,
+                    'status' => 'active',
+                    'plan' => ['id' => 1, 'name' => 'Rast'],
+                    'price' => ['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly'],
+                ]],
+                'trial' => null,
+            ], 200),
+        ]);
+
+        $company = Company::factory()->create(['studiokristian_customer_token' => 'customer-token']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->postJson('/api/v1/billing/subscription/change', ['plan_price_id' => 20]);
+
+        $resp->assertStatus(200);
+        $this->assertEquals('subscription', $resp->json('data.current.type'));
+        $this->assertEquals('Rast', $resp->json('data.current.subscription.plan.name'));
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/api/v1/billing/customer/subscription/change')
+                && $request['plan_price_id'] === 20
+                && $request->hasHeader('Idempotency-Key');
+        });
+    }
+
+    public function test_upgrade_failure_does_not_mutate_local_state(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/plans' => Http::response([
+                'data' => [
+                    ['id' => 1, 'name' => 'Rast', 'prices' => [['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly']]],
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscription/change' => Http::response([
+                'message' => 'Unable to change the subscription.',
+            ], 422),
+        ]);
+
+        $company = Company::factory()->create([
+            'studiokristian_customer_token' => 'customer-token',
+            'subscription_status' => 'active',
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->postJson('/api/v1/billing/subscription/change', ['plan_price_id' => 20]);
+
+        $resp->assertStatus(422);
+        // The local Company row is never touched by a subscription change request.
+        $this->assertEquals('active', $company->fresh()->subscription_status);
+    }
+
+    public function test_change_subscription_rejects_a_price_not_in_the_catalog(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/plans' => Http::response(['data' => []], 200),
+        ]);
+
+        $company = Company::factory()->create(['studiokristian_customer_token' => 'customer-token']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->postJson('/api/v1/billing/subscription/change', ['plan_price_id' => 999]);
+
+        $resp->assertStatus(422);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'subscription/change'));
+    }
+
+    public function test_downgrade_is_represented_as_a_scheduled_change(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/plans' => Http::response([
+                'data' => [
+                    ['id' => 1, 'name' => 'Start', 'prices' => [['id' => 10, 'amount' => 1900, 'currency' => 'EUR', 'interval' => 'monthly']]],
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscription/change' => Http::response([
+                'data' => [
+                    'id' => 4,
+                    'status' => 'active',
+                    'plan' => ['id' => 3, 'name' => 'Rast'],
+                    'price' => ['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly'],
+                    'scheduled_change' => [
+                        'plan' => ['id' => 1, 'name' => 'Start'],
+                        'price' => ['id' => 10, 'amount' => 1900, 'currency' => 'EUR', 'interval' => 'monthly'],
+                        'effective_at' => now()->addDays(20)->toIso8601String(),
+                    ],
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscriptions' => Http::response([
+                'subscriptions' => [[
+                    'id' => 4,
+                    'status' => 'active',
+                    'plan' => ['id' => 3, 'name' => 'Rast'],
+                    'price' => ['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly'],
+                    'scheduled_change' => [
+                        'plan' => ['id' => 1, 'name' => 'Start'],
+                        'price' => ['id' => 10, 'amount' => 1900, 'currency' => 'EUR', 'interval' => 'monthly'],
+                        'effective_at' => now()->addDays(20)->toIso8601String(),
+                    ],
+                ]],
+                'trial' => null,
+            ], 200),
+        ]);
+
+        $company = Company::factory()->create(['studiokristian_customer_token' => 'customer-token']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->postJson('/api/v1/billing/subscription/change', ['plan_price_id' => 10]);
+
+        $resp->assertStatus(200);
+        // Current plan remains Rast until the period ends - never immediately shown as Start.
+        $this->assertEquals('Rast', $resp->json('data.current.subscription.plan.name'));
+        $this->assertEquals('Start', $resp->json('data.current.subscription.scheduled_change.plan.name'));
+    }
+
+    public function test_cancellation_is_scheduled_and_subscription_stays_active(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/customer/subscription/cancel' => Http::response([
+                'data' => [
+                    'id' => 4,
+                    'status' => 'active',
+                    'cancel_at_period_end' => true,
+                    'current_period_end' => '2026-10-06T00:00:00+00:00',
+                    'plan' => ['id' => 3, 'name' => 'Adocare Pro'],
+                    'price' => ['id' => 17, 'amount' => 4500, 'currency' => 'EUR', 'interval' => 'monthly'],
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscriptions' => Http::response([
+                'subscriptions' => [[
+                    'id' => 4,
+                    'status' => 'active',
+                    'cancel_at_period_end' => true,
+                    'current_period_end' => '2026-10-06T00:00:00+00:00',
+                    'plan' => ['id' => 3, 'name' => 'Adocare Pro'],
+                    'price' => ['id' => 17, 'amount' => 4500, 'currency' => 'EUR', 'interval' => 'monthly'],
+                ]],
+                'trial' => null,
+            ], 200),
+        ]);
+
+        $company = Company::factory()->create(['studiokristian_customer_token' => 'customer-token']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->postJson('/api/v1/billing/subscription/cancel');
+
+        $resp->assertStatus(200);
+        $this->assertEquals('active', $resp->json('data.current.subscription.status'));
+        $this->assertTrue($resp->json('data.current.subscription.cancel_at_period_end'));
+        $this->assertEquals('subscription', $resp->json('data.current.type'));
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'subscription/cancel')
+            && $request->hasHeader('Idempotency-Key'));
+    }
+
+    public function test_resume_removes_scheduled_cancellation(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/customer/subscription/resume' => Http::response([
+                'data' => [
+                    'id' => 4,
+                    'status' => 'active',
+                    'cancel_at_period_end' => false,
+                    'plan' => ['id' => 3, 'name' => 'Adocare Pro'],
+                    'price' => ['id' => 17, 'amount' => 4500, 'currency' => 'EUR', 'interval' => 'monthly'],
+                ],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscriptions' => Http::response([
+                'subscriptions' => [[
+                    'id' => 4,
+                    'status' => 'active',
+                    'cancel_at_period_end' => false,
+                    'plan' => ['id' => 3, 'name' => 'Adocare Pro'],
+                    'price' => ['id' => 17, 'amount' => 4500, 'currency' => 'EUR', 'interval' => 'monthly'],
+                ]],
+                'trial' => null,
+            ], 200),
+        ]);
+
+        $company = Company::factory()->create(['studiokristian_customer_token' => 'customer-token']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->postJson('/api/v1/billing/subscription/resume');
+
+        $resp->assertStatus(200);
+        $this->assertFalse($resp->json('data.current.subscription.cancel_at_period_end'));
+    }
+
+    public function test_companies_cannot_change_or_cancel_each_others_subscriptions(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/customer/subscription/cancel' => Http::response([
+                'data' => ['id' => 1, 'status' => 'active', 'cancel_at_period_end' => true],
+            ], 200),
+            'billing.studiokristian.test/api/v1/billing/customer/subscriptions' => Http::response([
+                'subscriptions' => [['id' => 1, 'status' => 'active', 'cancel_at_period_end' => true]],
+                'trial' => null,
+            ], 200),
+        ]);
+
+        Company::factory()->create(['studiokristian_customer_token' => 'other-token']);
+        $ownCompany = Company::factory()->create(['studiokristian_customer_token' => 'own-token']);
+        $user = User::factory()->create(['company_id' => $ownCompany->id]);
+
+        $this->actingAs($user)->postJson('/api/v1/billing/subscription/cancel')->assertStatus(200);
+
+        // The Company/customer token used is always resolved from the authenticated session -
+        // there is no way to pass another company's id from the browser for this action.
+        Http::assertSent(fn ($request) => $request->hasHeader('X-Billing-Customer-Token', 'own-token')
+            && !$request->hasHeader('X-Billing-Customer-Token', 'other-token'));
+    }
+
+    public function test_plans_expose_entitlements_generically_without_hardcoding_features(): void
+    {
+        config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);
+        config(['services.studiokristian_billing.project_token' => 'project-token']);
+
+        Http::fake([
+            'billing.studiokristian.test/api/v1/billing/plans' => Http::response([
+                'data' => [[
+                    'id' => 1,
+                    'name' => 'Rast',
+                    'prices' => [['id' => 20, 'amount' => 3900, 'currency' => 'EUR', 'interval' => 'monthly']],
+                    'entitlements' => [
+                        'users' => ['type' => 'limit', 'value' => 10, 'unit' => 'users'],
+                        'branches' => ['type' => 'unlimited'],
+                        'priority_support' => ['type' => 'boolean', 'value' => true],
+                        'a_totally_new_project_specific_feature' => ['type' => 'custom'],
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $company = Company::factory()->create();
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $resp = $this->actingAs($user)->getJson('/api/v1/billing/plans');
+
+        $resp->assertStatus(200);
+        // ADOCare passes entitlements through as-is - it never hardcodes/filters feature keys.
+        $this->assertEquals('limit', $resp->json('data.0.entitlements.users.type'));
+        $this->assertEquals(10, $resp->json('data.0.entitlements.users.value'));
+        $this->assertEquals('unlimited', $resp->json('data.0.entitlements.branches.type'));
+        $this->assertTrue($resp->json('data.0.entitlements.priority_support.value'));
+        $this->assertEquals('custom', $resp->json('data.0.entitlements.a_totally_new_project_specific_feature.type'));
+    }
+
     public function test_provision_customer_credential_command_stores_token_on_company(): void
     {
         config(['services.studiokristian_billing.base_url' => 'https://billing.studiokristian.test']);

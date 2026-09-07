@@ -13,6 +13,8 @@ import TercialNavbar from './components/TercialNavbar.vue'
 import MobileBlocker from './components/MobileBlocker.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import AccessError from '@/pages/AccessError.vue'
+import AccessReadOnlyBanner from '@/components/AccessReadOnlyBanner.vue'
+import AccessPaymentWarningBanner from '@/components/AccessPaymentWarningBanner.vue'
 import { navigationAccessError } from '@/router'
 
 import { useAuthStore } from '@/stores/auth'
@@ -60,12 +62,25 @@ function handleSubscriptionExpired() {
     }
 }
 
+function handleAccessRestricted(event: Event) {
+    const detail = (event as CustomEvent<{ message?: string }>).detail
+
+    toast.add({
+        severity: 'warn',
+        summary: 'Akcia nie je dostupná',
+        detail: detail?.message ?? 'Účet je v režime len na čítanie.',
+        life: 6000,
+    })
+}
+
 onMounted(() => {
     window.addEventListener('subscription-expired', handleSubscriptionExpired)
+    window.addEventListener('access-restricted', handleAccessRestricted)
 })
 
 onBeforeUnmount(() => {
     window.removeEventListener('subscription-expired', handleSubscriptionExpired)
+    window.removeEventListener('access-restricted', handleAccessRestricted)
 })
 </script>
 
@@ -80,6 +95,9 @@ onBeforeUnmount(() => {
         <div class="flex flex-1 overflow-hidden">
             <div class="flex-1 bg-white p-8 relative" :class="contentLoading ? 'overflow-hidden' : 'overflow-auto'">
                 <LoadingOverlay :show="contentLoading" text="" />
+
+                <AccessReadOnlyBanner v-if="isLoggedIn" class="mb-5" />
+                <AccessPaymentWarningBanner v-if="isLoggedIn" class="mb-5" />
 
                 <AccessError v-if="navigationAccessError" />
                 <router-view v-else />

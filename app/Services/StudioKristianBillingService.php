@@ -178,6 +178,27 @@ class StudioKristianBillingService
     }
 
     /**
+     * Open a Stripe-hosted Billing Portal session so the customer can update their payment
+     * method. StudioKristian resolves the Stripe Customer from the credential pair - ADOCare
+     * never sees or sends a Stripe Customer id, and never talks to Stripe itself.
+     *
+     * @param  string  $returnUrl  Absolute https URL built by ADOCare, never taken from the browser.
+     * @return array{portal_url: ?string}
+     */
+    public function createPaymentMethodPortalSession(Company $company, string $returnUrl): array
+    {
+        $response = $this->send(fn () => $this->client($this->customerToken($company))
+            ->post('/api/v1/billing/customer/payment-method', [
+                'return_url' => $returnUrl,
+            ]));
+
+        // Like /checkout, this endpoint returns {url} at the top level - no "data" wrapper.
+        $data = $this->handle($response);
+
+        return ['portal_url' => $data['url'] ?? null];
+    }
+
+    /**
      * Provision a new StudioKristian Customer Credential for a Company that doesn't have
      * one yet. Self-service - authenticated with only the Project Credential, no
      * StudioKristian admin session required. Idempotent per Company: StudioKristian keys
@@ -269,6 +290,46 @@ class StudioKristianBillingService
     }
 
     /**
+     * Change the Company's active subscription to a different price. StudioKristian decides
+     * whether this applies immediately (upgrade, prorated by Stripe) or is scheduled for the
+     * end of the current billing period (downgrade) - ADOCare never computes proration or
+     * scheduling itself, it only asks for the desired price and reports back what happened.
+     */
+    public function changeSubscription(Company $company, int $planPriceId): array
+    {
+        $response = $this->send(fn () => $this->client($this->customerToken($company))
+            ->withHeaders(['Idempotency-Key' => $this->subscriptionActionIdempotencyKey($company, 'change', (string) $planPriceId)])
+            ->post('/api/v1/billing/customer/subscription/change', ['plan_price_id' => $planPriceId]));
+
+        return $this->handle($response)['data'] ?? [];
+    }
+
+    /**
+     * Schedule the Company's active subscription to cancel at the end of the current billing
+     * period - never an immediate cancellation.
+     */
+    public function cancelSubscription(Company $company): array
+    {
+        $response = $this->send(fn () => $this->client($this->customerToken($company))
+            ->withHeaders(['Idempotency-Key' => $this->subscriptionActionIdempotencyKey($company, 'cancel')])
+            ->post('/api/v1/billing/customer/subscription/cancel'));
+
+        return $this->handle($response)['data'] ?? [];
+    }
+
+    /**
+     * Reverse a scheduled end-of-period cancellation.
+     */
+    public function resumeSubscription(Company $company): array
+    {
+        $response = $this->send(fn () => $this->client($this->customerToken($company))
+            ->withHeaders(['Idempotency-Key' => $this->subscriptionActionIdempotencyKey($company, 'resume')])
+            ->post('/api/v1/billing/customer/subscription/resume'));
+
+        return $this->handle($response)['data'] ?? [];
+    }
+
+    /**
      * Reuse the same Idempotency-Key for repeated checkout attempts within a short window,
      * so accidental double-clicks/retries don't create multiple Checkout Sessions.
      */
@@ -276,6 +337,18 @@ class StudioKristianBillingService
     {
         return Cache::remember(
             "studiokristian_billing:checkout_idempotency_key:{$company->id}:{$planPriceId}",
+            300,
+            fn () => (string) Str::uuid()
+        );
+    }
+
+    /**
+     * Same double-click/retry protection as checkout, for subscription-changing actions.
+     */
+    private function subscriptionActionIdempotencyKey(Company $company, string $action, string $suffix = ''): string
+    {
+        return Cache::remember(
+            "studiokristian_billing:subscription_action_idempotency_key:{$company->id}:{$action}:{$suffix}",
             300,
             fn () => (string) Str::uuid()
         );

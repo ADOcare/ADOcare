@@ -1,5 +1,6 @@
 import router from '@/router';
 import api from '@/services/api';
+import { useAccessStore } from '@/stores/access';
 import type { Branch, User } from '@/types/models';
 import { defineStore } from 'pinia';
 
@@ -41,6 +42,7 @@ export const useAuthStore = defineStore('auth', {
                     this.user = null;
                     this.currentRole = null;
                     this.currentBranch = null;
+                    useAccessStore().clear();
                     return;
                 }
 
@@ -51,6 +53,9 @@ export const useAuthStore = defineStore('auth', {
                 this.currentRole = initialRole;
                 this.currentCompanyId = initialBranch ? initialBranch.company_id : null;
 
+                // Resolve the application access state once per session; the backend stays
+                // authoritative on every request regardless of what is cached here.
+                await useAccessStore().load();
 
             } catch {
                 this.clearAuth();
@@ -134,6 +139,7 @@ export const useAuthStore = defineStore('auth', {
             this.user = null;
             this.currentRole = null;
             this.currentBranch = null;
+            useAccessStore().clear();
             localStorage.removeItem('api_token');
         },
 

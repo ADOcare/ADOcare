@@ -13,10 +13,12 @@ use App\Http\Resources\DoctorCollection;
 use App\Http\Resources\DoctorResource;
 use App\Http\Responses\ApiResponse;
 use App\Models\Branch;
+use App\Models\Company;
 use App\Models\Patient;
 use App\Models\Doctor;
 use App\Models\User;
 use App\Models\Role;
+use App\Services\CompanyResourceUsageService;
 use Illuminate\Http\Request;
 use \App\Http\Controllers\Controller;
 use Illuminate\Http\Response;
@@ -85,7 +87,14 @@ class BranchController extends Controller
         if (!isset($data['company_id'])) {
             $data['company_id'] = auth()->user()->company_id;
         }
-        $item = Branch::create($data);
+
+        $company = Company::query()->find((int) $data['company_id']);
+
+        $item = $company
+            ? app(CompanyResourceUsageService::class)
+                ->createWithinLimit($company, 'branches', fn () => Branch::create($data))
+            : Branch::create($data);
+
         return $this->success($item, 'Created', Response::HTTP_CREATED);
     }
 

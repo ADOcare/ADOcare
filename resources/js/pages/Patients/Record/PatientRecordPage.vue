@@ -1939,6 +1939,7 @@ async function saveRecord() {
       patient_id: patientId.value,
       branch_id: branchId,
       date: admissionDate || null,
+      form_spec: defaultSpec,
       record_data: {
         ...answers,
         admissionDate,

@@ -29,7 +29,9 @@ class RecordDocumentService
         $doctor = $patient->doctor;
 
         $companyName = $company ? $company->name : '';
-        $companyAddress = $company->address . ', ' . $company->city . ', ' . $company->psc;
+        $companyAddress = $company
+            ? trim(implode(', ', array_filter([$company->address, $company->city, $company->psc])))
+            : '';
         $patientName = $patient->title . ' ' . $patient->first_name . ' ' . $patient->last_name;
         $patientBirthNumber = $patient->personal_number;
         $patientContact = $patient->contact;
@@ -58,6 +60,7 @@ class RecordDocumentService
             'patient_contact' => $patientContact,
             'insurance_code' => $insuranceCode,
             'form_data' => $processedRecordData,
+            'form_spec' => $data['form_spec'] ?? null,
             'document_id' => $document->id,
             'created_at' => now(),
         ];

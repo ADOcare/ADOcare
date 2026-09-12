@@ -231,6 +231,24 @@
                         return (string) ($val ?? '');
                     };
 
+                    $isFilledValue = function ($val) use (&$isFilledValue) {
+                        if ($val === null || $val === '') {
+                            return false;
+                        }
+
+                        if (is_array($val)) {
+                            foreach ($val as $item) {
+                                if ($isFilledValue($item)) {
+                                    return true;
+                                }
+                            }
+
+                            return false;
+                        }
+
+                        return true;
+                    };
+
                     // load translations (generic + field-specific)
                     $translationsFile = resource_path('views/pdf/form_specs/record_form_translations.php');
                     $translationsConfig = file_exists($translationsFile) ? include $translationsFile : ['generic' => [], 'fields' => []];
@@ -240,11 +258,38 @@
 
                 @if ($formSpec && is_array($formSpec['sections'] ?? null))
                     @php
-                        // helper to read nested keys like 'nutrition.weightKg'
+                        $fieldLabels = [];
+                        $optionLabels = [];
+                        $coveredFieldIds = [];
+
+                        foreach ($formSpec['sections'] ?? [] as $specSection) {
+                            foreach ($specSection['fields'] ?? [] as $specField) {
+                                $fieldId = (string) ($specField['id'] ?? '');
+                                if ($fieldId === '') {
+                                    continue;
+                                }
+
+                                $fieldLabels[$fieldId] = $specField['label'] ?? $fieldId;
+                                $coveredFieldIds[$fieldId] = true;
+
+                                foreach ($specField['options'] ?? [] as $option) {
+                                    if (is_array($option) && array_key_exists('value', $option)) {
+                                        $optionLabels[$fieldId][(string) $option['value']] = $option['label'] ?? (string) $option['value'];
+                                    }
+                                }
+                            }
+                        }
+
+                        // helper to read both submitted flat keys like 'nutrition.weightKg' and nested keys
                         $getNested = function ($data, $key) {
                             if ($key === null || $key === '') {
                                 return null;
                             }
+
+                            if (is_array($data) && array_key_exists($key, $data)) {
+                                return $data[$key];
+                            }
+
                             $parts = explode('.', $key);
                             $cur = $data;
                             foreach ($parts as $p) {
@@ -257,11 +302,15 @@
                             return $cur;
                         };
 
-                        $translateScalar = function ($value, $fieldId = null) use ($genericTranslations, $fieldTranslations) {
+                        $translateScalar = function ($value, $fieldId = null) use ($genericTranslations, $fieldTranslations, $optionLabels) {
                             $lookup = is_bool($value) ? ($value ? '1' : '0') : (is_scalar($value) ? (string) $value : null);
 
                             if ($lookup === null) {
                                 return null;
+                            }
+
+                            if ($fieldId && isset($optionLabels[$fieldId][$lookup])) {
+                                return $optionLabels[$fieldId][$lookup];
                             }
 
                             if ($fieldId && isset($fieldTranslations[$fieldId][$lookup])) {
@@ -290,7 +339,8 @@
                                 $out = '<ul class="value-list">';
                                 foreach ($items as $it) {
                                     if (is_array($it)) {
-                                        $out .= '<li>' . e(json_encode($it, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) . '</li>';
+                                        $display = trim((string) (($it['code'] ?? '') . ((isset($it['code'], $it['description']) && $it['description'] !== '') ? ' - ' : '') . ($it['description'] ?? ($it['label'] ?? ($it['name'] ?? '')))));
+                                        $out .= '<li>' . e($display !== '' ? $display : json_encode($it, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) . '</li>';
                                         continue;
                                     }
 
@@ -308,6 +358,21 @@
 
                             return nl2br(e($formatValue($val)));
                         };
+
+                        $humanizeFieldId = function ($key) use ($fieldLabels) {
+                            if (isset($fieldLabels[$key]) && trim((string) $fieldLabels[$key]) !== '') {
+                                return $fieldLabels[$key];
+                            }
+
+                            return str_replace(['_', '.'], [' ', ' → '], (string) $key);
+                        };
+
+                        $uncoveredFields = [];
+                        foreach ($formData as $key => $value) {
+                            if (!isset($coveredFieldIds[$key]) && $isFilledValue($value)) {
+                                $uncoveredFields[$key] = $value;
+                            }
+                        }
                     @endphp
 
                     @foreach ($formSpec['sections'] as $section)
@@ -357,6 +422,30 @@
                             </tbody>
                         </table>
                     @endforeach
+
+                    @if (!empty($uncoveredFields))
+                        <table class="section-table">
+                            <thead>
+                                <tr>
+                                    <th colspan="4">Ďalšie vyplnené údaje</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (array_chunk($uncoveredFields, 2, true) as $pair)
+                                    <tr>
+                                        @foreach ($pair as $key => $value)
+                                            <td class="field-label" style="width:25%">{{ $humanizeFieldId($key) }}</td>
+                                            <td class="field-value" style="width:25%">{!! $renderValue($value, $key) !!}</td>
+                                        @endforeach
+                                        @if (count($pair) === 1)
+                                            <td style="width:25%"></td>
+                                            <td style="width:25%"></td>
+                                        @endif
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    @endif
                 @elseif (!empty($formData) && is_array($formData))
                     <div class="section-title">Pozorovaní a zistenia</div>
                     <table class="field-table compact">

@@ -48,7 +48,7 @@ class OnboardingController extends Controller
      * interaction - provision the StudioKristian billing customer and start the
      * application trial. The Company is saved even if billing/trial fails afterwards, and
      * a StudioKristian outage never blocks registration: the user still proceeds into the
-     * application with a pending/pobem billing state and a retry path (see
+     * application with a pending/problém billing state and a retry path (see
      * `provisionBilling()`/`startTrial()`), instead of getting stuck on this step.
      */
     public function saveCompany(Request $request)

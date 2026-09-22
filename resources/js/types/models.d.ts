@@ -140,6 +140,31 @@ export interface City {
   updated_at: string | null
 }
 
+export interface PatientCoverage {
+  // columns
+  id: number
+  patient_id: number
+  insurance_company_id: number | null
+  regime: PatientCoverageRegime
+  member_state_code: string | null
+  foreign_insured_id: string | null
+  special_category: PatientSpecialCoverageCategory | null
+  entitlement_document_type: string | null
+  entitlement_document_number: string | null
+  valid_from: string | null
+  valid_to: string | null
+  is_verified: boolean
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  patient: Patient
+  insurance_company: InsuranceCompany
+  // counts
+  // exists
+  patient_exists: boolean
+  insurance_company_exists: boolean
+}
+
 export interface InsuranceCompany {
   // columns
   id: number
@@ -711,16 +736,19 @@ export interface Patient {
   doctor: Doctor
   visits: Visit[]
   insurance_company: InsuranceCompany
-  country: Country
+  coverages: PatientCoverage[]
+  current_coverage: PatientCoverage
   // counts
   visits_count: number
+  coverages_count: number
   // exists
   nurse_exists: boolean
   branch_exists: boolean
   doctor_exists: boolean
   visits_exists: boolean
   insurance_company_exists: boolean
-  country_exists: boolean
+  coverages_exists: boolean
+  current_coverage_exists: boolean
 }
 
 export interface Plan {
@@ -755,6 +783,23 @@ export interface Macro {
   // exists
   user_exists: boolean
 }
+
+const PatientCoverageRegime = {
+  DOMESTIC: 'domestic',
+  EU: 'eu',
+  SPECIAL: 'special',
+  UNCLASSIFIED: 'unclassified',
+} as const;
+
+export type PatientCoverageRegime = typeof PatientCoverageRegime[keyof typeof PatientCoverageRegime]
+
+const PatientSpecialCoverageCategory = {
+  HOMELESS: 'homeless',
+  NON_EU_FOREIGNER: 'non_eu_foreigner',
+  STATUTORY_ENTITLEMENT_9_3: 'statutory_entitlement_9_3',
+} as const;
+
+export type PatientSpecialCoverageCategory = typeof PatientSpecialCoverageCategory[keyof typeof PatientSpecialCoverageCategory]
 
 const RoleScope = {
   BRANCH: 'branch',

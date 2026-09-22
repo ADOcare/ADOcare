@@ -40,7 +40,7 @@ class PatientController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Patient::query();
+        $query = Patient::with(['latestCoverage.insuranceCompany']);
 
         $results = ApiQuery::apply(
             $request,
@@ -81,7 +81,7 @@ class PatientController extends Controller
      */
     public function show(Patient $patient): JsonResponse
     {
-        $patient->loadMissing(['doctor', 'visits', 'insuranceCompany']);
+        $patient->loadMissing(['doctor', 'visits', 'insuranceCompany', 'latestCoverage.insuranceCompany']);
 
         return $this->success(new PatientResource($patient), 'Pacient bol uspesne nacitany.');
     }

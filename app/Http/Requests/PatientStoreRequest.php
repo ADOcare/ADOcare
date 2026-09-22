@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesPatientCoverage;
 use Illuminate\Foundation\Http\FormRequest;
 
 class PatientStoreRequest extends FormRequest
 {
+    use ValidatesPatientCoverage;
+
     public function authorize()
     {
         return $this->user() !== null;
@@ -13,7 +16,7 @@ class PatientStoreRequest extends FormRequest
 
     public function rules()
     {
-        return [
+        return array_merge([
             'branch_id' => 'required|integer|exists:branches,id',
 
             'first_name' => 'required|string|max:255',
@@ -25,7 +28,6 @@ class PatientStoreRequest extends FormRequest
 
             'doctor_id' => 'nullable|integer|exists:doctors,id',
             'insurance_company_id' => 'nullable|integer|exists:insurance_companies,id',
-            'country_id' => 'required|integer|exists:countries,id',
             'nurse_id' => 'nullable|integer|exists:users,id',
 
             'address' => 'nullable|string|max:255',
@@ -37,6 +39,6 @@ class PatientStoreRequest extends FormRequest
 
             'reference_date' => 'nullable|date',
             'death_date' => 'nullable|date',
-        ];
+        ], $this->patientCoverageRules(required: true));
     }
 }

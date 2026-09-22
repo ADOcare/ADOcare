@@ -5,11 +5,17 @@ import MapSelector from '@/components/Address/MapSelector.vue'
 import { useAddressForm } from '@/composables/address'
 import useAuthStore from '@/stores/auth'
 import { useApi } from '@/composables/useApi'
-import type { Branch, Doctor, InsuranceCompany, Patient, Country, User } from '@/types/models'
+import type { Branch, Doctor, InsuranceCompany, Patient, User } from '@/types/models'
 import { formatBranchFullName, formatUserFullName } from '@/utils/formatUtils'
+import PatientCoverageFields from './PatientCoverageFields.vue'
+import {
+    normalizePatientCoverage,
+    type PatientCoverageSource,
+    type PatientWithCoverage,
+} from '@/composables/patientCoverage'
 
 const props = defineProps<{
-    patient?: Patient
+    patient?: PatientCoverageSource
     submitted?: boolean
     errors?: { [key: string]: string } | null
     disabled?: boolean
@@ -18,7 +24,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-    (e: 'update:patient', patient: Patient): void
+    (e: 'update:patient', patient: PatientWithCoverage): void
     (e: 'clear-error', key: string): void
     (e: 'address-valid-change', value: boolean): void
 }>()
@@ -34,8 +40,8 @@ const nurseOptions = ref<User[]>([])
 const branchesError = ref<Error | null>(null)
 const nursesError = ref<Error | null>(null)
 
-const emptyPatient: Patient = {} as Patient
-const localPatient = ref<Patient>(props.patient ? { ...props.patient } : emptyPatient)
+const emptyPatient: PatientWithCoverage = normalizePatientCoverage()
+const localPatient = ref<PatientWithCoverage>(normalizePatientCoverage(props.patient))
 
 const insufficientAddressMessage = 'Vyberte inú adresu, pretože táto adresa nie je dostatočná na uloženie pacienta.'
 const localAddressError = ref('')
@@ -49,7 +55,6 @@ const sexOptions = [
 
 const doctorOptions = ref<{ id: number; name: string }[]>([])
 const insuranceOptions = ref<{ id: number; name: string }[]>([])
-const countryOptions = ref<{ id: number; name: string; code: string }[]>([])
 
 function doctorOptionLabel(doc: Partial<Doctor>) {
     return `${doc.title ?? ''} ${doc.first_name ?? ''} ${doc.last_name ?? ''}`.replace(/\s+/g, ' ').trim()
@@ -112,23 +117,6 @@ async function loadInsuranceCompanies() {
     insuranceOptions.value = (data ?? []).map((ic) => ({
         id: ic.id,
         name: ic.name ?? '<Neznáma poisťovňa>',
-    }))
-
-    return { data, error }
-}
-
-async function loadCountries() {
-    const { data, error } = await list<Country>('/countries', { all: true })
-
-    if (!data || !Array.isArray(data)) {
-        countryOptions.value = []
-        return { data: [], error }
-    }
-
-    countryOptions.value = data.map((c) => ({
-        id: c.id,
-        name: c.name ?? 'Neznáma krajina',
-        code: c.code ?? '',
     }))
 
     return { data, error }
@@ -209,7 +197,6 @@ watch(
 onMounted(async () => {
     await loadFavouriteDoctors()
     await loadInsuranceCompanies()
-    await loadCountries()
 
     if (canEditAssignments.value) {
         const { error: branchesError } = await loadBranches(props.companyId)
@@ -295,7 +282,7 @@ function normalizeText(value: unknown): string {
     return String(value ?? '').trim()
 }
 
-function hasRequiredAddressParts(patient: Partial<Patient>): boolean {
+function hasRequiredAddressParts(patient: Partial<PatientWithCoverage>): boolean {
     return normalizeText(patient.address).length > 0 && normalizeText(patient.city).length > 0
 }
 
@@ -468,7 +455,7 @@ const openDoctorsSettingsFromFooter = async () => {
 watch(
     () => props.patient,
     (p) => {
-        const next: Patient = p ? { ...p } : emptyPatient
+        const next = normalizePatientCoverage(p)
         localPatient.value = next
 
         addressEntity.value = { ...next, psc: next.zip }
@@ -488,7 +475,7 @@ watch(
     localPatient,
     (val) => {
         try {
-            const parentVal: Patient = props.patient ?? emptyPatient
+            const parentVal = props.patient ?? emptyPatient
 
             if (JSON.stringify(val) !== JSON.stringify(parentVal)) {
                 emit('update:patient', { ...val })
@@ -626,25 +613,7 @@ defineExpose({
                 <small v-if="submitted && errors.sex" class="text-danger">{{ errors.sex }}</small>
             </div>
 
-            <div class="col-span-2">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Národnosť
-                </label>
-                <Select
-                    :disabled="disabled"
-                    v-model="localPatient.country_id"
-                    :options="countryOptions"
-                    optionLabel="name"
-                    optionValue="id"
-                    fluid
-                    filter
-                    :invalid="submitted && !localPatient.country_id"
-                    :class="{ 'opacity-50!': disabled }"
-                />
-                <small v-if="submitted && errors.country_id" class="text-danger">{{ errors.country_id }}</small>
-            </div>
-
-            <div class="col-span-4">
+            <div class="col-span-6">
                 <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
                     Kontakt
                 </label>
@@ -699,25 +668,16 @@ defineExpose({
                 </small>
             </div>
 
-            <div class="col-span-6">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Poisťovňa
-                </label>
-                <Select
-                    :disabled="disabled"
-                    v-model="localPatient.insurance_company_id"
-                    :options="insuranceOptions"
-                    optionLabel="name"
-                    optionValue="id"
-                    fluid
-                    :invalid="submitted && !localPatient.insurance_company_id"
-                    :class="{ 'opacity-50!': disabled }"
-                />
-                <small v-if="submitted && errors.insurance_company_id" class="text-danger">
-                    {{ errors.insurance_company_id }}
-                </small>
-            </div>
         </div>
+
+        <PatientCoverageFields
+            v-model="localPatient.coverage"
+            :insurance-companies="insuranceOptions"
+            :errors="errors"
+            :allow-unclassified="localPatient.coverage?.regime === 'unclassified'"
+            :disabled="disabled"
+            @clear-error="emit('clear-error', $event)"
+        />
 
         <div class="grid grid-cols-12 gap-4">
             <div class="col-span-12">

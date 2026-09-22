@@ -14,7 +14,6 @@ class PointsExportController extends Controller
 {
     private const DATA_TYPE = '753d';
     private const CARE_TYPE_ADOS = '850';
-    private const SLOVAKIA_COUNTRY_ID = 207;
 
     public function preview(Request $request)
     {
@@ -165,21 +164,32 @@ class PointsExportController extends Controller
         $rows = DB::table('patient_points as pp')
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
-            ->leftJoin('countries as c', 'c.id', '=', 'p.country_id')
+            ->join('patient_coverages as pc', function ($join) {
+                $join->on('pc.patient_id', '=', 'p.id')
+                    ->where(function ($query) {
+                        $query->whereNull('pc.valid_from')
+                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
+                    })
+                    ->where(function ($query) {
+                        $query->whereNull('pc.valid_to')
+                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
+                    });
+            })
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($companyId) {
                 $join->on('pcp.procedure_id', '=', 'pp.procedure_id')
-                    ->on('pcp.insurance_company_id', '=', 'p.insurance_company_id')
+                    ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')
                     ->where('pcp.company_id', '=', $companyId);
             })
             ->where('pp.user_id', $userId)
             ->where('pp.branch_id', $branchId)
-            ->where('p.insurance_company_id', $insuranceId)
+            ->where('pc.insurance_company_id', $insuranceId)
             ->whereColumn('p.nurse_id', 'pp.user_id')
             ->whereColumn('p.branch_id', 'pp.branch_id')
             ->whereBetween('pp.date', [$from, $to])
             ->when(!empty($patientIds), fn ($query) => $query->whereIn('pp.patient_id', $patientIds))
-            ->when(in_array($type, ['N', 'O'], true), fn ($query) => $query->where('p.country_id', self::SLOVAKIA_COUNTRY_ID))
-            ->when(in_array($type, ['E', 'F'], true), fn ($query) => $query->where('p.country_id', '!=', self::SLOVAKIA_COUNTRY_ID))
+            ->when(in_array($type, ['N', 'O', 'A'], true), fn ($query) => $query->where('pc.regime', 'domestic'))
+            ->when(in_array($type, ['E', 'F', 'G'], true), fn ($query) => $query->where('pc.regime', 'eu'))
+            ->when(in_array($type, ['I', 'J', 'K'], true), fn ($query) => $query->where('pc.regime', 'special'))
             ->orderBy('pp.date')
             ->select([
                 'pp.id as patient_point_id',
@@ -193,8 +203,8 @@ class PointsExportController extends Controller
                 'p.sex',
                 'p.latitude',
                 'p.longitude',
-                'p.country_id',
-                'c.code as country_code',
+                'pc.member_state_code as country_code',
+                'pc.foreign_insured_id',
 
                 'pp.diagnosis_code',
                 'pp.procedure_code',
@@ -306,7 +316,7 @@ class PointsExportController extends Controller
 
     private function build753dAdosBodyFields(object $row, int $rowNumber, string $type): array
     {
-        $isEuBatch = in_array($type, ['E', 'F'], true);
+        $isEuBatch = in_array($type, ['E', 'F', 'G'], true);
 
         $dayDD = Carbon::parse($row->date)->format('d');
         $requestDateYmd = Carbon::parse($row->request_date ?? $row->date)->format('Ymd');
@@ -337,7 +347,7 @@ class PointsExportController extends Controller
             $this->normalizeCode($row->doctor_pzs ?? ''),
             $this->normalizeCode($row->doctor_zpr ?? ''),
             $isEuBatch ? $this->normalizeCode($row->country_code ?? '') : '',
-            $isEuBatch ? $this->toAsciiString($row->personal_number ?? '') : '',
+            $isEuBatch ? $this->toAsciiString($row->foreign_insured_id ?? '') : '',
             $isEuBatch ? $this->normalizeCode($row->sex ?? '') : '',
             $requestDateYmd,
             '',

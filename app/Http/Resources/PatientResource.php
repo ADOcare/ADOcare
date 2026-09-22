@@ -27,7 +27,6 @@ class PatientResource extends JsonResource
             'doctor_id' => $this->doctor_id,
             'nurse_id' => $this->nurse_id,
             'insurance_company_id' => $this->insurance_company_id,
-            'country_id' => $this->country_id,
             'address' => $this->address,
             'city' => $this->city,
             'zip' => $this->zip,
@@ -52,6 +51,12 @@ class PatientResource extends JsonResource
 
             'insurance_company' => $this->whenLoaded('insuranceCompany', function () {
                 return new InsuranceCompanyResource($this->insuranceCompany);
+            }),
+
+            'coverage' => $this->whenLoaded('latestCoverage', function () {
+                return $this->latestCoverage
+                    ? new PatientCoverageResource($this->latestCoverage)
+                    : null;
             }),
 
             'visits' => $this->whenLoaded('visits', function () {

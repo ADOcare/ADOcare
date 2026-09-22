@@ -6,7 +6,11 @@ import PatientForm from './PatientForm.vue'
 import type { IModalContentProps } from '@/types/ui'
 import useAuthStore from '@/stores/auth'
 import usePatientFormValidation from '@/composables/usePatientFormValidation'
-import type { Patient } from '@/types/models'
+import {
+    createEmptyPatientCoverage,
+    normalizePatientCoverage,
+    type PatientWithCoverage,
+} from '@/composables/patientCoverage'
 
 const patientStore = usePatientStore()
 const authStore = useAuthStore()
@@ -14,7 +18,9 @@ const toast = useToast()
 
 const props = defineProps<IModalContentProps>()
 
-const patient = ref<Patient>({} as Patient)
+const patient = ref<PatientWithCoverage>({
+    coverage: createEmptyPatientCoverage(),
+} as PatientWithCoverage)
 
 // validation handled by composable
 const { submitted, errors, validateForm, clearError } = usePatientFormValidation(patient)
@@ -33,7 +39,7 @@ const createPatient = async () => {
         const created = await patientStore.createPatient(patient.value, branchId)
 
         // ✅ update local state + store
-        patient.value = created
+        patient.value = normalizePatientCoverage(created)
         patientStore.setPatient(created)
 
         toast.add({
@@ -44,7 +50,7 @@ const createPatient = async () => {
         })
 
         if (props.modalResolve) {
-            props.modalResolve(created)
+            props.modalResolve(patient.value)
         }
     } catch (e) {
         console.error('Failed to save patient', e)

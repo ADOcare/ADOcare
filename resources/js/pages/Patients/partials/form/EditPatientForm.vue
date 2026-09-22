@@ -8,19 +8,25 @@ import PatientForm from './PatientForm.vue';
 import type { IModalContentProps } from '@/types/ui';
 import usePatientFormValidation from '@/composables/usePatientFormValidation';
 import type { Patient } from '@/types/models';
+import {
+    normalizePatientCoverage,
+    type PatientWithCoverage,
+} from '@/composables/patientCoverage';
 
 
 const patientStore = usePatientStore();
 const authStore = useAuthStore();
 const props = defineProps<IModalContentProps & { patientId: number; isManagerView: boolean; }>();
 
-const patient = ref<Patient>({} as Patient);
+const patient = ref<PatientWithCoverage>(normalizePatientCoverage());
 const { submitted, errors, validateForm, clearError } = usePatientFormValidation(patient);
 
 onMounted(async () => {
     try {
-        const fetched = await api.fetchEntity<Patient>(`v1/patients/${props.patientId}`, { with: ['nurse', 'doctor', 'insuranceCompany'] });
-        patient.value = fetched;
+        const fetched = await api.fetchEntity<Patient>(`v1/patients/${props.patientId}`, {
+            with: ['nurse', 'doctor', 'insuranceCompany', 'currentCoverage.insuranceCompany'],
+        });
+        patient.value = normalizePatientCoverage(fetched);
 
     } catch (e) {
         console.error('Failed to fetch patient', e);
@@ -49,7 +55,7 @@ const savePatient = async () => {
 
     try {
         const fresh = await patientStore.persistPatientData(patient.value)
-        patient.value = fresh;
+        patient.value = normalizePatientCoverage(fresh);
         toast.add({ severity: 'success', summary: 'Pacient uložený', detail: `Pacient ${patient.value.first_name} bol úspešne uložený.`, life: 3000 });
         if (props.modalResolve) {
             props.modalResolve(patient.value);

@@ -147,6 +147,17 @@ class KilometersBatchDocumentService
 
         $rows = DB::table('patient_points as pp')
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
+            ->join('patient_coverages as pc', function ($join) {
+                $join->on('pc.patient_id', '=', 'p.id')
+                    ->where(function ($query) {
+                        $query->whereNull('pc.valid_from')
+                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
+                    })
+                    ->where(function ($query) {
+                        $query->whereNull('pc.valid_to')
+                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
+                    });
+            })
             ->join('doctors as d', 'd.id', '=', 'p.doctor_id')
             ->join('branches as b', 'b.id', '=', 'pp.branch_id')
             ->whereColumn('p.nurse_id', 'pp.user_id')
@@ -156,12 +167,13 @@ class KilometersBatchDocumentService
             })
             ->join('procedure_company_prices as pcp', function ($join) {
                 $join->on('pcp.procedure_id', '=', 'proc.id')
-                    ->on('pcp.insurance_company_id', '=', 'p.insurance_company_id');
+                    ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id');
             })
             ->where('pcp.company_id', $companyId)
             ->where('pp.user_id', $actorId)
             ->where('pp.branch_id', $branchId)
-            ->where('p.insurance_company_id', $insuranceId)
+            ->where('pc.insurance_company_id', $insuranceId)
+            ->where('pc.regime', 'domestic')
             ->whereBetween('pp.date', [$from, $to])
             ->whereIn('pp.procedure_code', ['3439', '3440'])
             ->when(!empty($patientIds), fn($q) => $q->whereIn('pp.patient_id', $patientIds))
@@ -282,6 +294,5 @@ class KilometersBatchDocumentService
         ]);
     }
 }
-
 
 

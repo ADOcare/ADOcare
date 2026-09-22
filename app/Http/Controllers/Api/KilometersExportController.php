@@ -17,7 +17,6 @@ class KilometersExportController extends Controller
     private const DATA_TYPE = '793n';
     private const TRANSPORT_TYPE_ADOS = 'ADOS';
     private const GROUPING_BUFFER_METERS = 100.0;
-    private const SLOVAKIA_COUNTRY_ID = 207;
     private const ADDRESS_CITY_MAX_LENGTH = 50;
 
     public function preview(Request $request)
@@ -185,23 +184,33 @@ class KilometersExportController extends Controller
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
             ->join('branches as b', 'b.id', '=', 'pp.branch_id')
-            ->leftJoin('countries as c', 'c.id', '=', 'p.country_id')
+            ->join('patient_coverages as pc', function ($join) {
+                $join->on('pc.patient_id', '=', 'p.id')
+                    ->where(function ($query) {
+                        $query->whereNull('pc.valid_from')
+                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
+                    })
+                    ->where(function ($query) {
+                        $query->whereNull('pc.valid_to')
+                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
+                    });
+            })
             ->leftJoin('procedures as proc', function ($join) {
                 $join->where('proc.code', '=', '0000');
             })
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($companyId) {
                 $join->on('pcp.procedure_id', '=', 'proc.id')
-                    ->on('pcp.insurance_company_id', '=', 'p.insurance_company_id')
+                    ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')
                     ->where('pcp.company_id', '=', $companyId);
             })
             ->where('pp.user_id', $userId)
             ->where('pp.branch_id', $branchId)
-            ->where('p.insurance_company_id', $insuranceId)
+            ->where('pc.insurance_company_id', $insuranceId)
             ->whereColumn('p.nurse_id', 'pp.user_id')
             ->whereColumn('p.branch_id', 'pp.branch_id')
             ->whereBetween('pp.date', [$from, $to])
             ->whereIn('pp.procedure_code', ['3439', '3440'])
-            ->where('p.country_id', self::SLOVAKIA_COUNTRY_ID)
+            ->where('pc.regime', 'domestic')
             ->when(!empty($patientIds), fn ($query) => $query->whereIn('pp.patient_id', $patientIds))
             ->orderBy('pp.date')
             ->orderBy('pp.patient_id')
@@ -221,8 +230,6 @@ class KilometersExportController extends Controller
                 'p.address as patient_address',
                 'p.latitude as patient_lat',
                 'p.longitude as patient_lng',
-                'p.country_id',
-                'c.code as country_code',
 
                 'd.pzs as doctor_pzs',
                 'd.zpr as doctor_zpr',

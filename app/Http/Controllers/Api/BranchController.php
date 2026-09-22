@@ -36,7 +36,7 @@ class BranchController extends Controller
 
     public function patients(Branch $branch)
     {
-        $query = Patient::with(['doctor', 'visits', 'insuranceCompany'])
+        $query = Patient::with(['doctor', 'visits', 'insuranceCompany', 'latestCoverage.insuranceCompany'])
             ->where('branch_id', $branch->id);
 
         $results = ApiQuery::apply(request(), $query);

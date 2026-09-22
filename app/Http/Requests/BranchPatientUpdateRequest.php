@@ -2,10 +2,13 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesPatientCoverage;
 use Illuminate\Foundation\Http\FormRequest;
 
 class BranchPatientUpdateRequest extends FormRequest
 {
+    use ValidatesPatientCoverage;
+
     public function authorize()
     {
         return true;
@@ -13,7 +16,7 @@ class BranchPatientUpdateRequest extends FormRequest
 
     public function rules()
     {
-        return [
+        return array_merge([
             'first_name' => 'sometimes|required|string|max:255',
             'last_name' => 'sometimes|required|string|max:255',
             'title' => 'nullable|string|max:255',
@@ -23,7 +26,6 @@ class BranchPatientUpdateRequest extends FormRequest
 
             'doctor_id' => 'nullable|integer|exists:doctors,id',
             'insurance_company_id' => 'nullable|integer|exists:insurance_companies,id',
-            'country_id' => 'sometimes|required|integer|exists:countries,id',
 
             'address' => 'nullable|string|max:255',
             'city' => 'nullable|string|max:255',
@@ -33,6 +35,6 @@ class BranchPatientUpdateRequest extends FormRequest
             'longitude' => 'nullable|numeric',
 
             'reference_date' => 'nullable|date',
-        ];
+        ], $this->patientCoverageRules());
     }
 }

@@ -14,19 +14,14 @@ class StorePointsBatchRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'batchNumber' => ['required', 'integer', 'min:1'],
-            'batchType.code' => ['required', 'string', 'max:10'],
+            'batchType.code' => ['required', 'string', 'in:N,O,A,E,F,G,I,J,K'],
             'insurance.id' => ['required', 'integer', 'min:1'],
             'period' => ['required', 'array', 'size:2'],
             'period.0' => ['required', 'date'],
             'period.1' => ['required', 'date', 'after_or_equal:period.0'],
             'branch.id' => ['required', 'integer', 'min:1'],
-            'company.id' => ['required', 'integer', 'min:1'],
-            'user.id' => ['nullable', 'integer', 'min:1'],
-
-            'patients' => ['nullable', 'array'],
-            'patients.*.id' => ['required', 'integer', 'min:1'],
-            'batchType.code' => ['required', 'string', 'in:N,O,E,F,I'],
+            'pointIds' => ['nullable', 'array'],
+            'pointIds.*' => ['required', 'integer', 'distinct', 'min:1'],
 
             'meta' => ['nullable', 'array'],
             'meta.fileName' => ['nullable', 'string', 'max:255'],

@@ -14,6 +14,8 @@ use App\Http\Controllers\Api\DiagnosisController;
 use App\Http\Controllers\Api\ProcedureController;
 use App\Http\Controllers\Api\PatientPointController;
 use App\Http\Controllers\Api\PointsExportController;
+use App\Http\Controllers\Api\PointClaimCandidateController;
+use App\Http\Controllers\Api\PointClaimLineResultController;
 use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\MyCompanyController;
@@ -348,6 +350,11 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::post('/batches/points/preview', [PointsExportController::class, 'preview'])
         ->middleware('role:any')
         ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
+    Route::post('/batches/points/candidates', PointClaimCandidateController::class)
+        ->middleware('role:any')
+        ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
+    Route::post('/point-claim-lines/{pointClaimLine}/result', [PointClaimLineResultController::class, 'store'])
+        ->middleware('role:any');
     Route::post('/batches/points/download', [PointsExportController::class, 'download'])
         ->middleware('role:any')
         ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');

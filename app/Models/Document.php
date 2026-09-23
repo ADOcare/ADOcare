@@ -18,6 +18,7 @@ class Document extends Model
         'name',
         'path',
         'branch_id',
+        'company_id',
         'period',
         'subtype',
         'insurance_company_id',

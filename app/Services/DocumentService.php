@@ -419,16 +419,23 @@ class DocumentService
             return null;
         }
 
-        return [
-            'batchNumber' => (int) ($payload['batchNumber'] ?? 0),
+        $downloadPayload = [
+            'batchNumber' => (string) ($payload['batchNumber'] ?? ''),
             'batchType' => ['code' => (string) data_get($payload, 'batchType.code', 'N')],
             'insurance' => ['id' => (int) data_get($payload, 'insurance.id', 0)],
             'period' => (array) ($payload['period'] ?? []),
-            'user' => ['id' => (int) data_get($payload, 'user.id', 0)],
             'branch' => ['id' => (int) data_get($payload, 'branch.id', 0)],
-            'company' => ['id' => data_get($payload, 'company.id')],
-            'patients' => (array) ($payload['patients'] ?? []),
+            'claimBatchId' => data_get($payload, 'claimBatchId'),
         ];
+
+        if (! empty($payload['pointIds'])) {
+            $downloadPayload['pointIds'] = (array) $payload['pointIds'];
+        }
+        if (! empty($payload['patients'])) {
+            $downloadPayload['patients'] = (array) $payload['patients'];
+        }
+
+        return $downloadPayload;
     }
     /**
      * Get or generate invoice PDF path.

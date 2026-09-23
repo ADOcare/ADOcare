@@ -9,13 +9,15 @@ import DocumentShell, { type FileItem } from '@/components/DocumentShell.vue'
 
 type PointsBatchPayload = {
     document_id: number
-    batchNumber: number
+    batchNumber: string
     batchType: { code: string }
     insurance: { id: number }
     period: string[]
     user?: { id: number }
     branch?: { id: number }
     company?: { id: number | null }
+    pointIds?: number[]
+    claimBatchId?: number
     patients?: { id: number }[]
     meta?: {
         fileName?: string
@@ -61,23 +63,20 @@ function normalizeDateOnly(value: string): string {
 }
 
 function buildDownloadPayloadFromStored(p: PointsBatchPayload) {
-    const companyId = p.company?.id ?? authStore.currentBranch?.company_id ?? null
-
-    const batchNumber = Number(p.batchNumber) || 0
     const insuranceId = Number(p.insurance?.id) || 0
-    const userId = Number(p.user?.id) || Number(authStore.user?.id) || 0
     const branchId = Number(p.branch?.id) || Number(authStore.currentBranch?.id) || 0
     const normalizedPeriod = (p.period ?? []).map((d) => normalizeDateOnly(d))
+    const storedPointIds = (p.pointIds ?? []).map((id) => Number(id)).filter((id) => id > 0)
+    const storedPatients = (p.patients ?? []).map((patient) => ({ id: Number(patient.id) }))
 
     return {
-        batchNumber: batchNumber,
         batchType: { code: p.batchType?.code ?? 'N' },
         insurance: { id: insuranceId },
         period: normalizedPeriod,
-        user: { id: userId },
         branch: { id: branchId },
-        company: { id: companyId },
-        patients: (p.patients ?? []).map((x) => ({ id: Number(x.id) })),
+        claimBatchId: Number(p.claimBatchId ?? 0) || undefined,
+        ...(storedPointIds.length > 0 ? { pointIds: storedPointIds } : {}),
+        ...(storedPatients.length > 0 ? { patients: storedPatients } : {}),
     }
 }
 

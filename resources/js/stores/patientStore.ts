@@ -30,7 +30,7 @@ function serializeCoverage(patient: PatientWithCoverage): PatientCoverage | null
 
     return {
         id: patient.coverage.id,
-        regime: patient.coverage.regime,
+        regime: patient.coverage.regime, 
         insurance_company_id: patient.coverage.insurance_company_id,
         member_state_code: patient.coverage.member_state_code,
         foreign_insured_id: patient.coverage.foreign_insured_id,

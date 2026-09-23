@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\PointClaimBatch;
+use App\Services\PointsBatchNumberService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -14,6 +16,10 @@ class PointsExportController extends Controller
 {
     private const DATA_TYPE = '753d';
     private const CARE_TYPE_ADOS = '850';
+
+    public function __construct(private PointsBatchNumberService $batchNumberService)
+    {
+    }
 
     public function preview(Request $request)
     {
@@ -58,6 +64,16 @@ class PointsExportController extends Controller
         $content = $this->build753dAdosContent($context);
         $fileName = "davka.{$context['batchNumber']}.txt";
 
+        if ($context['claimBatch']) {
+            $context['claimBatch']->update([
+                'status' => 'exported',
+                'exported_at' => now(),
+            ]);
+            $context['claimBatch']->lines()
+                ->where('status', 'pending')
+                ->update(['status' => 'exported']);
+        }
+
         return response()->streamDownload(function () use ($content) {
             echo $content;
         }, $fileName, [
@@ -100,20 +116,30 @@ class PointsExportController extends Controller
 
     private function validateInput(Request $request): array
     {
-        return $request->validate([
-            'batchNumber' => ['required', 'regex:/^\d{1,6}$/'],
-            'batchType.code' => ['required', 'string', 'in:N,O,I,E,F'],
+        $data = $request->validate([
+            'batchType.code' => ['required', 'string', 'in:N,O,A,E,F,G,I,J,K'],
             'insurance.id' => ['required', 'integer'],
             'period' => ['required', 'array', 'size:2'],
             'period.*' => ['required', 'date'],
 
-            'user.id' => ['required', 'integer'],
             'branch.id' => ['required', 'integer'],
-            'company.id' => ['required', 'integer'],
-
-            'patients' => ['nullable', 'array'],
-            'patients.*.id' => ['required_with:patients', 'integer'],
+            'claimBatchId' => ['nullable', 'integer', 'exists:point_claim_batches,id'],
+            'pointIds' => ['nullable', 'array', 'min:1', 'required_without:patients'],
+            'pointIds.*' => ['required', 'integer', 'distinct'],
+            'patients' => ['nullable', 'array', 'min:1', 'required_without:pointIds'],
+            'patients.*.id' => ['required', 'integer', 'distinct'],
         ]);
+
+        $actor = $request->user();
+        $branchId = (int) data_get($data, 'branch.id');
+        $branch = DB::table('branches')->where('id', $branchId)->first(['id', 'company_id']);
+
+        abort_unless($actor && $branch && $actor->isInBranch($branchId), 403);
+
+        data_set($data, 'user.id', (int) $actor->id);
+        data_set($data, 'company.id', (int) $branch->company_id);
+
+        return $data;
     }
 
     private function buildExportContext(array $data): array
@@ -122,17 +148,25 @@ class PointsExportController extends Controller
         $to = $this->parseDateOnly($data['period'][1]);
 
         $type = (string) data_get($data, 'batchType.code');
-        $batchNumber = (string) data_get($data, 'batchNumber');
-
         $userId = (int) data_get($data, 'user.id');
         $branchId = (int) data_get($data, 'branch.id');
         $companyId = (int) data_get($data, 'company.id');
         $insuranceId = (int) data_get($data, 'insurance.id');
+        $claimBatchId = (int) data_get($data, 'claimBatchId', 0);
+        $batchNumber = $this->batchNumberService->make($userId, $insuranceId, $from);
 
-        $patientIds = collect(data_get($data, 'patients', []))
+        $pointIds = collect(data_get($data, 'pointIds', []))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $legacyPatientIds = collect(data_get($data, 'patients', []))
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->filter(fn ($id) => $id > 0)
+            ->unique()
             ->values()
             ->all();
 
@@ -183,10 +217,9 @@ class PointsExportController extends Controller
             ->where('pp.user_id', $userId)
             ->where('pp.branch_id', $branchId)
             ->where('pc.insurance_company_id', $insuranceId)
-            ->whereColumn('p.nurse_id', 'pp.user_id')
-            ->whereColumn('p.branch_id', 'pp.branch_id')
             ->whereBetween('pp.date', [$from, $to])
-            ->when(!empty($patientIds), fn ($query) => $query->whereIn('pp.patient_id', $patientIds))
+            ->when(!empty($pointIds), fn ($query) => $query->whereIn('pp.id', $pointIds))
+            ->when(empty($pointIds), fn ($query) => $query->whereIn('pp.patient_id', $legacyPatientIds))
             ->when(in_array($type, ['N', 'O', 'A'], true), fn ($query) => $query->where('pc.regime', 'domestic'))
             ->when(in_array($type, ['E', 'F', 'G'], true), fn ($query) => $query->where('pc.regime', 'eu'))
             ->when(in_array($type, ['I', 'J', 'K'], true), fn ($query) => $query->where('pc.regime', 'special'))
@@ -220,7 +253,35 @@ class PointsExportController extends Controller
             ])
             ->get();
 
-        $rows = collect($this->deduplicateNearbyProcedureRows($rows, 50));
+        $claimBatch = null;
+        if ($claimBatchId > 0) {
+            $claimBatch = PointClaimBatch::query()
+                ->whereKey($claimBatchId)
+                ->where('healthcare_worker_id', $userId)
+                ->where('branch_id', $branchId)
+                ->where('insurance_company_id', $insuranceId)
+                ->where('batch_type', $type)
+                ->with('lines')
+                ->first();
+
+            if (! $claimBatch) {
+                throw ValidationException::withMessages([
+                    'claimBatchId' => ['Uložená dávka sa nenašla alebo k nej nemáte prístup.'],
+                ]);
+            }
+
+            $batchNumber = (string) $claimBatch->batch_number;
+
+            $pointIds = $claimBatch->lines
+                ->pluck('patient_point_id')
+                ->map(fn ($id) => (int) $id)
+                ->values()
+                ->all();
+
+            $rows = $claimBatch->lines
+                ->map(fn ($line) => (object) $line->snapshot)
+                ->values();
+        }
 
         $companyName = $company?->name;
 
@@ -240,7 +301,9 @@ class PointsExportController extends Controller
             'branchId' => $branchId,
             'companyId' => $companyId,
             'insuranceId' => $insuranceId,
-            'patientIds' => $patientIds,
+            'patientIds' => $rows->pluck('patient_id')->map(fn ($id) => (int) $id)->unique()->values()->all(),
+            'pointIds' => $pointIds,
+            'claimBatch' => $claimBatch,
 
             'company' => $company,
             'branch' => $branch,
@@ -384,18 +447,18 @@ class PointsExportController extends Controller
         $insuranceBranchCode = $context['insuranceBranchCode'];
         $rows = $context['rows'];
 
-        if (!in_array($type, ['N', 'O', 'I', 'E', 'F'], true)) {
+        if (!in_array($type, ['N', 'O', 'A', 'E', 'F', 'G', 'I', 'J', 'K'], true)) {
             $this->addValidationError(
                 $errors,
-                'Neplatný charakter dávky. Povolené hodnoty sú N, O, I, E, F.',
+                'Neplatný charakter dávky. Povolené hodnoty sú N, O, A, E, F, G, I, J, K.',
                 'batch:invalid_type'
             );
         }
 
-        if (!preg_match('/^\d{1,6}$/', (string) $batchNumber)) {
+        if (!preg_match('/^\d{6}$/', (string) $batchNumber)) {
             $this->addValidationError(
                 $errors,
-                'Číslo dávky musí obsahovať iba číslice a môže mať maximálne 6 číslic.',
+                'Číslo dávky musí mať presne 6 číslic vo formáte UUMMPP.',
                 'batch:invalid_number'
             );
         }

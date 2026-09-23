@@ -23,6 +23,7 @@ class InsuranceCompanySeeder extends Seeder
                 'dic' => '2022027040',
                 'ic_dph' => 'SK2022027040',
                 'register' => 'Obchodný register Mestského súdu Bratislava III, oddiel: Sa, vložka č. 3602/B',
+                'branch_code' => '25',
             ],
             [
                 'code' => 'DOVERA',
@@ -34,6 +35,7 @@ class InsuranceCompanySeeder extends Seeder
                 'dic' => '2022051130',
                 'ic_dph' => 'SK2022051130',
                 'register' => 'Obchodný register Mestského súdu Bratislava III, oddiel: Sa, vložka č. 3627/B',
+                'branch_code' => '24',
             ],
             [
                 'code' => 'UNION',
@@ -43,7 +45,8 @@ class InsuranceCompanySeeder extends Seeder
                 'psc' => '81453',
                 'ico' => '36284831',
                 'dic' => '2022152517',
-                'ic_dph' => 'SK712000136'
+                'ic_dph' => 'SK712000136',
+                'branch_code' => '27',
             ]
         ];
 

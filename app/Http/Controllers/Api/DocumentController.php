@@ -224,6 +224,7 @@ class DocumentController extends Controller
                 }
 
                 $downloadRequest = Request::create('/', 'POST', $payload);
+                $downloadRequest->setUserResolver(fn () => $document->user);
 
                 return $document->type === 'kilometers_batch'
                     ? app(KilometersExportController::class)->download($downloadRequest)

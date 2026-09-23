@@ -13,9 +13,9 @@ const uiOverlayStore = useUiOverlayStore()
 const loading = ref(false)
 const errorMessage = ref('')
 
-const batchNumber = computed(() => Number(route.query.batchNumber ?? 0))
-const patientIds = computed<number[]>(() => {
-    const raw = route.query.patientIds
+const batchNumber = computed(() => String(route.query.batchNumber ?? ''))
+const pointIds = computed<number[]>(() => {
+    const raw = route.query.pointIds
     if (!raw) return []
     try {
         const arr = JSON.parse(String(raw))
@@ -30,14 +30,12 @@ function buildPayload() {
     const period1 = String(route.query.period1 ?? route.query.periodTo ?? '')
 
     return {
-        batchNumber: batchNumber.value,
         batchType: { code: String(route.query.batchTypeCode ?? 'N') },
         insurance: { id: Number(route.query.insuranceId ?? 0) },
         period: [period0, period1],
-        user: { id: authStore.user?.id },
         branch: { id: authStore.currentBranch?.id },
         company: { id: authStore.currentBranch?.company_id ?? null },
-        patients: patientIds.value.map((id) => ({ id })),
+        pointIds: pointIds.value,
         meta: {
             fileName: String(route.query.fileName ?? `davka.${batchNumber.value}.txt`),
             amount: Number(route.query.amount ?? 0),

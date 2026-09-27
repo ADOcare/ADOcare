@@ -21,7 +21,7 @@ class PointsBatchNumberService
 
         $insuranceCode = DB::table('insurance_companies')
             ->where('id', $insuranceCompanyId)
-            ->value('branch_code');
+            ->value('code');
 
         $insuranceCode = trim((string) $insuranceCode);
 

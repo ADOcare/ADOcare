@@ -124,6 +124,29 @@ function clearSelection() {
     })
 }
 
+function applyInitialSelection() {
+    const keys = new Set(opt.value.initialSelectedKeys ?? [])
+
+    if (keys.size === 0) return
+
+    const source = isLocalMode.value
+        ? (opt.value.localItems ?? [])
+        : getCurrentItems()
+
+    selectedRowsMap.value.clear()
+
+    source.forEach((row: IBaseModel) => {
+        const id = getRowId(row)
+
+        if (id !== undefined && keys.has(id)) {
+            selectedRowsMap.value.set(id, row)
+        }
+    })
+
+    syncVisibleSelectionFromGlobal()
+    emits('row-selected', getAllSelectedRows())
+}
+
 function compareLocalValues(a: any, b: any) {
     if (a === b) return 0
     if (a === null || a === undefined) return -1
@@ -243,8 +266,8 @@ function onSort(e: any) {
 
     if (isLocalMode.value) {
         remote.page.value = 1
-        clearSelection()
         applyLocalRows()
+        syncVisibleSelectionFromGlobal()
         return
     }
 
@@ -255,6 +278,7 @@ function onPage(e: any) {
     if (isLocalMode.value) {
         remote.page.value = e.page + 1
         applyLocalRows()
+        syncVisibleSelectionFromGlobal()
         return
     }
 
@@ -332,6 +356,7 @@ onMounted(async () => {
     } else {
         await remote.loadPage(1)
     }
+    applyInitialSelection()
     syncVisibleSelectionFromGlobal()
     initialRemoteLoadDone = true
     opt.value.afterInit?.({ remote })
@@ -341,6 +366,10 @@ watch(
     () => opt.value.localItems,
     () => {
         if (!isLocalMode.value) return
+
+        if (opt.value.resetPageOnLocalItemsChange) {
+            remote.page.value = 1
+        }
 
         applyLocalRows()
         syncVisibleSelectionFromGlobal()
@@ -353,8 +382,8 @@ watch(
     () => {
         if (isLocalMode.value) {
             remote.page.value = 1
-            clearSelection()
             applyLocalRows()
+            syncVisibleSelectionFromGlobal()
             return
         }
 
@@ -539,7 +568,8 @@ watch(
         <DataTable
             ref="dt"
             :value="remote.items.value"
-            :paginator="!(opt.hidePaginator ?? false) && !isLocalMode"
+            :paginator="!(opt.hidePaginator ?? false)"
+            :first="(remote.page.value - 1) * remote.per_page.value"
             :rows="remote.per_page.value"
             :totalRecords="remote.total.value"
             :lazy="true"
@@ -571,7 +601,7 @@ watch(
                         <Paginator
                             v-bind="state"
                             paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
-                            v-on:page="(e) => remote.loadPage(e.page + 1)"
+                            v-on:page="(e) => onPage(e)"
                         />
                     </div>
 

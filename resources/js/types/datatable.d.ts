@@ -64,6 +64,8 @@ interface DataTableOptions<T = any> {
     endpointUrl: string;
     columns: ColumnDef<T>[];
     localItems?: T[];
+    initialSelectedKeys?: Array<string | number>;
+    resetPageOnLocalItemsChange?: boolean;
     afterInit?: (args: { remote: RemoteTableReturn }) => void;
     rowKey?: string;
     selectable?: boolean;

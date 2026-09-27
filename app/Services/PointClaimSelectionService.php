@@ -24,7 +24,7 @@ class PointClaimSelectionService
 
         $rows = $this->queryRows($context);
         $correctableLines = collect();
-        $baseNewBatch = null;
+        $baseNewBatch = $existingBatch;
         $baseNewPointIds = collect();
 
         if (in_array($context['batch_type'], self::CORRECTIVE_TYPES, true)) {
@@ -32,6 +32,7 @@ class PointClaimSelectionService
             $rows = $rows
                 ->filter(fn (object $row) => $correctableLines->has((int) $row->patient_point_id))
                 ->values();
+            $baseNewBatch = $this->baseNewBatch($context);
         } elseif (in_array($context['batch_type'], self::ADDITIVE_TYPES, true)) {
             $baseNewBatch = $this->baseNewBatch($context);
 
@@ -40,19 +41,21 @@ class PointClaimSelectionService
                     'batch_type' => ['Pred aditívnou dávkou musí byť vytvorená aktuálna nová dávka.'],
                 ]);
             }
+        }
 
+        if ($baseNewBatch) {
             $baseNewPointIds = $baseNewBatch->lines()
                 ->pluck('patient_point_id')
                 ->map(fn ($id) => (int) $id)
                 ->unique();
         }
 
-        $candidates = $rows->map(function (object $row) use ($context, $correctableLines, $baseNewPointIds) {
+        $candidates = $rows->map(function (object $row) use ($context, $correctableLines, $baseNewBatch, $baseNewPointIds) {
             $reasons = $this->blockingReasons($row, $context['batch_type']);
             $eligible = $reasons === [];
             $correctable = $correctableLines->get((int) $row->patient_point_id);
             $wasEdited = (string) $row->created_at !== (string) $row->updated_at;
-            $isAdditional = in_array($context['batch_type'], self::ADDITIVE_TYPES, true)
+            $isAdditional = $baseNewBatch !== null
                 && ! $baseNewPointIds->contains((int) $row->patient_point_id);
 
             $suggested = match (true) {
@@ -69,6 +72,12 @@ class PointClaimSelectionService
                 'patient_name' => trim((string) $row->first_name . ' ' . (string) $row->last_name),
                 'personal_number' => (string) ($row->personal_number ?? ''),
                 'service_date' => (string) $row->date,
+                'created_at' => Carbon::parse($row->created_at)
+                    ->timezone('Europe/Bratislava')
+                    ->toIso8601String(),
+                'updated_at' => Carbon::parse($row->updated_at)
+                    ->timezone('Europe/Bratislava')
+                    ->toIso8601String(),
                 'procedure_code' => (string) ($row->procedure_code ?? ''),
                 'diagnosis_code' => (string) ($row->diagnosis_code ?? ''),
                 'quantity' => (int) ($row->quantity ?? 0),
@@ -138,11 +147,13 @@ class PointClaimSelectionService
         $eligible = collect($result['candidates']);
         $batchType = (string) data_get($data, 'batchType.code');
 
-        if (in_array($batchType, self::NEW_TYPES, true)) {
+        $submittedPointIds = data_get($data, 'pointIds');
+
+        if (in_array($batchType, self::NEW_TYPES, true) && ! is_array($submittedPointIds)) {
             return $eligible;
         }
 
-        $selectedIds = collect(data_get($data, 'pointIds', []))
+        $selectedIds = collect($submittedPointIds ?? [])
             ->map(fn ($id) => (int) $id)
             ->filter()
             ->unique()
@@ -311,9 +322,9 @@ class PointClaimSelectionService
     private function baseNewBatch(array $context): ?PointClaimBatch
     {
         $newType = match ($context['batch_type']) {
-            'A' => 'N',
-            'G' => 'E',
-            'K' => 'I',
+            'O', 'A' => 'N',
+            'F', 'G' => 'E',
+            'J', 'K' => 'I',
             default => null,
         };
 

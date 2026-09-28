@@ -47,7 +47,12 @@ class BranchPatientController extends Controller
         $results = ApiQuery::apply(
             $request,
             $query,
-            searchable: ['first_name', 'last_name', 'personal_number'],
+            searchable: [
+                'first_name',
+                'last_name',
+                'personal_number',
+                'latestCoverage' => ['foreign_insured_id'],
+            ],
             allowedFilters: ['sex', 'nurse_id'],
             defaults: ['sort' => 'last_name']
         );

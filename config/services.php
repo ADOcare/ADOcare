@@ -58,6 +58,14 @@ return [
         'timeout' => env('UDZS_TIMEOUT', 10),
     ],
 
+    'eoverenie' => [
+        'base_url' => env('EOVERENIE_BASE_URL', 'https://eportalapi.udzs-sk.sk/api/external'),
+        'email' => env('EOVERENIE_EMAIL'),
+        'password' => env('EOVERENIE_PASSWORD'),
+        'token_ttl' => env('EOVERENIE_TOKEN_TTL', 3300),
+        'timeout' => env('EOVERENIE_TIMEOUT', 10),
+    ],
+
     // StudioKristian is the central SaaS billing platform. ADOCare is only a
     // consumer of its Billing API - never store Stripe credentials here.
     'studiokristian_billing' => [

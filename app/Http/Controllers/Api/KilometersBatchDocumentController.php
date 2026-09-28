@@ -22,13 +22,11 @@ class KilometersBatchDocumentController extends Controller
      * Store a new kilometers batch document.
      *
      * @group Documents
-     * @bodyParam batchNumber int required Batch number. Example: 1
+     * The batch number is generated automatically as UUMMPP.
      * @bodyParam batchType.code string required Batch type code. Example: N
      * @bodyParam insurance.id int required Insurance company ID. Example: 3
      * @bodyParam period array required Period range. Example: ["2026-04-01","2026-04-30"]
-     * @bodyParam user.id int required User ID. Example: 10
      * @bodyParam branch.id int required Branch ID. Example: 2
-     * @bodyParam company.id int required Company ID. Example: 1
      * @response 201 {"data":{"document_id":1},"message":"Kilometre dávka bola úspešne uložená"}
      */
     public function store(StoreKilometersBatchRequest $request)

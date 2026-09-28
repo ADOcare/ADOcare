@@ -3,7 +3,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
-import { usePatientStore } from '@/stores/patientStore'
+import { getPatientIdentifier, usePatientStore } from '@/stores/patientStore'
 import type { User } from '@/types/models'
 import usePatients from '@/composables/usePatients'
 import useBranches from '@/composables/useBranches'
@@ -29,6 +29,9 @@ const companyName = computed(() => user.value?.company?.name ?? '')
 const fullName = computed(() =>
     user.value ? `${user.value.title ?? ''} ${user.value.first_name ?? ''} ${user.value.last_name ?? ''}`.trim() : ''
 )
+const selectedPatientIdentifier = computed(() => {
+    return getPatientIdentifier(patientStore.current)
+})
 
 /* ------------ BRANCH SELECT OPTIONS ------------ */
 
@@ -208,7 +211,7 @@ watch(branchOptions, async (newOpts) => {
                             (patientStore.current.first_name ?? '') + ' ' + (patientStore.current.last_name ?? '')
                             }}</span>
                         <span class="bg-darkgrey rounded-md text-mini text-white px-2">{{
-                            patientStore.current.personal_number }}</span>
+                            selectedPatientIdentifier }}</span>
                     </span>
                     <span v-else class="text-normal text-white">Vyberte pacienta</span>
                 </template>

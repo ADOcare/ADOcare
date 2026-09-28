@@ -9,6 +9,8 @@ use App\Http\Controllers\Api\CarServiceController;
 use App\Http\Controllers\Api\KilometersExportController;
 use App\Http\Controllers\Api\PatientController;
 use App\Http\Controllers\Api\PatientDeathCheckController;
+use App\Http\Controllers\Api\PatientInsuranceCheckController;
+use App\Http\Controllers\Api\PatientInsurancePrefillController;
 use App\Http\Controllers\Api\InsuranceCompanyController;
 use App\Http\Controllers\Api\DiagnosisController;
 use App\Http\Controllers\Api\ProcedureController;
@@ -190,7 +192,16 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::post('patients/restore', [PatientController::class, 'restoreMany'])
         ->middleware('role:any');
 
+    Route::post('patients/insurance-prefill', [PatientInsurancePrefillController::class, 'store'])
+        ->middleware('role:any');
+
+    Route::post('patients/insurance-check', [PatientInsuranceCheckController::class, 'storeForm'])
+        ->middleware('role:any');
+
     Route::get('patients/{patient}/death-check', [PatientDeathCheckController::class, 'show'])
+        ->middleware(['role:any', 'can:view,patient']);
+
+    Route::post('patients/{patient}/insurance-check', [PatientInsuranceCheckController::class, 'store'])
         ->middleware(['role:any', 'can:view,patient']);
 
     Route::group(['prefix' => 'patients/{patient}', 'middleware' => ['role:any', 'can:view,patient']], function () {

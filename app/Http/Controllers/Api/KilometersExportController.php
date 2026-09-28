@@ -3,6 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\PointsBatchNumberService;
+use App\Services\Claims\ClaimInterfaceVersionRegistry;
+use App\Services\Claims\InsuredClaimResolver;
+use App\Services\Claims\ClaimFileGenerator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -19,12 +23,21 @@ class KilometersExportController extends Controller
     private const GROUPING_BUFFER_METERS = 100.0;
     private const ADDRESS_CITY_MAX_LENGTH = 50;
 
+    public function __construct(
+        private PointsBatchNumberService $batchNumberService,
+        private InsuredClaimResolver $insuredResolver,
+        private ClaimInterfaceVersionRegistry $interfaceVersions,
+        private ClaimFileGenerator $claimFileGenerator,
+    ) {
+    }
+
     public function preview(Request $request)
     {
         $data = $this->validateInput($request);
         $context = $this->buildExportContext($data);
 
         $this->validate793nAdosExportContext($context);
+        $content = $this->build793nAdosContent($context);
 
         $calculatedRows = $this->calculateKilometersForRows($context['rows']);
 
@@ -53,6 +66,12 @@ class KilometersExportController extends Controller
             'message' => 'Preview generated',
             'data' => [
                 'sheet' => $sheet,
+                'developerPreview' => [
+                    'interfaceVersion' => $context['interfaceVersion'],
+                    'rows' => $this->normalizedInsuredRows($context),
+                    'content' => $content,
+                    'validation' => ['valid' => true, 'errors' => []],
+                ],
             ],
         ]);
     }
@@ -114,20 +133,29 @@ class KilometersExportController extends Controller
 
     private function validateInput(Request $request): array
     {
-        return $request->validate([
-            'batchNumber' => ['required', 'regex:/^\d{1,6}$/'],
-            'batchType.code' => ['required', 'string', 'in:N,O'],
+        $data = $request->validate([
+            'batchNumber' => ['nullable', 'regex:/^\d{6}$/'],
+            'batchType.code' => ['required', 'string', 'in:N,O,A,E,F,G,I,J,K'],
             'insurance.id' => ['required', 'integer'],
             'period' => ['required', 'array', 'size:2'],
             'period.*' => ['required', 'date'],
 
-            'user.id' => ['required', 'integer'],
             'branch.id' => ['required', 'integer'],
-            'company.id' => ['required', 'integer'],
 
             'patients' => ['nullable', 'array'],
             'patients.*.id' => ['required_with:patients', 'integer'],
         ]);
+
+        $actor = $request->user();
+        $branchId = (int) data_get($data, 'branch.id');
+        $branch = DB::table('branches')->where('id', $branchId)->first(['id', 'company_id']);
+
+        abort_unless($actor && $branch && $actor->isInBranch($branchId), 403);
+
+        data_set($data, 'user.id', (int) $actor->id);
+        data_set($data, 'company.id', (int) $branch->company_id);
+
+        return $data;
     }
 
     private function buildExportContext(array $data): array
@@ -136,7 +164,11 @@ class KilometersExportController extends Controller
         $to = $this->parseDateOnly($data['period'][1]);
 
         $type = (string) data_get($data, 'batchType.code');
-        $batchNumber = (string) data_get($data, 'batchNumber');
+        $batchNumber = $this->batchNumberService->make(
+            (int) data_get($data, 'user.id'),
+            (int) data_get($data, 'insurance.id'),
+            $from
+        );
 
         $userId = (int) data_get($data, 'user.id');
         $branchId = (int) data_get($data, 'branch.id');
@@ -210,7 +242,7 @@ class KilometersExportController extends Controller
             ->whereColumn('p.branch_id', 'pp.branch_id')
             ->whereBetween('pp.date', [$from, $to])
             ->whereIn('pp.procedure_code', ['3439', '3440'])
-            ->where('pc.regime', 'domestic')
+            ->where('pc.regime', $this->regimeForCharacter($type))
             ->when(!empty($patientIds), fn ($query) => $query->whereIn('pp.patient_id', $patientIds))
             ->orderBy('pp.date')
             ->orderBy('pp.patient_id')
@@ -231,8 +263,8 @@ class KilometersExportController extends Controller
                 'p.latitude as patient_lat',
                 'p.longitude as patient_lng',
 
-                'd.pzs as doctor_pzs',
-                'd.zpr as doctor_zpr',
+                DB::raw('COALESCE(pp.doctor_pzs, d.pzs) as doctor_pzs'),
+                DB::raw('COALESCE(pp.doctor_zpr, d.zpr) as doctor_zpr'),
 
                 'b.city as branch_city',
                 'b.address as branch_address',
@@ -240,8 +272,21 @@ class KilometersExportController extends Controller
                 'b.longitude as branch_lng',
 
                 'pcp.price',
+                'pc.regime',
+                'pc.identification_method',
+                'pc.member_state_code',
+                'pc.foreign_insured_id',
+                'pc.special_category',
+                'pc.entitlement_document_type',
+                'pc.entitlement_confirmed',
+                'pc.valid_from as coverage_valid_from',
             ])
-            ->get();
+            ->get()
+            ->groupBy('id')
+            ->map(fn ($matches) => $matches->sortByDesc(
+                fn ($match) => $match->coverage_valid_from ?? '0000-00-00'
+            )->first())
+            ->values();
 
         $rows = $this->normalizeAddressAndCityFields($rows);
 
@@ -280,6 +325,7 @@ class KilometersExportController extends Controller
             'branchName' => $branchName,
             'performedBy' => $performedBy !== '' ? $performedBy : "User #{$userId}",
             'insuranceName' => $insurance?->name,
+            'interfaceVersion' => $this->interfaceVersions->forDate(self::DATA_TYPE, $from),
         ];
     }
 
@@ -320,13 +366,13 @@ class KilometersExportController extends Controller
             $this->normalizeCode($user->code ?? ''),
             number_format((float) $workingTime, 2, '.', ''),
             $termYYYYMM,
-            $batchNumber,
+            '',
             'EUR',
         ];
 
-        $lines = [
-            $this->formatTextLine($line1Fields, 9, 'Identifikácia dávky 793n musí mať presne 9 polí.'),
-            $this->formatTextLine($line2Fields, 7, 'Záhlavie dávky 793n musí mať presne 7 polí.'),
+        $records = [
+            ['fields' => $line1Fields, 'count' => 9],
+            ['fields' => $line2Fields, 'count' => 7],
         ];
 
         foreach ($calculatedRows as $index => $calculatedRow) {
@@ -336,17 +382,14 @@ class KilometersExportController extends Controller
                 kilometers: (float) $calculatedRow['kilometers'],
                 userCar: (string) $userCar,
                 userId: $userId,
-                insuranceCode: $insuranceCode
+                insuranceCode: $insuranceCode,
+                type: $type
             );
 
-            $lines[] = $this->formatTextLine(
-                $bodyFields,
-                23,
-                'Veta tela dávky 793n na riadku ' . ($index + 1) . ' musí mať presne 23 polí.'
-            );
+            $records[] = ['fields' => $bodyFields, 'count' => 23];
         }
 
-        return implode("\r\n", $lines) . "\r\n";
+        return $this->claimFileGenerator->generate($records);
     }
 
     private function build793nAdosBodyFields(
@@ -355,8 +398,13 @@ class KilometersExportController extends Controller
         float $kilometers,
         string $userCar,
         int $userId,
-        string $insuranceCode
+        string $insuranceCode,
+        string $type
     ): array {
+        $resolved = $this->insuredResolver->resolve(
+            $row,
+            $this->insuredResolver->operationForCharacter($type)
+        );
         $dayDD = Carbon::parse($row->date)->format('d');
 
         $patientName = $this->toAsciiString(
@@ -374,7 +422,7 @@ class KilometersExportController extends Controller
         return [
             $rowNumber,
             $dayDD,
-            $this->toAsciiString($row->personal_number ?? ''),
+            $this->toAsciiString($resolved->personalNumber ?? ''),
             $patientName,
             $this->toAsciiString($row->diagnosis_code ?? ''),
             '',
@@ -392,9 +440,9 @@ class KilometersExportController extends Controller
             'N',
             $this->normalizeCode($row->doctor_pzs ?? ''),
             $this->normalizeCode($row->doctor_zpr ?? ''),
-            '',
-            '',
-            '',
+            $this->normalizeCode($resolved->memberStateCode ?? ''),
+            $this->toAsciiString($resolved->foreignInsuredId ?? ''),
+            $this->normalizeCode($resolved->sex ?? ''),
         ];
     }
 
@@ -433,18 +481,18 @@ class KilometersExportController extends Controller
         $userCar = $context['userCar'];
         $rows = $context['rows'];
 
-        if (!in_array($type, ['N', 'O'], true)) {
+        if (!in_array($type, ['N', 'O', 'A', 'E', 'F', 'G', 'I', 'J', 'K'], true)) {
             $this->addValidationError(
                 $errors,
-                'Neplatný charakter dávky. Pre kilometrové dávky sú povolené hodnoty N alebo O.',
+                'Neplatný charakter dávky 793n.',
                 'batch:invalid_type'
             );
         }
 
-        if (!preg_match('/^\d{1,6}$/', (string) $batchNumber)) {
+        if (!preg_match('/^\d{6}$/', (string) $batchNumber)) {
             $this->addValidationError(
                 $errors,
-                'Číslo dávky musí obsahovať iba číslice a môže mať maximálne 6 číslic.',
+                'Číslo dávky musí mať presne 6 číslic vo formáte UUMMPP.',
                 'batch:invalid_number'
             );
         }
@@ -571,8 +619,21 @@ class KilometersExportController extends Controller
                 to: $to,
                 userCar: (string) $userCar,
                 userId: (int) $context['userId'],
-                insuranceCode: (string) $insuranceCode
+                insuranceCode: (string) $insuranceCode,
+                type: $type
             );
+        }
+
+        if (in_array($type, ['I', 'J', 'K'], true)) {
+            $specialCategories = $rows->pluck('special_category')->filter()->unique();
+
+            if ($specialCategories->count() > 1) {
+                $this->addValidationError(
+                    $errors,
+                    'Osobitná dávka nesmie miešať rozdielne právne kategórie poistencov.',
+                    'batch:mixed_special_categories'
+                );
+            }
         }
 
         $this->throwKilometersValidationErrors($errors);
@@ -586,10 +647,31 @@ class KilometersExportController extends Controller
         string $to,
         string $userCar,
         int $userId,
-        string $insuranceCode
+        string $insuranceCode,
+        string $type
     ): void {
         $patientName = $this->formatPatientName($row);
         $label = "{$patientName} / riadok {$rowNumber}";
+        $resolved = $this->insuredResolver->resolve(
+            $row,
+            $this->insuredResolver->operationForCharacter($type)
+        );
+
+        if ($resolved->character !== $type) {
+            $this->addValidationError(
+                $errors,
+                "Poistný režim pacienta {$patientName} patrí do dávky {$resolved->character}, nie {$type}.",
+                $this->patientErrorKey($row, 'incompatible_character')
+            );
+        }
+
+        foreach ($resolved->errors as $resolverError) {
+            $this->addValidationError(
+                $errors,
+                "{$resolverError} Pacient: {$patientName}.",
+                $this->patientErrorKey($row, 'insured_identification')
+            );
+        }
 
         $this->addMissingError(
             $errors,
@@ -609,22 +691,6 @@ class KilometersExportController extends Controller
                 );
             }
         }
-
-        $this->addMissingError(
-            $errors,
-            $row->personal_number ?? null,
-            "Chýba rodné číslo alebo BIČ pacienta: {$patientName}.",
-            $this->patientErrorKey($row, 'missing_personal_number')
-        );
-
-        $this->addLengthBetweenError(
-            $errors,
-            $row->personal_number ?? null,
-            9,
-            10,
-            "Rodné číslo alebo BIČ musí mať 9 až 10 znakov: {$patientName}.",
-            $this->patientErrorKey($row, 'invalid_personal_number_length')
-        );
 
         $this->addMissingError(
             $errors,
@@ -914,7 +980,8 @@ class KilometersExportController extends Controller
             kilometers: 0.0,
             userCar: $userCar,
             userId: $userId,
-            insuranceCode: $insuranceCode
+            insuranceCode: $insuranceCode,
+            type: $type
         );
 
         if (count($fields) !== 23) {
@@ -929,6 +996,7 @@ class KilometersExportController extends Controller
     private function calculateKilometersForRows($rows): array
     {
         $visitedAddressesPerDay = [];
+        $lastStopPerDay = [];
         $calculatedRows = [];
 
         foreach ($rows as $index => $row) {
@@ -937,6 +1005,18 @@ class KilometersExportController extends Controller
             if ($this->hasValidCoords($row->branch_lat, $row->branch_lng, $row->patient_lat, $row->patient_lng)) {
                 $dateString = $this->normalizeDateString($row->date);
                 $visitedAddressesPerDay[$dateString] ??= [];
+                $origin = $lastStopPerDay[$dateString] ?? [
+                    'lat' => (float) $row->branch_lat,
+                    'lng' => (float) $row->branch_lng,
+                    'city' => $row->branch_city,
+                    'address' => $row->branch_address,
+                ];
+
+                $row = clone $row;
+                $row->branch_lat = $origin['lat'];
+                $row->branch_lng = $origin['lng'];
+                $row->branch_city = $origin['city'];
+                $row->branch_address = $origin['address'];
 
                 if (!$this->hasNearbyVisitedAddress(
                     $visitedAddressesPerDay[$dateString],
@@ -945,8 +1025,8 @@ class KilometersExportController extends Controller
                     self::GROUPING_BUFFER_METERS
                 )) {
                     $kilometers = $this->getDistanceFromRouteService(
-                        (float) $row->branch_lat,
-                        (float) $row->branch_lng,
+                        (float) $origin['lat'],
+                        (float) $origin['lng'],
                         (float) $row->patient_lat,
                         (float) $row->patient_lng
                     );
@@ -958,6 +1038,13 @@ class KilometersExportController extends Controller
                         'pp_id' => (int) $row->id,
                     ];
                 }
+
+                $lastStopPerDay[$dateString] = [
+                    'lat' => (float) $row->patient_lat,
+                    'lng' => (float) $row->patient_lng,
+                    'city' => $row->patient_city,
+                    'address' => $row->patient_address,
+                ];
             }
 
             $calculatedRows[] = [
@@ -968,6 +1055,41 @@ class KilometersExportController extends Controller
         }
 
         return $calculatedRows;
+    }
+
+    private function regimeForCharacter(string $character): string
+    {
+        return match (true) {
+            in_array($character, ['N', 'O', 'A'], true) => 'domestic',
+            in_array($character, ['E', 'F', 'G'], true) => 'eu',
+            in_array($character, ['I', 'J', 'K'], true) => 'special',
+            default => 'unclassified',
+        };
+    }
+
+    private function normalizedInsuredRows(array $context): array
+    {
+        $operation = $this->insuredResolver->operationForCharacter($context['type']);
+
+        return $context['rows']->values()->map(function (object $row, int $index) use ($operation) {
+            $resolved = $this->insuredResolver->resolve($row, $operation);
+
+            return [
+                'row' => $index + 1,
+                'patient_id' => $row->patient_id ?? null,
+                'service_date' => $row->date ?? null,
+                'character' => $resolved->character,
+                'regime' => $resolved->regime,
+                'identification_method' => $resolved->identificationMethod,
+                'used' => [
+                    'personal_number' => $resolved->personalNumber,
+                    'member_state_code' => $resolved->memberStateCode,
+                    'foreign_insured_id' => $resolved->foreignInsuredId,
+                    'sex' => $resolved->sex,
+                ],
+                'errors' => $resolved->errors,
+            ];
+        })->all();
     }
 
     private function formatTextLine(array $fields, int $expectedCount, string $errorMessage): string

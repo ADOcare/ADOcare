@@ -5,13 +5,19 @@ import useAuthStore from './auth'
 
 const STORAGE_KEY = 'selected-patient'
 
-type PatientCoverage = {
+export type PatientCoverage = {
     id?: number
     regime: 'domestic' | 'eu' | 'special' | 'unclassified' | null
+    category: 'domestic' | 'eu' | 'non_eu' | 'homeless' | 'other' | null
+    identification_method: 'slovak_identifier' | 'foreign_triad' | 'incomplete' | null
     insurance_company_id: number | null
     member_state_code: string | null
     foreign_insured_id: string | null
     special_category: string | null
+    other_subtype: string | null
+    legal_basis: string | null
+    entitlement_confirmed: boolean
+    document_registered: boolean
     entitlement_document_type: string | null
     entitlement_document_number: string | null
     valid_from: string | null
@@ -19,8 +25,49 @@ type PatientCoverage = {
     is_verified: boolean
 }
 
-type PatientWithCoverage = Patient & {
+export type PatientWithCoverage = Patient & {
     coverage?: PatientCoverage | null
+}
+
+export function getPatientIdentifier(patient: PatientWithCoverage | null | undefined): string {
+    if (!patient) {
+        return ''
+    }
+
+    const personalNumber = String(patient.personal_number ?? '').trim()
+    const foreignInsuredId = String(patient.coverage?.foreign_insured_id ?? '').trim()
+
+    if (patient.coverage?.identification_method === 'foreign_triad') {
+        return foreignInsuredId
+    }
+
+    return personalNumber
+}
+
+type InsuranceCompanyVerification = {
+    id: number | null
+    code: string | null
+    name: string | null
+}
+
+export type PatientInsuranceCheckResult = {
+    status: 'found' | 'verified' | 'mismatch' | 'not_insured' | 'duplicity' | 'identity_mismatch' | 'unknown' | 'not_applicable'
+    insured: boolean | null
+    matches_saved_insurance: boolean | null
+    matches_patient_name?: boolean | null
+    is_verified: boolean
+    identification_number?: string
+    patient_name?: string | null
+    valid_from?: string | null
+    valid_to?: string | null
+    last_changed?: string | null
+    has_duplicity?: boolean
+    reason?: string
+    http_status?: number | null
+    saved_insurance_company?: InsuranceCompanyVerification | null
+    registered_insurance_company?: InsuranceCompanyVerification | null
+    local_insurance_company_found?: boolean
+    history?: Array<Record<string, unknown>>
 }
 
 function serializeCoverage(patient: PatientWithCoverage): PatientCoverage | null {
@@ -30,11 +77,17 @@ function serializeCoverage(patient: PatientWithCoverage): PatientCoverage | null
 
     return {
         id: patient.coverage.id,
-        regime: patient.coverage.regime, 
+        regime: patient.coverage.regime,
+        category: patient.coverage.category,
+        identification_method: patient.coverage.identification_method,
         insurance_company_id: patient.coverage.insurance_company_id,
         member_state_code: patient.coverage.member_state_code,
         foreign_insured_id: patient.coverage.foreign_insured_id,
         special_category: patient.coverage.special_category,
+        other_subtype: patient.coverage.other_subtype,
+        legal_basis: patient.coverage.legal_basis,
+        entitlement_confirmed: patient.coverage.entitlement_confirmed,
+        document_registered: patient.coverage.document_registered,
         entitlement_document_type: patient.coverage.entitlement_document_type,
         entitlement_document_number: patient.coverage.entitlement_document_number,
         valid_from: patient.coverage.valid_from,
@@ -67,19 +120,27 @@ function serializePatient(patient: PatientWithCoverage) {
 export const usePatientStore = defineStore('patient', {
     state: () => ({
         current: null as PatientWithCoverage | null,
+        selectionVersion: 0,
     }),
 
     actions: {
-        setPatient(patient: PatientWithCoverage) {
+        setPatient(patient: PatientWithCoverage, selected = true) {
             if (useAuthStore().isManager) {
                 return
             }
 
             this.current = patient
+            if (selected) {
+                this.selectionVersion += 1
+            }
             localStorage.setItem(STORAGE_KEY, JSON.stringify(patient))
         },
 
         loadFromStorage() {
+            if (this.current) {
+                return
+            }
+
             const raw = localStorage.getItem(STORAGE_KEY)
 
             if (!raw) {
@@ -89,6 +150,7 @@ export const usePatientStore = defineStore('patient', {
             try {
                 const patient = JSON.parse(raw) as PatientWithCoverage
                 this.current = patient
+                this.selectionVersion += 1
             } catch (error) {
                 console.error('Failed to parse stored patient', error)
                 localStorage.removeItem(STORAGE_KEY)
@@ -108,7 +170,7 @@ export const usePatientStore = defineStore('patient', {
             }
         },
 
-        async persistPatientData(patient: PatientWithCoverage) {
+        async persistPatientData(patient: PatientWithCoverage, selected = true) {
             try {
                 const isNew = !patient.id
 
@@ -141,11 +203,11 @@ export const usePatientStore = defineStore('patient', {
                 )
                 const updated = response.data.data as PatientWithCoverage
 
-                this.setPatient(updated)
+                this.setPatient(updated, selected)
 
                 return updated
             } catch (error) {
-                throw new Error('Failed to save patient: ' + error)
+                throw error
             }
         },
 
@@ -159,7 +221,7 @@ export const usePatientStore = defineStore('patient', {
 
                 return response.data.data as PatientWithCoverage
             } catch (error) {
-                throw new Error('Failed to create patient: ' + error)
+                throw error
             }
         },
 
@@ -199,6 +261,55 @@ export const usePatientStore = defineStore('patient', {
             } catch (error) {
                 console.error('[UDZS] Store: API error', error)
                 throw new Error('Failed to check patient death status: ' + error)
+            }
+        },
+
+        async checkPatientInsurance(patientId: number): Promise<PatientInsuranceCheckResult> {
+            try {
+                const response = await api.post(`/v1/patients/${patientId}/insurance-check`)
+                const result = response.data.data as PatientInsuranceCheckResult
+
+                if (this.current?.id === patientId && this.current.coverage) {
+                    this.current.coverage.is_verified = result.is_verified
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.current))
+                }
+
+                return result
+            } catch (error) {
+                console.error('[EOVERENIE] Insurance check failed', error)
+                throw new Error('Failed to check patient insurance status: ' + error)
+            }
+        },
+
+        async checkPatientInsuranceData(payload: {
+            personal_number: string
+            first_name: string
+            last_name: string
+            insurance_company_id: number
+            regime: string
+        }): Promise<PatientInsuranceCheckResult> {
+            try {
+                const response = await api.post('/v1/patients/insurance-check', payload)
+
+                return response.data.data as PatientInsuranceCheckResult
+            } catch (error) {
+                console.error('[EOVERENIE] Insurance form check failed', error)
+                throw new Error('Failed to check patient insurance data: ' + error)
+            }
+        },
+
+        async prefillPatientInsurance(payload: {
+            personal_number: string
+            first_name?: string | null
+            last_name?: string | null
+        }): Promise<PatientInsuranceCheckResult> {
+            try {
+                const response = await api.post('/v1/patients/insurance-prefill', payload)
+
+                return response.data.data as PatientInsuranceCheckResult
+            } catch (error) {
+                console.error('[EOVERENIE] Insurance prefill failed', error)
+                throw new Error('Failed to load patient insurance details: ' + error)
             }
         },
 

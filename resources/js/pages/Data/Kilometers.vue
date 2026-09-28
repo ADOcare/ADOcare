@@ -3,7 +3,11 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
-import type { Patient as PatientModel, InsuranceCompany } from '@/types/models'
+import type { InsuranceCompany } from '@/types/models'
+import {
+    getPatientIdentifier,
+    type PatientWithCoverage,
+} from '@/stores/patientStore'
 import { useAuthStore } from '@/stores/auth'
 import { useUiOverlayStore } from '@/stores/uiOverlay'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
@@ -48,7 +52,6 @@ type DocRow = {
     insurance_company_name?: string
 }
 
-const batchNumber = ref<string | null>(null)
 const batchType = ref<BatchType | null>(null)
 const insurance = ref<Insurance | null>(null)
 
@@ -63,13 +66,20 @@ const submitted = ref(false)
 const patientsLoading = ref(false)
 
 const batchTypes = ref<BatchType[]>([
-    { code: 'N', name: 'Nová dávka' },
-    { code: 'O', name: 'Opravná dávka' },
+    { code: 'N', name: 'Nová – tuzemskí (N)' },
+    { code: 'O', name: 'Opravná – tuzemskí (O)' },
+    { code: 'A', name: 'Aditívna – tuzemskí (A)' },
+    { code: 'E', name: 'Nová – zahraničný nárok (E)' },
+    { code: 'F', name: 'Opravná – zahraničný nárok (F)' },
+    { code: 'G', name: 'Aditívna – zahraničný nárok (G)' },
+    { code: 'I', name: 'Nová – osobitný režim (I)' },
+    { code: 'J', name: 'Opravná – osobitný režim (J)' },
+    { code: 'K', name: 'Aditívna – osobitný režim (K)' },
 ])
 
 const insurances = ref<Insurance[]>([])
 
-const isCorrectionBatch = computed(() => batchType.value?.code === 'O')
+const isCorrectionBatch = computed(() => ['O', 'F', 'J', 'A', 'G', 'K'].includes(batchType.value?.code ?? ''))
 
 function mapInsuranceCompanyToOption(company: InsuranceCompany): Insurance {
     const displayName = company.name ?? ''
@@ -81,11 +91,11 @@ function mapInsuranceCompanyToOption(company: InsuranceCompany): Insurance {
     }
 }
 
-function mapPatients(items: PatientModel[]): Patient[] {
+function mapPatients(items: PatientWithCoverage[]): Patient[] {
     return items.map((p) => ({
         id: p.id,
         name: `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
-        personalNumber: p.personal_number ?? '',
+        personalNumber: getPatientIdentifier(p),
     }))
 }
 
@@ -127,7 +137,7 @@ async function loadAllPatients() {
         })
 
         const data = res.data?.data
-        const items = ((Array.isArray(data) ? data : data?.items) as PatientModel[]) ?? []
+        const items = ((Array.isArray(data) ? data : data?.items) as PatientWithCoverage[]) ?? []
 
         allPatients.value = mapPatients(items)
     } catch (e) {
@@ -158,24 +168,6 @@ function removePatient(patient: Patient) {
     )
 }
 
-function onBatchNumberKeydown(e: KeyboardEvent) {
-    const allowedKeys = [
-        'Backspace',
-        'Delete',
-        'ArrowLeft',
-        'ArrowRight',
-        'Tab',
-    ]
-
-    if (allowedKeys.includes(e.key)) {
-        return
-    }
-
-    if (!/^[0-9]$/.test(e.key)) {
-        e.preventDefault()
-    }
-}
-
 function showRoutesGeneratedToast() {
     toast.add({
         group: ROUTES_TOAST_GROUP,
@@ -200,7 +192,6 @@ async function onSubmit() {
     const needsPatients = isCorrectionBatch.value
 
     if (
-        !batchNumber.value ||
         !batchType.value ||
         !insurance.value ||
         !hasPeriod ||
@@ -227,7 +218,6 @@ async function onSubmit() {
 
     try {
         const res = await api.post('/v1/batches/kilometers/preview', {
-            batchNumber: batchNumber.value,
             batchType: { code: batchType.value.code },
             insurance: { id: insurance.value.id },
             period: [periodFromLocal, periodToLocal],
@@ -496,23 +486,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
         <form @submit.prevent="onSubmit" class="flex flex-col gap-4">
             <section class="bg-tag3 p-6 rounded-md flex flex-col gap-4">
                 <div class="grid grid-cols-12 gap-4">
-                    <div class="col-span-12 md:col-span-3">
-                        <label class="block text-normal mb-1">Číslo dávky</label>
-                        <InputText
-                            v-model="batchNumber"
-                            @keydown="onBatchNumberKeydown"
-                            maxlength="6"
-                            inputmode="numeric"
-                            inputClass="w-full! border-none! shadow-none! bg-white! focus:ring-0! focus:shadow-none!"
-                            class="border-none!"
-                            fluid
-                        />
-                        <small v-if="submitted && !batchNumber" class="text-danger">
-                            Číslo dávky je povinné.
-                        </small>
-                    </div>
-
-                    <div class="col-span-12 md:col-span-3">
+                    <div class="col-span-12 md:col-span-4">
                         <label class="block text-normal mb-1">Typ dávky</label>
                         <Select
                             v-model="batchType"

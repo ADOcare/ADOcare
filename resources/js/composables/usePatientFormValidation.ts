@@ -4,10 +4,15 @@ import useAuthStore from '@/stores/auth';
 
 type PatientCoverageForm = {
     regime?: 'domestic' | 'eu' | 'special' | 'unclassified' | null;
+    category?: 'domestic' | 'eu' | 'non_eu' | 'homeless' | 'other' | null;
+    identification_method?: 'slovak_identifier' | 'foreign_triad' | 'incomplete' | null;
     insurance_company_id?: number | null;
     member_state_code?: string | null;
     foreign_insured_id?: string | null;
     special_category?: string | null;
+    other_subtype?: string | null;
+    legal_basis?: string | null;
+    entitlement_confirmed?: boolean;
     valid_from?: string | null;
     valid_to?: string | null;
 };
@@ -35,17 +40,30 @@ export default function usePatientFormValidation(patient: { value: PatientWithCo
 
         if (!p.first_name?.trim()) e.first_name = 'Meno je povinné.';
         if (!p.last_name?.trim()) e.last_name = 'Priezvisko je povinné.';
-        if (!p.personal_number?.trim()) e.personal_number = 'Rodné číslo je povinné.';
         if (!p.sex) e.sex = 'Pohlavie je povinné.';
         if (!p.doctor_id) e.doctor_id = 'Lekár je povinný.';
         const coverage = p.coverage ?? {};
 
-        if (!coverage.regime || coverage.regime === 'unclassified') {
-            e['coverage.regime'] = 'Vyberte režim úhrady pacienta.';
+        if (!coverage.category) {
+            e['coverage.category'] = 'Vyberte kategóriu poistenca.';
         }
 
-        if (!coverage.insurance_company_id) {
+        if (!coverage.regime) {
+            e['coverage.regime'] = 'Vyberte kategóriu poistenca.';
+        }
+
+        if (
+            coverage.regime !== 'unclassified'
+            && !coverage.insurance_company_id
+        ) {
             e['coverage.insurance_company_id'] = 'Poisťovňa je povinná.';
+        }
+
+        if (
+            coverage.identification_method === 'slovak_identifier'
+            && !p.personal_number?.trim()
+        ) {
+            e.personal_number = 'Rodné číslo alebo pridelený BIČ je povinný.';
         }
 
         if (coverage.regime === 'eu') {
@@ -60,6 +78,17 @@ export default function usePatientFormValidation(patient: { value: PatientWithCo
 
         if (coverage.regime === 'special' && !coverage.special_category) {
             e['coverage.special_category'] = 'Kategória osobitného nároku je povinná.';
+        }
+
+        if (coverage.category === 'other' && !coverage.other_subtype?.trim()) {
+            e['coverage.other_subtype'] = 'Vyberte konkrétnu situáciu pacienta.';
+        }
+
+        if (
+            ['non_eu', 'homeless', 'other'].includes(coverage.category ?? '')
+            && !coverage.legal_basis?.trim()
+        ) {
+            e['coverage.legal_basis'] = 'Chýba určenie právneho nároku pacienta.';
         }
 
         if (

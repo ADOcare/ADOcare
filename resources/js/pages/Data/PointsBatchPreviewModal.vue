@@ -83,14 +83,14 @@ function renderStatus(_: unknown, row: PointCandidate) {
     const labels: string[] = []
 
     if (row.added_after_new_batch) {
-        labels.push('<span class="inline-flex bg-tag3 rounded-md px-2 py-1 text-mini text-accent">Pridaný</span>')
+        labels.push('<span class="inline-flex bg-tag3 rounded-md px-2 py-1 text-mini">Pridaný</span>')
     }
 
     if (row.edited) {
-        labels.push('<span class="inline-flex bg-tag3 rounded-md px-2 py-1 text-mini text-accent">Upravený</span>')
+        labels.push('<span class="inline-flex bg-tag3 rounded-md px-2 py-1 text-mini">Upravený</span>')
     }
 
-    return labels.join(' ')
+    return labels.join(' ') || '—'
 }
 
 const tableOptions = computed<DataTableOptions<PointCandidate>>(() => ({
@@ -100,7 +100,7 @@ const tableOptions = computed<DataTableOptions<PointCandidate>>(() => ({
     resetPageOnLocalItemsChange: true,
     rowKey: 'point_id',
     selectable: true,
-    defaultPageSize: 50,
+    defaultPageSize: 10,
     pageSizeOptions: [10, 25, 50],
     columns: [
         { field: 'service_date', header: 'Dátum výkonu', width: '8rem' },
@@ -122,7 +122,7 @@ const tableOptions = computed<DataTableOptions<PointCandidate>>(() => ({
             width: '11rem',
             render: (value) => formatDateTime(String(value ?? '')),
         },
-        { field: 'status', header: 'Stav', width: '7rem', render: renderStatus },
+        { field: 'status', header: 'Stav', width: '14rem', render: renderStatus },
     ],
 }))
 
@@ -159,6 +159,10 @@ function createBatch() {
                 <div class="text-mini text-darkgrey">Celková suma</div>
                 <div class="text-normal font-semibold">{{ formatAmount(selectedAmount) }} €</div>
             </div>
+        </div>
+
+        <div class="text-normal text-darkgrey">
+            Relevantné záznamy sú predvolene označené. Výber môžete pred vytvorením dávky upraviť.
         </div>
 
         <div class="h-[55vh] min-h-[24rem]">

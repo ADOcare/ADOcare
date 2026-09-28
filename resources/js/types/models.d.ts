@@ -146,9 +146,15 @@ export interface PatientCoverage {
   patient_id: number
   insurance_company_id: number | null
   regime: PatientCoverageRegime
+  category: 'domestic' | 'eu' | 'non_eu' | 'homeless' | 'other'
+  identification_method: 'slovak_identifier' | 'foreign_triad' | 'incomplete'
   member_state_code: string | null
   foreign_insured_id: string | null
   special_category: PatientSpecialCoverageCategory | null
+  other_subtype: string | null
+  legal_basis: string | null
+  entitlement_confirmed: boolean
+  document_registered: boolean
   entitlement_document_type: string | null
   entitlement_document_number: string | null
   valid_from: string | null

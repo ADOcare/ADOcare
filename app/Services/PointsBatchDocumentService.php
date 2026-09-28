@@ -87,6 +87,16 @@ class PointsBatchDocumentService
                 ->rawRowsForPointIds($data, $actor, $selectedPointIds)
                 ->keyBy(fn ($row) => (int) $row->patient_point_id);
 
+            if (in_array($subtype, ['I', 'J', 'K'], true)) {
+                $specialCategories = $rawRows->pluck('special_category')->filter()->unique();
+
+                if ($specialCategories->count() > 1) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'pointIds' => ['Osobitná dávka nesmie miešať rozdielne právne kategórie poistencov.'],
+                    ]);
+                }
+            }
+
             if ($isNewBatch) {
                 $oldBatch = PointClaimBatch::query()
                     ->where('healthcare_worker_id', $actor->id)
@@ -166,6 +176,9 @@ class PointsBatchDocumentService
                 'created_by' => $actor->id,
                 'insurance_company_id' => $insuranceId,
                 'batch_type' => $subtype,
+                'special_category' => in_array($subtype, ['I', 'J', 'K'], true)
+                    ? $rawRows->pluck('special_category')->filter()->unique()->first()
+                    : null,
                 'accounting_period' => Carbon::parse($periodFromRaw)->startOfMonth()->toDateString(),
                 'batch_number' => $batchNumber,
                 'invoice_number' => data_get($data, 'invoiceNumber'),
@@ -193,9 +206,13 @@ class PointsBatchDocumentService
                     'longitude' => $rawRow->longitude,
                     'country_code' => $rawRow->member_state_code,
                     'foreign_insured_id' => $rawRow->foreign_insured_id,
+                    'regime' => $rawRow->regime,
+                    'identification_method' => $rawRow->identification_method,
+                    'category' => $rawRow->category,
                     'special_category' => $rawRow->special_category,
                     'entitlement_document_type' => $rawRow->entitlement_document_type,
                     'entitlement_document_number' => $rawRow->entitlement_document_number,
+                    'entitlement_confirmed' => (bool) $rawRow->entitlement_confirmed,
                     'diagnosis_code' => $rawRow->diagnosis_code,
                     'procedure_code' => $rawRow->procedure_code,
                     'quantity' => (int) $rawRow->quantity,

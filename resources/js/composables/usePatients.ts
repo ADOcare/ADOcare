@@ -1,13 +1,16 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
-import type { Patient } from '@/types/models'
+import {
+    getPatientIdentifier,
+    type PatientWithCoverage,
+} from '@/stores/patientStore'
 import type { VirtualScrollerLazyEvent } from 'primevue/virtualscroller'
 
 export type PatientOption = {
     id: number
     name: string
     personalNumber: string
-    raw: Patient
+    raw: PatientWithCoverage
 }
 
 export default function usePatients() {
@@ -31,7 +34,7 @@ export default function usePatients() {
     async function fetchPatients(page: number) {
         try {
             if (!fetchPatientsURL.value) return []
-            const res = await api.fetchEntitiesPaginated<Patient>(fetchPatientsURL.value, {
+            const res = await api.fetchEntitiesPaginated<PatientWithCoverage>(fetchPatientsURL.value, {
                 per_page: 20,
                 page: page,
                 q: patientFilterString.value.trim() || undefined,
@@ -43,11 +46,11 @@ export default function usePatients() {
         return []
     }
 
-    function transformPatientsToPatientOptions(items: Patient[]): PatientOption[] {
+    function transformPatientsToPatientOptions(items: PatientWithCoverage[]): PatientOption[] {
         return items.map((p) => ({
             id: p.id,
             name: `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
-            personalNumber: p.personal_number ?? '',
+            personalNumber: getPatientIdentifier(p),
             raw: p,
         }))
     }

@@ -52,13 +52,17 @@ const createPatient = async () => {
         if (props.modalResolve) {
             props.modalResolve(patient.value)
         }
-    } catch (e) {
-        console.error('Failed to save patient', e)
+    } catch (error: any) {
+        console.error('Failed to save patient', error)
+        const personalNumberError = error?.response?.data?.errors?.personal_number?.[0]
+
         toast.add({
             severity: 'error',
-            summary: 'Chyba',
-            detail: 'Nepodarilo sa uložiť pacienta. Skúste to znova.',
-            life: 5000,
+            summary: personalNumberError ? 'Pacient už existuje' : 'Chyba',
+            detail: personalNumberError
+                ?? error?.response?.data?.message
+                ?? 'Nepodarilo sa uložiť pacienta. Skúste to znova.',
+            life: personalNumberError ? 10000 : 5000,
         })
     }
 }

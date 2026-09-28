@@ -7,10 +7,19 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use Illuminate\Validation\ValidationException;
+use App\Models\Branch;
+use Illuminate\Support\Str;
+use App\Services\Claims\InsuredClaimResolver;
 
 
 class KilometersBatchDocumentService
 {
+    public function __construct(
+        private PointsBatchNumberService $batchNumberService,
+        private InsuredClaimResolver $insuredResolver,
+    ) {
+    }
+
     public function getKilometersBatchPayload(Document $document): ?array
     {
         if (! $document->path || ! Storage::disk('local')->exists($document->path)) {
@@ -25,13 +34,15 @@ class KilometersBatchDocumentService
     {
         $insuranceId = (int) data_get($data, 'insurance.id');
         $branchId  = (int) data_get($data, 'branch.id');
-        $companyId = (int) data_get($data, 'company.id');
-        $insuranceId = (int) data_get($data, 'insurance.id');
+        $branch = Branch::query()->findOrFail($branchId);
+        abort_unless($actor && $actor->isInBranch($branchId), 403);
+        $companyId = (int) $branch->company_id;
 
         $periodFromRaw = (string) data_get($data, 'period.0');
         $periodToRaw   = (string) data_get($data, 'period.1');
 
         $subtype = (string) data_get($data, 'batchType.code', 'N');
+        $batchNumber = $this->batchNumberService->make($actor, $insuranceId, $periodFromRaw);
 
         $tz = 'Europe/Bratislava';
         $to = Carbon::parse($periodToRaw)->setTimezone($tz);
@@ -50,10 +61,12 @@ class KilometersBatchDocumentService
 
         return DB::transaction(function () use (
             $data, $actor, $branchId, $companyId, $periodFromRaw, $periodToRaw, $periodKey, $subtype, $insuranceId,
+            $batchNumber,
         ) {
             $type = 'kilometers_batch';
 
-            $existing = Document::query()
+            $isNewBatch = in_array($subtype, ['N', 'E', 'I'], true);
+            $existing = $isNewBatch ? Document::query()
                 ->where('type', $type)
                 ->where('subtype', $subtype)
                 ->where('user_id', $actor->id)
@@ -61,9 +74,9 @@ class KilometersBatchDocumentService
                 ->where('period', $periodKey)
                 ->where('insurance_company_id', $insuranceId)
                 ->lockForUpdate()
-                ->first();
+                ->first() : null;
 
-            $newPath = 'kilometers_batches/' . now()->timestamp . '_' . (int) data_get($data, 'batchNumber') . '.json';
+            $newPath = 'kilometers_batches/' . Str::uuid() . '_' . $batchNumber . '.json';
 
             if ($existing) {
                 if ($existing->path && Storage::disk('local')->exists($existing->path)) {
@@ -73,7 +86,7 @@ class KilometersBatchDocumentService
                 $existing->update([
                     'company_id' => $companyId ?: $existing->company_id,
                     'mime_type'  => 'application/json',
-                    'name'       => 'kilometre_' . $subtype . '_davka_' . (int) data_get($data, 'batchNumber') . '_' . now()->format('d.m.Y'),
+                    'name'       => 'kilometre_' . $subtype . '_davka_' . $batchNumber . '_' . now()->format('d.m.Y'),
                     'path'       => $newPath,
                     'period'     => $periodKey,
                     'subtype'    => $subtype,
@@ -94,7 +107,7 @@ class KilometersBatchDocumentService
                     'subtype'    => $subtype,
                     'mime_type'  => 'application/json',
 
-                    'name'       => 'kilometre_' . $subtype . '_davka_' . (int) data_get($data, 'batchNumber') . '_' . now()->format('d.m.Y'),
+                    'name'       => 'kilometre_' . $subtype . '_davka_' . $batchNumber . '_' . now()->format('d.m.Y'),
                     'path'       => $newPath,
                     'period'     => $periodKey,
                 ]);
@@ -102,7 +115,7 @@ class KilometersBatchDocumentService
 
             $payload = [
                 'document_id' => $document->id,
-                'batchNumber' => (int) data_get($data, 'batchNumber'),
+                'batchNumber' => $batchNumber,
                 'batchType'   => ['code' => $subtype],
                 'insurance'   => ['id' => (int) data_get($data, 'insurance.id')],
                 'period'      => [$periodFromRaw, $periodToRaw],
@@ -173,7 +186,7 @@ class KilometersBatchDocumentService
             ->where('pp.user_id', $actorId)
             ->where('pp.branch_id', $branchId)
             ->where('pc.insurance_company_id', $insuranceId)
-            ->where('pc.regime', 'domestic')
+            ->where('pc.regime', $this->regimeForCharacter((string) data_get($data, 'batchType.code')))
             ->whereBetween('pp.date', [$from, $to])
             ->whereIn('pp.procedure_code', ['3439', '3440'])
             ->when(!empty($patientIds), fn($q) => $q->whereIn('pp.patient_id', $patientIds))
@@ -191,23 +204,34 @@ class KilometersBatchDocumentService
                 'p.longitude as patient_lng',
                 'pp.diagnosis_code',
                 'pp.procedure_code',
-                'd.pzs as doctor_pzs',
-                'd.zpr as doctor_zpr',
+                DB::raw('COALESCE(pp.doctor_pzs, d.pzs) as doctor_pzs'),
+                DB::raw('COALESCE(pp.doctor_zpr, d.zpr) as doctor_zpr'),
                 'b.city as branch_city',
                 'b.address as branch_address',
                 'b.latitude as branch_lat',
                 'b.longitude as branch_lng',
                 'pcp.price',
+                'pc.regime',
+                'pc.identification_method',
+                'pc.member_state_code',
+                'pc.foreign_insured_id',
+                'pc.special_category',
+                'pc.entitlement_document_type',
+                'pc.entitlement_confirmed',
+                'pc.valid_from as coverage_valid_from',
             ])
             ->orderBy('pp.date')
             ->orderBy('pp.patient_id')
             ->orderBy('pp.id')
-            ->get();
+            ->orderByDesc('pc.valid_from')
+            ->get()
+            ->unique('id')
+            ->values();
 
-        $this->validateRowsForBatchCreation($rows);
+        $this->validateRowsForBatchCreation($rows, (string) data_get($data, 'batchType.code'));
     }
 
-    private function validateRowsForBatchCreation($rows): void
+    private function validateRowsForBatchCreation($rows, string $character): void
     {
         $errors = [];
 
@@ -217,8 +241,18 @@ class KilometersBatchDocumentService
 
         foreach ($rows as $row) {
             $patientName = $this->formatPatientName($row);
+            $resolved = $this->insuredResolver->resolve(
+                $row,
+                $this->insuredResolver->operationForCharacter($character)
+            );
 
-            $this->addMissingError($errors, $row->personal_number, "Chýba rodné číslo pacienta {$patientName}.");
+            foreach ($resolved->errors as $resolverError) {
+                $errors[] = "{$resolverError} Pacient: {$patientName}.";
+            }
+
+            if ($resolved->character !== $character) {
+                $errors[] = "Pacient {$patientName} patrí do dávky {$resolved->character}, nie {$character}.";
+            }
             $this->addMissingError($errors, $row->last_name, "Chýba priezvisko pacienta {$patientName}.");
             $this->addMissingError($errors, $row->first_name, "Chýba meno pacienta {$patientName}.");
             $this->addMissingError($errors, $row->sex, "Chýba pohlavie pacienta {$patientName}.");
@@ -243,7 +277,25 @@ class KilometersBatchDocumentService
             $this->addMissingError($errors, $row->price, "Chýba cena výkonu 0000 pre pacienta {$patientName}.");
         }
 
+        if (in_array($character, ['I', 'J', 'K'], true)) {
+            $specialCategories = $rows->pluck('special_category')->filter()->unique();
+
+            if ($specialCategories->count() > 1) {
+                $errors[] = 'Osobitná dávka nesmie miešať rozdielne právne kategórie poistencov.';
+            }
+        }
+
         $this->throwKilometersValidationErrors($errors);
+    }
+
+    private function regimeForCharacter(string $character): string
+    {
+        return match (true) {
+            in_array($character, ['N', 'O', 'A'], true) => 'domestic',
+            in_array($character, ['E', 'F', 'G'], true) => 'eu',
+            in_array($character, ['I', 'J', 'K'], true) => 'special',
+            default => 'unclassified',
+        };
     }
 
     private function addMissingError(array &$errors, mixed $value, string $message): void
@@ -294,5 +346,3 @@ class KilometersBatchDocumentService
         ]);
     }
 }
-
-

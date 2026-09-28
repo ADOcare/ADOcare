@@ -2,9 +2,12 @@
 import { computed, ref, watch, useAttrs } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { openPatientDocumentsModal, openPatientEditModal, openScanDocumentModal } from '@/helpers/modalHelpers'
-import { usePatientStore } from '@/stores/patientStore'
+import {
+    getPatientIdentifier,
+    usePatientStore,
+    type PatientWithCoverage,
+} from '@/stores/patientStore'
 import { useAuthStore } from '@/stores/auth'
-import type { Patient } from '@/types/models'
 
 defineOptions({ inheritAttrs: false })
 const attrs = useAttrs()
@@ -12,14 +15,16 @@ const attrs = useAttrs()
 const router = useRouter()
 const patientStore = usePatientStore()
 const authStore = useAuthStore()
-const patient = computed<Patient | null>(() => patientStore.current)
+const patient = computed<PatientWithCoverage | null>(() => patientStore.current)
 const currentBranchId = computed(() => authStore.currentBranch?.id ?? null)
 
 const patientName = computed(() =>
     patient.value ? `${patient.value.first_name ?? ''} ${patient.value.last_name ?? ''}`.trim() : ''
 )
 
-const patientPersonalNumber = computed(() => patient.value?.personal_number ?? '')
+const patientIdentifier = computed(() => {
+    return getPatientIdentifier(patient.value)
+})
 
 const isHovered = ref(false)
 
@@ -50,22 +55,48 @@ function openScanDocument(patientId: number | undefined, branchId: number | null
     }
 }
 
-function patientIsComplete(p: Patient | null) {
+function patientIsComplete(p: PatientWithCoverage | null) {
     if (!p) return true
 
-  const first = String(p.first_name ?? '').trim()
-  const last = String(p.last_name ?? '').trim()
-  const pn = String(p.personal_number ?? '').trim()
-  const sex = (p as any).sex ?? null
-  const doctorId = (p as any).doctor_id ?? null
-  const insuranceId = (p as any).insurance_company_id ?? null
-  const street = String((p as any).address ?? '').trim()
-  const city = String((p as any).city ?? '').trim()
-  const zip = String((p as any).zip ?? '').trim()
-  const lat = (p as any).latitude
-  const lng = (p as any).longitude
+    const first = String(p.first_name ?? '').trim()
+    const last = String(p.last_name ?? '').trim()
+    const personalNumber = String(p.personal_number ?? '').trim()
+    const sex = p.sex ?? null
+    const doctorId = p.doctor_id ?? null
+    const coverage = p.coverage ?? null
+    const insuranceId = coverage?.insurance_company_id ?? p.insurance_company_id ?? null
+    const street = String(p.address ?? '').trim()
+    const city = String(p.city ?? '').trim()
+    const zip = String(p.zip ?? '').trim()
+    const lat = p.latitude
+    const lng = p.longitude
 
-    if (!first || !last || !pn || !sex || !doctorId || !insuranceId) return false
+    if (!first || !last || !sex || !doctorId || !coverage) return false
+    if (coverage.regime === 'unclassified') return false
+    if (!insuranceId) return false
+
+    if (coverage.identification_method === 'slovak_identifier' && !personalNumber) {
+        return false
+    }
+
+    if (coverage.identification_method === 'foreign_triad') {
+        const state = String(coverage.member_state_code ?? '').trim()
+        const foreignId = String(coverage.foreign_insured_id ?? '').trim()
+
+        if (!state || !foreignId) return false
+    }
+
+    if (!coverage.identification_method || coverage.identification_method === 'incomplete') {
+        return false
+    }
+
+    if (
+        coverage.regime === 'special'
+        && (!coverage.special_category || !coverage.entitlement_confirmed)
+    ) {
+        return false
+    }
+
     if (!street && !city && !zip) return false
     if (lat == null || lng == null) return false
 
@@ -106,7 +137,7 @@ watch(
         </h2>
 
                 <h2 class="text-normal! px-sm! text-almostwhite!">
-                    {{ patientPersonalNumber }}
+                    {{ patientIdentifier }}
                 </h2>
             </div>
         </template>

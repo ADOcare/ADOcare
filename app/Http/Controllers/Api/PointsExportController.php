@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PointClaimBatch;
 use App\Services\PointsBatchNumberService;
+use App\Services\Claims\ClaimInterfaceVersionRegistry;
+use App\Services\Claims\InsuredClaimResolver;
+use App\Services\Claims\ClaimFileGenerator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -17,8 +20,12 @@ class PointsExportController extends Controller
     private const DATA_TYPE = '753d';
     private const CARE_TYPE_ADOS = '850';
 
-    public function __construct(private PointsBatchNumberService $batchNumberService)
-    {
+    public function __construct(
+        private PointsBatchNumberService $batchNumberService,
+        private InsuredClaimResolver $insuredResolver,
+        private ClaimInterfaceVersionRegistry $interfaceVersions,
+        private ClaimFileGenerator $claimFileGenerator,
+    ) {
     }
 
     public function preview(Request $request)
@@ -27,6 +34,7 @@ class PointsExportController extends Controller
         $context = $this->buildExportContext($data);
 
         $this->validate753dAdosExportContext($context);
+        $content = $this->build753dAdosContent($context);
 
         $amount = $context['rows']
             ->sum(fn ($row) => (float) ($row->quantity ?? 0) * (float) ($row->price ?? 0));
@@ -50,6 +58,12 @@ class PointsExportController extends Controller
             'message' => 'Preview generated',
             'data' => [
                 'sheet' => $sheet,
+                'developerPreview' => [
+                    'interfaceVersion' => $context['interfaceVersion'],
+                    'rows' => $this->normalizedInsuredRows($context),
+                    'content' => $content,
+                    'validation' => ['valid' => true, 'errors' => []],
+                ],
             ],
         ]);
     }
@@ -238,20 +252,31 @@ class PointsExportController extends Controller
                 'p.longitude',
                 'pc.member_state_code as country_code',
                 'pc.foreign_insured_id',
+                'pc.regime',
+                'pc.identification_method',
+                'pc.special_category',
+                'pc.entitlement_document_type',
+                'pc.entitlement_confirmed',
+                'pc.valid_from as coverage_valid_from',
 
                 'pp.diagnosis_code',
                 'pp.procedure_code',
                 'pp.quantity',
 
-                'd.pzs as doctor_pzs',
-                'd.zpr as doctor_zpr',
+                DB::raw('COALESCE(pp.doctor_pzs, d.pzs) as doctor_pzs'),
+                DB::raw('COALESCE(pp.doctor_zpr, d.zpr) as doctor_zpr'),
 
                 'pcp.price',
 
                 DB::raw("'O' as sender_type"),
                 DB::raw("NULL as patient_type"),
             ])
-            ->get();
+            ->get()
+            ->groupBy('patient_point_id')
+            ->map(fn ($matches) => $matches->sortByDesc(
+                fn ($match) => $match->coverage_valid_from ?? '0000-00-00'
+            )->first())
+            ->values();
 
         $claimBatch = null;
         if ($claimBatchId > 0) {
@@ -278,9 +303,8 @@ class PointsExportController extends Controller
                 ->values()
                 ->all();
 
-            $rows = $claimBatch->lines
-                ->map(fn ($line) => (object) $line->snapshot)
-                ->values();
+            // Snapshot slúži na porovnanie N/O/A. Samotný export sa vždy skladá
+            // z aktuálnych údajov bodovania a historicky platného krytia k dátumu výkonu.
         }
 
         $companyName = $company?->name;
@@ -318,6 +342,7 @@ class PointsExportController extends Controller
             'performedBy' => $performedBy !== '' ? $performedBy : "User #{$userId}",
             'insuranceName' => $insurance?->name,
             'insuranceBranchCode' => $insurance?->branch_code,
+            'interfaceVersion' => $this->interfaceVersions->forDate(self::DATA_TYPE, $from),
         ];
     }
 
@@ -355,34 +380,35 @@ class PointsExportController extends Controller
             number_format((float) $workingTime, 2, '.', ''),
             $termYYYYMM,
             self::CARE_TYPE_ADOS,
-            $batchNumber,
+            $context['claimBatch']?->invoice_number ?? '',
             'EUR',
         ];
 
-        $lines = [
-            $this->formatTextLine($line1Fields, 9, 'Identifikácia dávky musí mať presne 9 polí.'),
-            $this->formatTextLine($line2Fields, 8, 'Záhlavie dávky musí mať presne 8 polí.'),
+        $records = [
+            ['fields' => $line1Fields, 'count' => 9],
+            ['fields' => $line2Fields, 'count' => 8],
         ];
 
         foreach ($rows as $index => $row) {
             $bodyFields = $this->build753dAdosBodyFields($row, $index + 1, $type);
 
-            $lines[] = $this->formatTextLine(
-                $bodyFields,
-                38,
-                'Veta tela dávky na riadku ' . ($index + 1) . ' musí mať presne 38 polí.'
-            );
+            $records[] = ['fields' => $bodyFields, 'count' => 38];
         }
 
-        return implode("\r\n", $lines) . "\r\n";
+        return $this->claimFileGenerator->generate($records);
     }
 
     private function build753dAdosBodyFields(object $row, int $rowNumber, string $type): array
     {
-        $isEuBatch = in_array($type, ['E', 'F', 'G'], true);
+        $resolved = $this->insuredResolver->resolve(
+            $row,
+            $this->insuredResolver->operationForCharacter($type)
+        );
 
         $dayDD = Carbon::parse($row->date)->format('d');
-        $requestDateYmd = Carbon::parse($row->request_date ?? $row->date)->format('Ymd');
+        $requestDateYmd = ! empty($row->request_date)
+            ? Carbon::parse($row->request_date)->format('Ymd')
+            : '';
 
         $patientName = $this->toAsciiString(
             trim(($row->last_name ?? '') . ' ' . ($row->first_name ?? '')),
@@ -392,7 +418,7 @@ class PointsExportController extends Controller
         return [
             $rowNumber,
             $dayDD,
-            $isEuBatch ? '' : $this->toAsciiString($row->personal_number ?? ''),
+            $this->toAsciiString($resolved->personalNumber ?? ''),
             $patientName,
             $this->toAsciiString($row->diagnosis_code ?? ''),
             $this->toAsciiString($row->procedure_code ?? ''),
@@ -409,9 +435,9 @@ class PointsExportController extends Controller
             $this->normalizeCode($row->sender_type ?? 'O'),
             $this->normalizeCode($row->doctor_pzs ?? ''),
             $this->normalizeCode($row->doctor_zpr ?? ''),
-            $isEuBatch ? $this->normalizeCode($row->country_code ?? '') : '',
-            $isEuBatch ? $this->toAsciiString($row->foreign_insured_id ?? '') : '',
-            $isEuBatch ? $this->normalizeCode($row->sex ?? '') : '',
+            $this->normalizeCode($resolved->memberStateCode ?? ''),
+            $this->toAsciiString($resolved->foreignInsuredId ?? ''),
+            $this->normalizeCode($resolved->sex ?? ''),
             $requestDateYmd,
             '',
             '',
@@ -564,6 +590,18 @@ class PointsExportController extends Controller
             $this->validate753dAdosRow($errors, $row, $index + 1, $type, $from, $to);
         }
 
+        if (in_array($type, ['I', 'J', 'K'], true)) {
+            $specialCategories = $rows->pluck('special_category')->filter()->unique();
+
+            if ($specialCategories->count() > 1) {
+                $this->addValidationError(
+                    $errors,
+                    'Osobitná dávka nesmie miešať rozdielne právne kategórie poistencov.',
+                    'batch:mixed_special_categories'
+                );
+            }
+        }
+
         $this->throwPointsValidationErrors($errors);
     }
 
@@ -578,7 +616,26 @@ class PointsExportController extends Controller
         $patientName = $this->formatPatientName($row);
         $patientLabel = $patientName !== '' ? $patientName : "pacient #{$row->patient_id}";
         $rowLabel = "{$patientLabel} / riadok {$rowNumber}";
-        $isEuBatch = in_array($type, ['E', 'F'], true);
+        $resolved = $this->insuredResolver->resolve(
+            $row,
+            $this->insuredResolver->operationForCharacter($type)
+        );
+
+        if ($resolved->character !== $type) {
+            $this->addValidationError(
+                $errors,
+                "Poistný režim pacienta {$patientLabel} patrí do dávky {$resolved->character}, nie {$type}.",
+                $this->patientErrorKey($row, 'incompatible_character')
+            );
+        }
+
+        foreach ($resolved->errors as $resolverError) {
+            $this->addValidationError(
+                $errors,
+                "{$resolverError} Pacient: {$patientLabel}.",
+                $this->patientErrorKey($row, 'insured_identification')
+            );
+        }
 
         $this->addMissingError(
             $errors,
@@ -620,71 +677,6 @@ class PointsExportController extends Controller
                 $errors,
                 "Meno poistenca môže mať maximálne 60 znakov: {$patientLabel}.",
                 $this->patientErrorKey($row, 'invalid_full_name_length')
-            );
-        }
-
-        if ($isEuBatch) {
-            $this->addMissingError(
-                $errors,
-                $row->country_code ?? null,
-                "Chýba členský štát poistenca: {$patientLabel}.",
-                $this->patientErrorKey($row, 'missing_country_code')
-            );
-
-            $this->addLengthBetweenError(
-                $errors,
-                $row->country_code ?? null,
-                1,
-                3,
-                "Členský štát poistenca musí mať 1 až 3 znaky: {$patientLabel}.",
-                $this->patientErrorKey($row, 'invalid_country_code_length')
-            );
-
-            $this->addMissingError(
-                $errors,
-                $row->personal_number ?? null,
-                "Chýba identifikačné číslo poistenca: {$patientLabel}.",
-                $this->patientErrorKey($row, 'missing_foreign_patient_number')
-            );
-
-            $this->addLengthBetweenError(
-                $errors,
-                $row->personal_number ?? null,
-                1,
-                20,
-                "Identifikačné číslo poistenca musí mať 1 až 20 znakov: {$patientLabel}.",
-                $this->patientErrorKey($row, 'invalid_foreign_patient_number_length')
-            );
-
-            $this->addMissingError(
-                $errors,
-                $row->sex ?? null,
-                "Chýba pohlavie poistenca: {$patientLabel}.",
-                $this->patientErrorKey($row, 'missing_sex')
-            );
-
-            $this->addPatternError(
-                $errors,
-                $row->sex ?? null,
-                '/^[MF]$/',
-                "Pohlavie poistenca musí byť M alebo F: {$patientLabel}.",
-                $this->patientErrorKey($row, 'invalid_sex')
-            );
-        } else {
-            $this->addMissingError(
-                $errors,
-                $row->personal_number ?? null,
-                "Chýba rodné číslo alebo BIČ pacienta: {$patientLabel}.",
-                $this->patientErrorKey($row, 'missing_personal_number')
-            );
-
-            $this->addLengthBetweenError(
-                $errors,
-                $row->personal_number ?? null,
-                9,
-                10,
-                "Rodné číslo alebo BIČ musí mať 9 až 10 znakov: {$patientLabel}.",
-                $this->patientErrorKey($row, 'invalid_personal_number_length')
             );
         }
 
@@ -1085,5 +1077,30 @@ class PointsExportController extends Controller
         }
 
         return Carbon::parse($value)->toDateString();
+    }
+
+    private function normalizedInsuredRows(array $context): array
+    {
+        $operation = $this->insuredResolver->operationForCharacter($context['type']);
+
+        return $context['rows']->values()->map(function (object $row, int $index) use ($operation) {
+            $resolved = $this->insuredResolver->resolve($row, $operation);
+
+            return [
+                'row' => $index + 1,
+                'patient_id' => $row->patient_id ?? null,
+                'service_date' => $row->date ?? null,
+                'character' => $resolved->character,
+                'regime' => $resolved->regime,
+                'identification_method' => $resolved->identificationMethod,
+                'used' => [
+                    'personal_number' => $resolved->personalNumber,
+                    'member_state_code' => $resolved->memberStateCode,
+                    'foreign_insured_id' => $resolved->foreignInsuredId,
+                    'sex' => $resolved->sex,
+                ],
+                'errors' => $resolved->errors,
+            ];
+        })->all();
     }
 }

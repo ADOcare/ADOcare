@@ -22,6 +22,7 @@ import { usePatientStore } from '@/stores/patientStore'
 import { useUiOverlayStore } from '@/stores/uiOverlay'
 import ModalProvider from './components/ModalProvider.vue'
 import useDeathCheck from '@/composables/useDeathCheck'
+import useInsuranceCheck from '@/composables/useInsuranceCheck'
 
 const router = useRouter()
 const route = useRoute()
@@ -30,7 +31,7 @@ const uiStore = useUiOverlayStore()
 const { contentLoading } = storeToRefs(uiStore)
 const toast = useToast()
 const patientStore = usePatientStore()
-const { current: currentPatient } = storeToRefs(patientStore)
+const { current: currentPatient, selectionVersion: patientSelectionVersion } = storeToRefs(patientStore)
 const ROUTES_TOAST_GROUP = 'kilometers-routes-toast'
 const TIMELINE_CALC_TOAST_GROUP = 'timeline-calculation-toast'
 
@@ -39,6 +40,14 @@ useDeathCheck({
     auth,
     patientStore,
     currentPatient,
+    toast,
+})
+
+useInsuranceCheck({
+    auth,
+    patientStore,
+    currentPatient,
+    selectionVersion: patientSelectionVersion,
     toast,
 })
 

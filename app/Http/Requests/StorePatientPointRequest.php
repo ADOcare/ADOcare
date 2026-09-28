@@ -15,7 +15,7 @@ class StorePatientPointRequest extends FormRequest
     {
         return [
             'date' => ['required', 'date'],
-            'patient_personal_number' => ['required', 'string', 'max:255'],
+            'patient_personal_number' => ['nullable', 'string', 'max:255'],
             'patient_name' => ['required', 'string', 'max:255'],
             'patient_id' => ['nullable', 'integer'],
 

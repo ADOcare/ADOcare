@@ -9,12 +9,17 @@ use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use App\Services\Claims\InsuredClaimResolver;
 
 class PointClaimSelectionService
 {
     private const NEW_TYPES = ['N', 'E', 'I'];
     private const CORRECTIVE_TYPES = ['O', 'F', 'J'];
     private const ADDITIVE_TYPES = ['A', 'G', 'K'];
+
+    public function __construct(private InsuredClaimResolver $insuredResolver)
+    {
+    }
 
     public function candidates(array $data, User $actor): array
     {
@@ -29,9 +34,6 @@ class PointClaimSelectionService
 
         if (in_array($context['batch_type'], self::CORRECTIVE_TYPES, true)) {
             $correctableLines = $this->correctableLines($context);
-            $rows = $rows
-                ->filter(fn (object $row) => $correctableLines->has((int) $row->patient_point_id))
-                ->values();
             $baseNewBatch = $this->baseNewBatch($context);
         } elseif (in_array($context['batch_type'], self::ADDITIVE_TYPES, true)) {
             $baseNewBatch = $this->baseNewBatch($context);
@@ -263,11 +265,14 @@ class PointClaimSelectionService
                 'p.longitude',
                 'pc.id as coverage_id',
                 'pc.regime',
+                'pc.identification_method',
+                'pc.category',
                 'pc.member_state_code',
                 'pc.foreign_insured_id',
                 'pc.special_category',
                 'pc.entitlement_document_type',
                 'pc.entitlement_document_number',
+                'pc.entitlement_confirmed',
                 'd.pzs as current_doctor_pzs',
                 'd.zpr as current_doctor_zpr',
                 'pcp.price',
@@ -279,10 +284,19 @@ class PointClaimSelectionService
 
     private function correctableLines(array $context): Collection
     {
+        $lineageTypes = match ($context['batch_type']) {
+            'O' => ['N', 'O'],
+            'F' => ['E', 'F'],
+            'J' => ['I', 'J'],
+            default => [],
+        };
+
         $lines = DB::table('point_claim_lines as line')
             ->join('point_claim_batches as batch', 'batch.id', '=', 'line.batch_id')
             ->where('batch.healthcare_worker_id', $context['healthcare_worker_id'])
             ->where('batch.insurance_company_id', $context['insurance_company_id'])
+            ->whereDate('batch.accounting_period', $context['accounting_period'])
+            ->whereIn('batch.batch_type', $lineageTypes)
             ->whereNull('batch.deleted_at')
             ->whereNotExists(function ($query) {
                 $query->selectRaw('1')
@@ -345,12 +359,18 @@ class PointClaimSelectionService
     private function blockingReasons(object $row, string $batchType): array
     {
         $reasons = [];
+        $resolved = $this->insuredResolver->resolve(
+            $row,
+            $this->insuredResolver->operationForCharacter($batchType)
+        );
 
         if (blank($row->first_name) || blank($row->last_name)) {
             $reasons[] = 'Pacient nemá vyplnené meno a priezvisko.';
         }
-        if (blank($row->personal_number) && blank($row->foreign_insured_id)) {
-            $reasons[] = 'Chýba rodné číslo alebo zahraničné identifikačné číslo poistenca.';
+        array_push($reasons, ...$resolved->errors);
+
+        if ($resolved->character !== $batchType) {
+            $reasons[] = "Poistný vzťah patrí do dávky {$resolved->character}.";
         }
         if (blank($row->diagnosis_code)) {
             $reasons[] = 'Chýba diagnóza.';
@@ -364,14 +384,7 @@ class PointClaimSelectionService
         if ($row->price === null) {
             $reasons[] = 'Pre výkon nie je nastavená cena pre vybranú poisťovňu.';
         }
-        if (in_array($batchType, ['E', 'F', 'G'], true) && blank($row->member_state_code)) {
-            $reasons[] = 'Chýba štát poistenia.';
-        }
-        if (in_array($batchType, ['I', 'J', 'K'], true) && blank($row->special_category)) {
-            $reasons[] = 'Chýba osobitná kategória poistenia.';
-        }
-
-        return $reasons;
+        return array_values(array_unique($reasons));
     }
 
     private function regimeFor(string $batchType): string

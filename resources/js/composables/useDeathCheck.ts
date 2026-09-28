@@ -16,7 +16,7 @@ type AuthStore = {
 
 type PatientStore = {
     checkPatientDeath(patientId: number): Promise<PatientDeathCheckResult>
-    persistPatientData(patient: Patient): Promise<Patient>
+    persistPatientData(patient: Patient, selected?: boolean): Promise<Patient>
 }
 
 type UseDeathCheckOptions = {
@@ -128,7 +128,7 @@ export default function useDeathCheck(options: UseDeathCheckOptions) {
                     deathUpdateInProgress.value = true
                     try {
                         currentPatient.value.death_date = deathDate
-                        await patientStore.persistPatientData(currentPatient.value)
+                        await patientStore.persistPatientData(currentPatient.value, false)
                     } finally {
                         deathUpdateInProgress.value = false
                     }

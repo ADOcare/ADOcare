@@ -64,6 +64,7 @@ import { openPatientDocumentsModal, openPatientEditModal } from '@/helpers/modal
 import { formatBranchFullName, formatUserFullName } from '@/utils/formatUtils'
 import api from '@/services/api'
 import Select from 'primevue/select'
+import { useToast } from 'primevue/usetoast'
 
 interface Props {
     endpointUrl: string
@@ -74,6 +75,7 @@ const endpointUrl = computed(() => props.endpointUrl)
 
 const patientStore = usePatientStore()
 const { openModal } = useModal()
+const toast = useToast()
 const authStore = useAuthStore()
 const canDeletePatients = computed(() => !!authStore.currentRole)
 const branchId = computed(() => authStore.currentBranch?.id ?? null)
@@ -171,8 +173,27 @@ async function restorePatients(rows: Patient[], remote?: RemoteTableReturn) {
     const ids = rows.filter((row) => row.deleted_at).map((row) => row.id)
     if (!ids.length) return
 
-    await api.post('/v1/patients/restore', { ids })
-    remote?.reload?.()
+    try {
+        await api.post('/v1/patients/restore', { ids })
+        toast.add({
+            severity: 'success',
+            summary: 'Pacienti boli obnovení',
+            detail: 'Vybraní pacienti boli úspešne obnovení.',
+            life: 4000,
+        })
+        remote?.reload?.()
+    } catch (error: any) {
+        const personalNumberError = error?.response?.data?.errors?.personal_number?.[0]
+
+        toast.add({
+            severity: 'error',
+            summary: personalNumberError ? 'Pacienta nemožno obnoviť' : 'Obnovenie sa nepodarilo',
+            detail: personalNumberError
+                ?? error?.response?.data?.message
+                ?? 'Vybraných pacientov sa nepodarilo obnoviť.',
+            life: personalNumberError ? 10000 : 6000,
+        })
+    }
 }
 
 async function deletePatients(rows: Patient[], remote?: RemoteTableReturn) {

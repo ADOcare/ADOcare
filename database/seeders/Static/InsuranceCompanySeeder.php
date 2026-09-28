@@ -14,7 +14,7 @@ class InsuranceCompanySeeder extends Seeder
 
         $defaults = [
             [
-                'code' => 'VZP',
+                'code' => '25',
                 'name' => 'Všeobecná zdravotná poisťovňa, a. s.',
                 'address' => 'Panónska cesta 2',
                 'city' => 'Bratislava',
@@ -23,10 +23,9 @@ class InsuranceCompanySeeder extends Seeder
                 'dic' => '2022027040',
                 'ic_dph' => 'SK2022027040',
                 'register' => 'Obchodný register Mestského súdu Bratislava III, oddiel: Sa, vložka č. 3602/B',
-                'branch_code' => '25',
             ],
             [
-                'code' => 'DOVERA',
+                'code' => '24',
                 'name' => 'DÔVERA zdravotná poisťovňa, a. s.',
                 'address' => 'Einsteinova 25 ',
                 'city' => 'Bratislava',
@@ -35,10 +34,9 @@ class InsuranceCompanySeeder extends Seeder
                 'dic' => '2022051130',
                 'ic_dph' => 'SK2022051130',
                 'register' => 'Obchodný register Mestského súdu Bratislava III, oddiel: Sa, vložka č. 3627/B',
-                'branch_code' => '24',
             ],
             [
-                'code' => 'UNION',
+                'code' => '27',
                 'name' => 'Union zdravotná poisťovňa, a.s.',
                 'address' => 'Karadžičova 10',
                 'city' => 'Bratislava',
@@ -46,7 +44,6 @@ class InsuranceCompanySeeder extends Seeder
                 'ico' => '36284831',
                 'dic' => '2022152517',
                 'ic_dph' => 'SK712000136',
-                'branch_code' => '27',
             ]
         ];
 

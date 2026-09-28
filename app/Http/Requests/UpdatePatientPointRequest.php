@@ -20,7 +20,7 @@ class UpdatePatientPointRequest extends FormRequest
     {
         return [
             'date' => ['sometimes', 'required', 'date'],
-            'patient_personal_number' => ['sometimes', 'required', 'string', 'max:255'],
+            'patient_personal_number' => ['sometimes', 'nullable', 'string', 'max:255'],
             'patient_name' => ['sometimes', 'required', 'string', 'max:255'],
             'patient_id' => ['sometimes', 'required', 'integer'],
 

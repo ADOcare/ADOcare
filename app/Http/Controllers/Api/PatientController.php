@@ -45,7 +45,12 @@ class PatientController extends Controller
         $results = ApiQuery::apply(
             $request,
             $query,
-            searchable: ['first_name', 'last_name', 'personal_number'],
+            searchable: [
+                'first_name',
+                'last_name',
+                'personal_number',
+                'latestCoverage' => ['foreign_insured_id'],
+            ],
             allowedFilters: ['sex'],
             defaults: ['sort' => 'last_name']
         );
@@ -155,7 +160,7 @@ class PatientController extends Controller
             return $this->error('Neplatny payload.', 422);
         }
 
-        Patient::withTrashed()->whereIn('id', $ids)->restore();
+        $this->service->restoreManyByIds($ids);
 
         return $this->success(null, 'Pacienti boli uspesne obnoveni.');
     }

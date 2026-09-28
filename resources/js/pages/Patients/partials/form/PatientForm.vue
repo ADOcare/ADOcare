@@ -4,7 +4,12 @@ import AddressAutocomplete from '@/components/Address/AddressAutocomplete.vue'
 import MapSelector from '@/components/Address/MapSelector.vue'
 import { useAddressForm } from '@/composables/address'
 import useAuthStore from '@/stores/auth'
+import {
+    usePatientStore,
+    type PatientInsuranceCheckResult,
+} from '@/stores/patientStore'
 import { useApi } from '@/composables/useApi'
+import { useToast } from 'primevue/usetoast'
 import type { Branch, Doctor, InsuranceCompany, Patient, User } from '@/types/models'
 import { formatBranchFullName, formatUserFullName } from '@/utils/formatUtils'
 import PatientCoverageFields from './PatientCoverageFields.vue'
@@ -33,6 +38,8 @@ const submitted = computed(() => !!props.submitted)
 const errors = computed(() => props.errors ?? {})
 
 const authStore = useAuthStore()
+const patientStore = usePatientStore()
+const toast = useToast()
 const { list, listScoped } = useApi()
 
 const branchOptions = ref<Branch[]>([])
@@ -55,6 +62,295 @@ const sexOptions = [
 
 const doctorOptions = ref<{ id: number; name: string }[]>([])
 const insuranceOptions = ref<{ id: number; name: string }[]>([])
+const insuranceVerificationLoading = ref(false)
+const insurancePrefillLoading = ref(false)
+const lastInsurancePrefillKey = ref('')
+const insuranceVerificationBaseline = ref<{
+    patientId: number | null
+    firstName: string
+    lastName: string
+    personalNumber: string
+    regime: string | null
+    insuranceCompanyId: number | null
+} | null>(null)
+
+const insuranceVerificationHasUnsavedChanges = computed(() => {
+    const baseline = insuranceVerificationBaseline.value
+
+    const currentPatientId = Number(localPatient.value.id || 0) || null
+
+    if (!baseline || baseline.patientId !== currentPatientId) {
+        return false
+    }
+
+    return baseline.firstName !== String(localPatient.value.first_name ?? '')
+        || baseline.lastName !== String(localPatient.value.last_name ?? '')
+        || baseline.personalNumber !== String(localPatient.value.personal_number ?? '')
+        || baseline.regime !== (localPatient.value.coverage.regime ?? null)
+        || baseline.insuranceCompanyId !== (localPatient.value.coverage.insurance_company_id ?? null)
+})
+
+const canPrefillInsurance = computed(() => {
+    const personalNumber = String(localPatient.value.personal_number ?? '').replace(/\D+/g, '')
+    const regime = localPatient.value.coverage.regime
+
+    return [9, 10].includes(personalNumber.length)
+        && !!String(localPatient.value.first_name ?? '').trim()
+        && !!String(localPatient.value.last_name ?? '').trim()
+        && (regime === null || ['domestic', 'unclassified'].includes(regime))
+})
+
+const canVerifyInsurance = computed(() => {
+    const personalNumber = String(localPatient.value.personal_number ?? '').replace(/\D+/g, '')
+
+    return [9, 10].includes(personalNumber.length)
+        && !!String(localPatient.value.first_name ?? '').trim()
+        && !!String(localPatient.value.last_name ?? '').trim()
+        && localPatient.value.coverage.regime === 'domestic'
+        && !!localPatient.value.coverage.insurance_company_id
+})
+
+function verificationCompanyLabel(
+    company: PatientInsuranceCheckResult['registered_insurance_company'],
+) {
+    if (!company) return 'nezistená poisťovňa'
+
+    return [company.name, company.code ? `(${company.code})` : null]
+        .filter(Boolean)
+        .join(' ')
+}
+
+function insuranceLookupErrorDetail(result: PatientInsuranceCheckResult) {
+    switch (result.reason) {
+        case 'configuration_missing':
+            return 'Laravel nenačítal EOVERENIE_EMAIL alebo EOVERENIE_PASSWORD. Vyčistite config cache a reštartujte PHP server.'
+        case 'authentication_failed':
+            return result.http_status
+                ? `Prihlásenie do eOverenia zlyhalo (HTTP ${result.http_status}). Skontrolujte prihlasovacie údaje.`
+                : 'Prihlásenie do eOverenia zlyhalo. Skontrolujte prihlasovacie údaje.'
+        case 'authentication_not_attempted':
+            return 'PHP worker nevykonal prihlásenie do eOverenia. Vyčistite Laravel config cache a reštartujte Herd.'
+        case 'connection_failed':
+            return 'Laravel server sa nedokázal pripojiť k eOvereniu. Skontrolujte internetové pripojenie, DNS a TLS certifikáty servera.'
+        case 'unexpected_response':
+            return result.http_status
+                ? `ÚDZS vrátil neočakávanú odpoveď (HTTP ${result.http_status}).`
+                : 'ÚDZS vrátil neočakávanú odpoveď.'
+        case 'invalid_response':
+            return 'ÚDZS odpovedal, ale odpoveď neobsahovala očakávané údaje.'
+        default:
+            return 'Služba eOverenie momentálne neposkytla použiteľnú odpoveď.'
+    }
+}
+
+async function verifyInsurance() {
+    if (!canVerifyInsurance.value || insuranceVerificationLoading.value) {
+        return
+    }
+
+    insuranceVerificationLoading.value = true
+
+    try {
+        const result = await patientStore.checkPatientInsuranceData({
+            personal_number: String(localPatient.value.personal_number ?? '').replace(/\D+/g, ''),
+            first_name: String(localPatient.value.first_name ?? '').trim(),
+            last_name: String(localPatient.value.last_name ?? '').trim(),
+            insurance_company_id: Number(localPatient.value.coverage.insurance_company_id),
+            regime: String(localPatient.value.coverage.regime),
+        })
+        localPatient.value.coverage.is_verified = result.is_verified
+
+        if (result.status === 'verified') {
+            insuranceVerificationBaseline.value = {
+                patientId: Number(localPatient.value.id || 0) || null,
+                firstName: String(localPatient.value.first_name ?? ''),
+                lastName: String(localPatient.value.last_name ?? ''),
+                personalNumber: String(localPatient.value.personal_number ?? ''),
+                regime: localPatient.value.coverage.regime,
+                insuranceCompanyId: localPatient.value.coverage.insurance_company_id,
+            }
+
+            toast.add({
+                severity: 'success',
+                summary: 'Poistenie bolo overené',
+                detail: `Pacient je poistencom ${verificationCompanyLabel(result.registered_insurance_company)}.`,
+                life: 5000,
+            })
+        } else if (result.status === 'mismatch') {
+            const savedCompany = verificationCompanyLabel(result.saved_insurance_company)
+            const registeredCompany = verificationCompanyLabel(result.registered_insurance_company)
+
+            toast.add({
+                severity: 'warn',
+                summary: 'Poisťovňa sa nezhoduje',
+                detail: `Vybraná poisťovňa: ${savedCompany}. ÚDZS: ${registeredCompany}.`,
+                life: 8000,
+            })
+        } else if (result.status === 'not_insured') {
+            toast.add({
+                severity: 'warn',
+                summary: 'Poistný vzťah nebol potvrdený',
+                detail: 'ÚDZS pre pacienta nepotvrdil aktuálny poistný vzťah.',
+                life: 8000,
+            })
+        } else if (result.status === 'duplicity') {
+            toast.add({
+                severity: 'warn',
+                summary: 'Duplicitný poistný vzťah',
+                detail: 'ÚDZS vrátil duplicitné údaje o poistení. Záznam pacienta je potrebné skontrolovať.',
+                life: 8000,
+            })
+        } else if (result.status === 'identity_mismatch') {
+            const registeredName = result.patient_name ?? 'iného pacienta'
+
+            toast.add({
+                severity: 'warn',
+                summary: 'Meno pacienta sa nezhoduje',
+                detail: `Pre zadané rodné číslo ÚDZS vrátil meno ${registeredName}. Skontrolujte rodné číslo a osobné údaje.`,
+                life: 8000,
+            })
+        } else if (result.status === 'not_applicable') {
+            toast.add({
+                severity: 'info',
+                summary: 'Overenie nie je dostupné',
+                detail: 'Automatické overenie je dostupné pre tuzemského poistenca.',
+                life: 5000,
+            })
+        } else {
+            toast.add({
+                severity: 'error',
+                summary: 'Overenie sa nepodarilo',
+                detail: insuranceLookupErrorDetail(result),
+                life: 7000,
+            })
+        }
+    } catch (error) {
+        console.error('[EOVERENIE] Manual insurance check failed', error)
+        toast.add({
+            severity: 'error',
+            summary: 'Overenie sa nepodarilo',
+            detail: 'Poistný vzťah sa nepodarilo overiť. Skúste to znova.',
+            life: 7000,
+        })
+    } finally {
+        insuranceVerificationLoading.value = false
+    }
+}
+
+async function prefillInsurance(force = false) {
+    const personalNumber = String(localPatient.value.personal_number ?? '').replace(/\D+/g, '')
+    const firstName = String(localPatient.value.first_name ?? '').trim()
+    const lastName = String(localPatient.value.last_name ?? '').trim()
+    const regime = localPatient.value.coverage.regime
+
+    if (
+        insurancePrefillLoading.value
+        || ![9, 10].includes(personalNumber.length)
+        || !firstName
+        || !lastName
+        || (regime !== null && !['domestic', 'unclassified'].includes(regime))
+    ) {
+        return
+    }
+
+    const requestKey = `${personalNumber}:${firstName}:${lastName}`.toLocaleLowerCase('sk-SK')
+
+    if (!force && lastInsurancePrefillKey.value === requestKey) {
+        return
+    }
+
+    insurancePrefillLoading.value = true
+    lastInsurancePrefillKey.value = requestKey
+
+    try {
+        const result = await patientStore.prefillPatientInsurance({
+            personal_number: personalNumber,
+            first_name: firstName,
+            last_name: lastName,
+        })
+
+        if (result.status === 'found') {
+            const company = result.registered_insurance_company
+
+            if (!result.local_insurance_company_found || !company?.id) {
+                lastInsurancePrefillKey.value = ''
+                toast.add({
+                    severity: 'warn',
+                    summary: 'Poisťovňa nie je nakonfigurovaná',
+                    detail: `ÚDZS vrátil poisťovňu ${verificationCompanyLabel(company)}, ale jej kód nie je v databáze poisťovní.`,
+                    life: 8000,
+                })
+                return
+            }
+
+            localPatient.value.coverage = {
+                ...localPatient.value.coverage,
+                regime: 'domestic',
+                category: 'domestic',
+                identification_method: 'slovak_identifier',
+                insurance_company_id: company.id,
+                member_state_code: null,
+                foreign_insured_id: null,
+                special_category: null,
+                other_subtype: null,
+                legal_basis: null,
+                entitlement_confirmed: true,
+                entitlement_document_type: null,
+                entitlement_document_number: null,
+                valid_from: result.valid_from ?? null,
+                valid_to: result.valid_to ?? null,
+                is_verified: false,
+            }
+
+            toast.add({
+                severity: 'success',
+                summary: 'Poistenie bolo doplnené',
+                detail: `Poisťovňa ${verificationCompanyLabel(company)} bola načítaná z ÚDZS.`,
+                life: 5000,
+            })
+        } else if (result.status === 'identity_mismatch') {
+            toast.add({
+                severity: 'warn',
+                summary: 'Meno pacienta sa nezhoduje',
+                detail: `Pre zadané rodné číslo ÚDZS vrátil meno ${result.patient_name ?? 'iného pacienta'}. Poistenie nebolo doplnené.`,
+                life: 8000,
+            })
+        } else if (result.status === 'duplicity') {
+            toast.add({
+                severity: 'warn',
+                summary: 'Duplicitný poistný vzťah',
+                detail: 'ÚDZS vrátil duplicitné údaje. Poistenie nebolo automaticky doplnené.',
+                life: 8000,
+            })
+        } else if (result.status === 'not_insured') {
+            toast.add({
+                severity: 'warn',
+                summary: 'Poistný vzťah nebol potvrdený',
+                detail: 'Pre zadané rodné číslo nebol potvrdený aktuálny poistný vzťah.',
+                life: 8000,
+            })
+        } else {
+            lastInsurancePrefillKey.value = ''
+            toast.add({
+                severity: 'error',
+                summary: 'Poistenie sa nepodarilo načítať',
+                detail: insuranceLookupErrorDetail(result),
+                life: 7000,
+            })
+        }
+    } catch (error) {
+        lastInsurancePrefillKey.value = ''
+        console.error('[EOVERENIE] Automatic insurance prefill failed', error)
+        toast.add({
+            severity: 'error',
+            summary: 'Poistenie sa nepodarilo načítať',
+            detail: 'Skúste údaje načítať znova.',
+            life: 7000,
+        })
+    } finally {
+        insurancePrefillLoading.value = false
+    }
+}
 
 function doctorOptionLabel(doc: Partial<Doctor>) {
     return `${doc.title ?? ''} ${doc.first_name ?? ''} ${doc.last_name ?? ''}`.replace(/\s+/g, ' ').trim()
@@ -232,13 +528,6 @@ watch(
     },
 )
 
-// -------------------- Personal number --------------------
-function onPersonalNumberInput(e: Event) {
-    const input = e.target as HTMLInputElement
-    const digitsOnly = input.value.replace(/\D+/g, '')
-    localPatient.value.personal_number = digitsOnly
-}
-
 watch(
     () => localPatient.value.personal_number,
     (val) => {
@@ -246,7 +535,13 @@ watch(
             return
         }
 
-        const clean = val.replace(/\D+/g, '')
+        if (localPatient.value.coverage?.category !== 'domestic') {
+            return
+        }
+
+        const clean = /[A-Za-z]/.test(val)
+            ? val.replace(/\s+/g, '').toUpperCase()
+            : val.replace(/\D+/g, '')
 
         if (val !== clean) {
             localPatient.value.personal_number = clean
@@ -458,6 +753,17 @@ watch(
         const next = normalizePatientCoverage(p)
         localPatient.value = next
 
+        if (insuranceVerificationBaseline.value?.patientId !== Number(next.id || 0)) {
+            insuranceVerificationBaseline.value = {
+                patientId: Number(next.id || 0) || null,
+                firstName: String(next.first_name ?? ''),
+                lastName: String(next.last_name ?? ''),
+                personalNumber: String(next.personal_number ?? ''),
+                regime: next.coverage.regime,
+                insuranceCompanyId: next.coverage.insurance_company_id,
+            }
+        }
+
         addressEntity.value = { ...next, psc: next.zip }
         initAddressForm()
 
@@ -469,6 +775,21 @@ watch(
         }
     },
     { immediate: true },
+)
+
+watch(
+    () => [
+        localPatient.value.first_name,
+        localPatient.value.last_name,
+        localPatient.value.personal_number,
+        localPatient.value.coverage.regime,
+        localPatient.value.coverage.insurance_company_id,
+    ],
+    () => {
+        if (insuranceVerificationHasUnsavedChanges.value) {
+            localPatient.value.coverage.is_verified = false
+        }
+    },
 )
 
 watch(
@@ -546,6 +867,7 @@ defineExpose({
                     fluid
                     :invalid="submitted && !localPatient.first_name"
                     :class="{ 'bg-transparent!': disabled, 'opacity-50!': disabled }"
+                    @blur="prefillInsurance()"
                 />
                 <small v-if="submitted && errors.first_name" class="text-danger">{{ errors.first_name }}</small>
             </div>
@@ -560,6 +882,7 @@ defineExpose({
                     fluid
                     :invalid="submitted && !localPatient.last_name"
                     :class="{ 'bg-transparent!': disabled, 'opacity-50!': disabled }"
+                    @blur="prefillInsurance()"
                 />
                 <small v-if="submitted && errors.last_name" class="text-danger">{{ errors.last_name }}</small>
             </div>
@@ -574,26 +897,6 @@ defineExpose({
                     fluid
                     :class="{ 'opacity-50!': disabled }"
                 />
-            </div>
-
-            <div class="col-span-4">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Rodné číslo
-                </label>
-                <InputText
-                    :disabled="disabled"
-                    v-model="localPatient.personal_number"
-                    maxlength="11"
-                    inputmode="numeric"
-                    pattern="[0-9]*"
-                    fluid
-                    :invalid="submitted && !localPatient.personal_number"
-                    :class="{ 'opacity-50!': disabled }"
-                    @input="onPersonalNumberInput"
-                />
-                <small v-if="submitted && errors.personal_number" class="text-danger">
-                    {{ errors.personal_number }}
-                </small>
             </div>
 
             <div class="col-span-2">
@@ -672,11 +975,19 @@ defineExpose({
 
         <PatientCoverageFields
             v-model="localPatient.coverage"
+            v-model:personal-number="localPatient.personal_number"
             :insurance-companies="insuranceOptions"
             :errors="errors"
-            :allow-unclassified="localPatient.coverage?.regime === 'unclassified'"
             :disabled="disabled"
+            :sex="localPatient.sex"
+            :verifying="insuranceVerificationLoading"
+            :loading-insurance="insurancePrefillLoading"
+            :can-load-insurance="canPrefillInsurance"
+            :can-verify-insurance="canVerifyInsurance"
+            :verification-has-unsaved-changes="insuranceVerificationHasUnsavedChanges"
             @clear-error="emit('clear-error', $event)"
+            @verify="verifyInsurance"
+            @load-insurance="prefillInsurance(true)"
         />
 
         <div class="grid grid-cols-12 gap-4">

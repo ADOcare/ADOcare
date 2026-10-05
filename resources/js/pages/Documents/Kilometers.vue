@@ -14,7 +14,7 @@ const uiOverlayStore = useUiOverlayStore()
 
 const loading = ref(false)
 
-const batchNumber = computed(() => Number(route.query.batchNumber ?? 0))
+const batchNumber = computed(() => String(route.query.batchNumber ?? ''))
 
 const patientIds = computed<number[]>(() => {
     const raw = route.query.patientIds
@@ -36,7 +36,6 @@ function buildPayload() {
     const period1 = String(route.query.period1 ?? route.query.periodTo ?? '')
 
     return {
-        batchNumber: batchNumber.value,
         batchType: { code: String(route.query.batchTypeCode ?? 'N') },
         insurance: { id: Number(route.query.insuranceId ?? 0) },
         period: [period0, period1],

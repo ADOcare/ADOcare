@@ -4,10 +4,8 @@ import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
 import type { InsuranceCompany } from '@/types/models'
-import {
-    getPatientIdentifier,
-    type PatientWithCoverage,
-} from '@/stores/patientStore'
+import type { PatientWithCoverage } from '@/stores/patientStore'
+import { getPatientIdentifier } from '@/utils/patientIdentifier'
 import { useAuthStore } from '@/stores/auth'
 import { useUiOverlayStore } from '@/stores/uiOverlay'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'

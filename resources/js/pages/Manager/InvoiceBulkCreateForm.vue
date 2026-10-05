@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
+import {
+    automaticInvoiceDates,
+    defaultInvoiceDueDate,
+    formatSlovakDate,
+    latestInvoiceIssueDate,
+    serviceDeliveryDate,
+    toApiDate,
+    validateInvoiceDates,
+} from '@/utils/invoiceDates'
 
 type InsuranceCompanyOption = {
   id: number
@@ -15,6 +24,35 @@ const saving = ref(false)
 const loadingCompanies = ref(false)
 const period = ref<Date | null>(props.initialPeriod ?? null)
 const insuranceCompanies = ref<InsuranceCompanyOption[]>([])
+const now = new Date()
+const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+const issuedAt = ref<Date | null>(today)
+const sentAt = ref<Date | null>(today)
+const dueDate = ref<Date | null>(null)
+const deliveryDate = computed(() => serviceDeliveryDate(period.value))
+const latestIssueDate = computed(() => latestInvoiceIssueDate(period.value))
+
+watch(
+  period,
+  (selectedPeriod) => {
+    if (!selectedPeriod) {
+      issuedAt.value = null
+      sentAt.value = null
+      dueDate.value = null
+      return
+    }
+
+    const automatic = automaticInvoiceDates(selectedPeriod)
+    issuedAt.value = automatic.issuedAt
+    sentAt.value = automatic.sentAt
+    dueDate.value = automatic.dueDate
+  },
+  { immediate: true },
+)
+
+watch(sentAt, (value) => {
+  dueDate.value = defaultInvoiceDueDate(value)
+})
 
 void loadInsuranceCompanies()
 
@@ -62,27 +100,75 @@ async function submit() {
     return
   }
 
+  const dateError = validateInvoiceDates(
+    period.value,
+    'procedures',
+    issuedAt.value,
+    sentAt.value,
+    dueDate.value,
+  )
+
+  if (dateError) {
+    toast.add({
+      severity: 'error',
+      summary: 'Nesprávne dátumy',
+      detail: dateError,
+      life: 5000,
+    })
+    return
+  }
+
   saving.value = true
 
   try {
     const invoiceTypes: Array<'procedures' | 'transport'> = ['procedures', 'transport']
-    const requests: Promise<unknown>[] = []
+    let successCount = 0
+    let failedCount = 0
+    let firstErrorMessage = ''
+    let stoppedEarly = false
 
     for (const company of insuranceCompanies.value) {
       for (const type of invoiceTypes) {
-        requests.push(
-          api.post('/v1/invoices', {
+        try {
+          await api.post('/v1/invoices', {
             insurance_company_id: company.id,
             period: periodValue,
             type,
+            issued_at: toApiDate(issuedAt.value),
+            sent_at: toApiDate(sentAt.value),
+            due_date: toApiDate(dueDate.value),
           })
-        )
+
+          successCount += 1
+        } catch (error: any) {
+          failedCount += 1
+
+          const responseData = error?.response?.data
+          const validationErrors = responseData?.errors
+          const validationMessage = validationErrors && typeof validationErrors === 'object'
+            ? Object.values(validationErrors).flat().map(String)[0]
+            : null
+
+          firstErrorMessage = validationMessage
+            ?? responseData?.message
+            ?? 'Nepodarilo sa vytvoriť faktúru.'
+
+          console.error('Bulk invoice create failed', {
+            companyId: company.id,
+            type,
+            status: error?.response?.status,
+            response: responseData,
+          })
+
+          stoppedEarly = true
+          break
+        }
+      }
+
+      if (stoppedEarly) {
+        break
       }
     }
-
-    const results = await Promise.allSettled(requests)
-    const successCount = results.filter((r) => r.status === 'fulfilled').length
-    const failedCount = results.length - successCount
 
     if (failedCount === 0) {
       toast.add({
@@ -93,10 +179,10 @@ async function submit() {
       })
     } else {
       toast.add({
-        severity: 'warn',
-        summary: 'Dokončené s chybami',
-        detail: `Vytvorených faktúr: ${successCount}, neúspešných: ${failedCount}.`,
-        life: 5000,
+        severity: 'error',
+        summary: 'Vytváranie bolo zastavené',
+        detail: firstErrorMessage,
+        life: 15000,
       })
     }
 
@@ -122,6 +208,55 @@ async function submit() {
         class="w-full"
         inputClass="w-full!"
       />
+    </div>
+
+    <div class="col-span-12">
+      <label class="block text-normal mb-1">Dátum dodania služby</label>
+      <InputText :model-value="formatSlovakDate(deliveryDate)" disabled fluid />
+      <small class="text-muted">Automaticky posledný deň vybraného mesiaca.</small>
+    </div>
+
+    <div class="col-span-12 md:col-span-6">
+      <label class="block text-normal mb-1">Dátum vystavenia *</label>
+      <DatePicker
+        v-model="issuedAt"
+        dateFormat="dd.mm.yy"
+        :manualInput="false"
+        :minDate="deliveryDate ?? undefined"
+        :maxDate="latestIssueDate ?? undefined"
+        class="w-full"
+        inputClass="w-full!"
+      />
+      <small v-if="latestIssueDate" class="text-muted">
+        Najneskôr {{ formatSlovakDate(latestIssueDate) }}.
+      </small>
+    </div>
+
+    <div class="col-span-12 md:col-span-6">
+      <label class="block text-normal mb-1">Dátum odoslania *</label>
+      <DatePicker
+        v-model="sentAt"
+        dateFormat="dd.mm.yy"
+        :manualInput="false"
+        :minDate="issuedAt ?? undefined"
+        class="w-full"
+        inputClass="w-full!"
+      />
+    </div>
+
+    <div class="col-span-12">
+      <label class="block text-normal mb-1">Dátum splatnosti *</label>
+      <DatePicker
+        v-model="dueDate"
+        dateFormat="dd.mm.yy"
+        :manualInput="false"
+        :minDate="issuedAt ?? undefined"
+        class="w-full"
+        inputClass="w-full!"
+      />
+      <small class="text-muted">
+        Automaticky 30 dní od odoslania; upravte podľa zmluvy s poisťovňou.
+      </small>
     </div>
 
     <div class="col-span-12 mt-4 flex items-center justify-end gap-2">

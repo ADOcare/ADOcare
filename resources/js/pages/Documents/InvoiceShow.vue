@@ -74,6 +74,7 @@ const formattedTotal = computed(() => {
 const issueDate = computed(() => formatDate(invoice.value?.invoice_created_at ?? ''))
 const deliveryDate = computed(() => formatDate(invoice.value?.services_delivered_at ?? ''))
 const sentDate = computed(() => formatDate(invoice.value?.invoice_sent_at ?? ''))
+const dueDate = computed(() => formatDate(invoice.value?.due_date ?? ''))
 
 const periodLabel = computed(() => {
     const period = invoice.value?.period ?? ''
@@ -208,7 +209,7 @@ watchEffect(() => {
                             <div class="text-sm text-right">
                                 <div><strong>Konštatný symbol: </strong> {{ invoice.constant_symbol || '' }}</div>
                                 <div><strong>Spôsob úhrady:</strong> {{ invoice.payment_method || '' }}</div>
-                                <div><strong>Dátum splatnosti:</strong> {{ invoice.due_date || '' }}</div>
+                                <div><strong>Dátum splatnosti:</strong> {{ dueDate || '' }}</div>
                             </div>
                         </div>
 

@@ -2,6 +2,16 @@
 import { computed, ref, watch } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
+import {
+    automaticInvoiceDates,
+    defaultInvoiceDueDate,
+    formatSlovakDate,
+    latestInvoiceIssueDate,
+    parseApiDate,
+    serviceDeliveryDate,
+    toApiDate,
+    validateInvoiceDates,
+} from '@/utils/invoiceDates'
 
 type InsuranceCompanyOption = {
     id: number
@@ -16,6 +26,9 @@ type InvoicePayload = {
     total?: number
     amount: number | null
     related_invoice_id: number | null
+    issued_at: Date | null
+    sent_at: Date | null
+    due_date: Date | null
 }
 
 type RelatedInvoiceOption = {
@@ -41,6 +54,8 @@ const insuranceCompanies = ref<InsuranceCompanyOption[]>([])
 const relatedInvoices = ref<RelatedInvoiceOption[]>([])
 const saving = ref(false)
 const loadingOptions = ref(false)
+const today = new Date()
+const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 
 const local = ref<InvoicePayload>({
     insurance_company_id: null,
@@ -48,11 +63,17 @@ const local = ref<InvoicePayload>({
     type: null,
     amount: null,
     related_invoice_id: null,
+    issued_at: todayDate,
+    sent_at: todayDate,
+    due_date: null,
 })
 
 const isCreditNote = computed(() => local.value.type === 'credit_note')
 const isDebitNote = computed(() => local.value.type === 'debit_note')
 const isNoteType = computed(() => isCreditNote.value || isDebitNote.value)
+const isMonthlyService = computed(() => ['procedures', 'transport'].includes(local.value.type ?? ''))
+const deliveryDate = computed(() => serviceDeliveryDate(local.value.period))
+const latestIssueDate = computed(() => latestInvoiceIssueDate(local.value.period))
 
 const selectedRelatedInvoice = computed(() => {
     if (!local.value.related_invoice_id) return null
@@ -80,6 +101,9 @@ watch(
             type: v?.type ?? null,
             amount: typeof v?.total === 'number' ? Math.abs(v.total) : null,
             related_invoice_id: (v as any)?.related_invoice_id ?? null,
+            issued_at: parseApiDate((v as any)?.issued_at) ?? todayDate,
+            sent_at: parseApiDate((v as any)?.sent_at) ?? todayDate,
+            due_date: parseApiDate((v as any)?.due_date),
         }
     },
     { immediate: true }
@@ -172,6 +196,29 @@ watch(
 )
 
 watch(
+    () => local.value.period,
+    (period) => {
+        if (local.value.id || !period) {
+            return
+        }
+
+        const automatic = automaticInvoiceDates(period)
+        local.value.issued_at = automatic.issuedAt
+        local.value.sent_at = automatic.sentAt
+        local.value.due_date = automatic.dueDate
+    },
+)
+
+watch(
+    () => local.value.sent_at,
+    (sentAt) => {
+        if (!local.value.id) {
+            local.value.due_date = defaultInvoiceDueDate(sentAt)
+        }
+    },
+)
+
+watch(
     () => local.value.related_invoice_id,
     () => {
         const related = selectedRelatedInvoice.value
@@ -247,12 +294,33 @@ async function save() {
         return
     }
 
+    const dateError = validateInvoiceDates(
+        local.value.period,
+        local.value.type,
+        local.value.issued_at,
+        local.value.sent_at,
+        local.value.due_date,
+    )
+
+    if (dateError) {
+        toast.add({
+            severity: 'error',
+            summary: 'Nesprávne dátumy',
+            detail: dateError,
+            life: 5000,
+        })
+        return
+    }
+
     saving.value = true
 
     try {
         const payload: Record<string, unknown> = {
             period,
             type: local.value.type,
+            issued_at: toApiDate(local.value.issued_at),
+            sent_at: toApiDate(local.value.sent_at),
+            due_date: toApiDate(local.value.due_date),
         }
 
         if (local.value.insurance_company_id) {
@@ -288,10 +356,15 @@ async function save() {
     } catch (err) {
         console.error('Save invoice failed', err)
 
+        const responseErrors = (err as any)?.response?.data?.errors
+        const firstMessage = responseErrors && typeof responseErrors === 'object'
+            ? Object.values(responseErrors).flat().map(String)[0]
+            : null
+
         toast.add({
             severity: 'error',
             summary: 'Chyba',
-            detail: 'Nepodarilo sa uložiť faktúru.',
+            detail: firstMessage ?? 'Nepodarilo sa uložiť faktúru.',
             life: 4000,
         })
     } finally {
@@ -352,6 +425,61 @@ async function save() {
                 class="w-full"
                 inputClass="w-full!"
             />
+        </div>
+
+        <div v-if="isMonthlyService" class="col-span-12">
+            <label class="block text-normal mb-1">Dátum dodania služby</label>
+            <InputText
+                :model-value="formatSlovakDate(deliveryDate)"
+                disabled
+                fluid
+            />
+            <small class="text-muted">
+                Automaticky posledný deň vybraného mesiaca.
+            </small>
+        </div>
+
+        <div class="col-span-12 md:col-span-6">
+            <label class="block text-normal mb-1">Dátum vystavenia *</label>
+            <DatePicker
+                v-model="local.issued_at"
+                dateFormat="dd.mm.yy"
+                :manualInput="false"
+                :minDate="isMonthlyService ? deliveryDate : undefined"
+                :maxDate="isMonthlyService ? latestIssueDate : undefined"
+                class="w-full"
+                inputClass="w-full!"
+            />
+            <small v-if="isMonthlyService && latestIssueDate" class="text-muted">
+                Najneskôr {{ formatSlovakDate(latestIssueDate) }}.
+            </small>
+        </div>
+
+        <div class="col-span-12 md:col-span-6">
+            <label class="block text-normal mb-1">Dátum odoslania *</label>
+            <DatePicker
+                v-model="local.sent_at"
+                dateFormat="dd.mm.yy"
+                :manualInput="false"
+                :minDate="local.issued_at ?? undefined"
+                class="w-full"
+                inputClass="w-full!"
+            />
+        </div>
+
+        <div class="col-span-12">
+            <label class="block text-normal mb-1">Dátum splatnosti *</label>
+            <DatePicker
+                v-model="local.due_date"
+                dateFormat="dd.mm.yy"
+                :manualInput="false"
+                :minDate="local.issued_at ?? undefined"
+                class="w-full"
+                inputClass="w-full!"
+            />
+            <small class="text-muted">
+                Automaticky 30 dní od odoslania; upravte podľa zmluvy s poisťovňou.
+            </small>
         </div>
 
         <div v-if="isNoteType" class="col-span-12">

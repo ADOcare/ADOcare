@@ -29,21 +29,6 @@ export type PatientWithCoverage = Patient & {
     coverage?: PatientCoverage | null
 }
 
-export function getPatientIdentifier(patient: PatientWithCoverage | null | undefined): string {
-    if (!patient) {
-        return ''
-    }
-
-    const personalNumber = String(patient.personal_number ?? '').trim()
-    const foreignInsuredId = String(patient.coverage?.foreign_insured_id ?? '').trim()
-
-    if (patient.coverage?.identification_method === 'foreign_triad') {
-        return foreignInsuredId
-    }
-
-    return personalNumber
-}
-
 type InsuranceCompanyVerification = {
     id: number | null
     code: string | null

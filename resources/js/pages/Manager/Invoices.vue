@@ -23,6 +23,9 @@ type InvoiceRow = {
   period?: string
   total?: number
   invoice_number?: string
+  issued_at?: string | null
+  sent_at?: string | null
+  due_date?: string | null
   type?: string
   related_invoice_number?: string
 }

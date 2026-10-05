@@ -19,8 +19,17 @@ class Invoice extends Model
         'type',
         'total',
         'invoice_number',
+        'issued_at',
+        'sent_at',
+        'due_date',
         'related_invoice_id',
         'mime_type',
+    ];
+
+    protected $casts = [
+        'issued_at' => 'date',
+        'sent_at' => 'date',
+        'due_date' => 'date',
     ];
 
     public function user()

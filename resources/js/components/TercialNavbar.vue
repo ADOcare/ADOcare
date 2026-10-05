@@ -3,10 +3,10 @@ import { computed, ref, watch, useAttrs } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { openPatientDocumentsModal, openPatientEditModal, openScanDocumentModal } from '@/helpers/modalHelpers'
 import {
-    getPatientIdentifier,
     usePatientStore,
     type PatientWithCoverage,
 } from '@/stores/patientStore'
+import { getPatientIdentifier } from '@/utils/patientIdentifier'
 import { useAuthStore } from '@/stores/auth'
 
 defineOptions({ inheritAttrs: false })

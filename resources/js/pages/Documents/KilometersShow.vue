@@ -9,7 +9,7 @@ import DocumentShell, { type FileItem } from '@/components/DocumentShell.vue'
 
 type KilometersBatchPayload = {
     document_id: number
-    batchNumber: number
+    batchNumber: string
     batchType: { code: string }
     insurance: { id: number }
     period: string[]
@@ -66,7 +66,6 @@ function buildDownloadPayloadFromStored(p: any) {
     const userId = Number(p.user?.id || p.user_id || authStore.user?.id || 0)
     const companyId = p.company?.id || p.company_id || authStore.currentBranch?.company_id || null
 
-    const batchNumber = Number(p.batchNumber || p.batch_number || 0)
     const batchTypeCode = p.batchType?.code || p.batch_type_code || 'N'
 
     const normalizedPeriod = (p.period ?? [])
@@ -81,7 +80,6 @@ function buildDownloadPayloadFromStored(p: any) {
         .filter((x: any) => x.id > 0)
 
     return {
-        batchNumber,
         batchType: { code: batchTypeCode },
         insurance: { id: insuranceId },
         period: normalizedPeriod,

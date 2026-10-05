@@ -28,6 +28,7 @@ export interface Document {
   subtype: string | null
   insurance_company_id: number | null
   deleted_at: string | null
+  company_id: number | null
   // relations
   patient: Patient
   user: User
@@ -146,15 +147,9 @@ export interface PatientCoverage {
   patient_id: number
   insurance_company_id: number | null
   regime: PatientCoverageRegime
-  category: 'domestic' | 'eu' | 'non_eu' | 'homeless' | 'other'
-  identification_method: 'slovak_identifier' | 'foreign_triad' | 'incomplete'
   member_state_code: string | null
   foreign_insured_id: string | null
   special_category: PatientSpecialCoverageCategory | null
-  other_subtype: string | null
-  legal_basis: string | null
-  entitlement_confirmed: boolean
-  document_registered: boolean
   entitlement_document_type: string | null
   entitlement_document_number: string | null
   valid_from: string | null
@@ -162,6 +157,12 @@ export interface PatientCoverage {
   is_verified: boolean
   created_at: string | null
   updated_at: string | null
+  category: PatientCoverageCategory
+  identification_method: PatientIdentificationMethod
+  other_subtype: string | null
+  legal_basis: string | null
+  entitlement_confirmed: boolean
+  document_registered: boolean
   // relations
   patient: Patient
   insurance_company: InsuranceCompany
@@ -210,6 +211,31 @@ export interface TextBlock {
   visits_count: number
   // exists
   visits_exists: boolean
+}
+
+export interface PointClaimLine {
+  // columns
+  id: number
+  batch_id: number
+  patient_point_id: number
+  coverage_id: number | null
+  previous_claim_line_id: number | null
+  selection_source: string
+  status: string
+  quantity: number
+  unit_price: number
+  amount: number
+  snapshot: Array<unknown>
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  batch: PointClaimBatch
+  results: PointClaimLineResult[]
+  // counts
+  results_count: number
+  // exists
+  batch_exists: boolean
+  results_exists: boolean
 }
 
 export interface Doctor {
@@ -394,6 +420,21 @@ export interface CarService {
   // counts
   // exists
   car_exists: boolean
+}
+
+export interface PointClaimLineResult {
+  // columns
+  id: number
+  claim_line_id: number
+  status: string
+  error_code: string | null
+  message: string | null
+  accepted_quantity: number | null
+  accepted_amount: number | null
+  received_at: string
+  raw_data: Array<unknown> | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 export interface SubscriptionTier {
@@ -595,6 +636,9 @@ export interface Invoice {
   type: string
   related_invoice_id: number | null
   deleted_at: string | null
+  issued_at: string | null
+  sent_at: string | null
+  due_date: string | null
   // relations
   user: User
   insurance_company: InsuranceCompany
@@ -744,6 +788,7 @@ export interface Patient {
   insurance_company: InsuranceCompany
   coverages: PatientCoverage[]
   current_coverage: PatientCoverage
+  latest_coverage: PatientCoverage
   // counts
   visits_count: number
   coverages_count: number
@@ -755,6 +800,38 @@ export interface Patient {
   insurance_company_exists: boolean
   coverages_exists: boolean
   current_coverage_exists: boolean
+  latest_coverage_exists: boolean
+}
+
+export interface PointClaimBatch {
+  // columns
+  id: number
+  document_id: number | null
+  company_id: number
+  branch_id: number
+  healthcare_worker_id: number
+  created_by: number
+  insurance_company_id: number
+  batch_type: string
+  accounting_period: string
+  batch_number: string
+  invoice_number: string | null
+  special_category: string | null
+  status: string
+  total_amount: number
+  finalized_at: string | null
+  exported_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  deleted_at: string | null
+  // relations
+  lines: PointClaimLine[]
+  document: Document
+  // counts
+  lines_count: number
+  // exists
+  lines_exists: boolean
+  document_exists: boolean
 }
 
 export interface Plan {
@@ -806,6 +883,24 @@ const PatientSpecialCoverageCategory = {
 } as const;
 
 export type PatientSpecialCoverageCategory = typeof PatientSpecialCoverageCategory[keyof typeof PatientSpecialCoverageCategory]
+
+const PatientCoverageCategory = {
+  DOMESTIC: 'domestic',
+  EU: 'eu',
+  NON_EU: 'non_eu',
+  HOMELESS: 'homeless',
+  OTHER: 'other',
+} as const;
+
+export type PatientCoverageCategory = typeof PatientCoverageCategory[keyof typeof PatientCoverageCategory]
+
+const PatientIdentificationMethod = {
+  SLOVAK_IDENTIFIER: 'slovak_identifier',
+  FOREIGN_TRIAD: 'foreign_triad',
+  INCOMPLETE: 'incomplete',
+} as const;
+
+export type PatientIdentificationMethod = typeof PatientIdentificationMethod[keyof typeof PatientIdentificationMethod]
 
 const RoleScope = {
   BRANCH: 'branch',

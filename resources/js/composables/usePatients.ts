@@ -1,9 +1,7 @@
 import { ref, computed } from 'vue'
 import api from '@/services/api'
-import {
-    getPatientIdentifier,
-    type PatientWithCoverage,
-} from '@/stores/patientStore'
+import type { PatientWithCoverage } from '@/stores/patientStore'
+import { getPatientIdentifier } from '@/utils/patientIdentifier'
 import type { VirtualScrollerLazyEvent } from 'primevue/virtualscroller'
 
 export type PatientOption = {

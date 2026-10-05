@@ -207,7 +207,7 @@
             <div class="invoice-info-right">
                 <div><strong>Konštatný symbol: </strong> {{ $invoiceData['constant_symbol'] ?? '' }}</div>
                 <div><strong>Spôsob úhrady:</strong> {{ $invoiceData['payment_method'] ?? '' }}</div>
-                <div><strong>Dátum splatnosti:</strong> {{ $invoiceData['due_date'] ?? '' }}</div>
+                <div><strong>Dátum splatnosti:</strong> {{ formatDate($invoiceData['due_date'] ?? '') }}</div>
             </div>
         </div>
 

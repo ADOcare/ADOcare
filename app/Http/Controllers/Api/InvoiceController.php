@@ -12,6 +12,7 @@ use App\Models\Document;
 use App\Models\Invoice;
 use App\Models\User;
 use App\Services\DocumentService;
+use App\Support\InvoiceDates;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -92,6 +93,9 @@ class InvoiceController extends Controller
                     'type' => $validated['type'],
                     'total' => 0,
                     'invoice_number' => null,
+                    'issued_at' => $validated['issued_at'],
+                    'sent_at' => $validated['sent_at'],
+                    'due_date' => $validated['due_date'],
                     'related_invoice_id' => $validated['related_invoice_id'] ?? null,
                     'mime_type' => 'application/json',
                 ]);
@@ -139,9 +143,10 @@ class InvoiceController extends Controller
 
         $payload = $this->readDocumentJson($invoice->path);
 
-        if (!is_array($payload) || !array_key_exists('company_register', $payload)) {
+        if (!$this->hasCurrentInvoicePayload($payload)) {
             $payload = $this->buildInvoicePayload($invoice, $actor);
             Storage::disk('local')->put($invoice->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            $this->invalidateInvoicePdf($invoice);
         }
 
         return $this->success($payload, 'Faktúra bola načítaná');
@@ -159,9 +164,10 @@ class InvoiceController extends Controller
 
         $payload = $this->readDocumentJson($invoice->path);
 
-        if (!is_array($payload) || !array_key_exists('company_register', $payload)) {
+        if (!$this->hasCurrentInvoicePayload($payload)) {
             $payload = $this->buildInvoicePayload($invoice, $actor);
             Storage::disk('local')->put($invoice->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            $this->invalidateInvoicePdf($invoice);
         }
 
         return response()->view('pdf.invoice', [
@@ -367,6 +373,7 @@ class InvoiceController extends Controller
 
         $payload = $this->buildInvoicePayload($invoice, $actor);
         Storage::disk('local')->put($invoice->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        $this->invalidateInvoicePdf($invoice);
 
         $invoice->load(['insuranceCompany:id,name', 'user:id,title,first_name,last_name,company_id']);
 
@@ -381,6 +388,7 @@ class InvoiceController extends Controller
         }
 
         $this->deleteStoredFile($invoice->path);
+        $this->invalidateInvoicePdf($invoice);
         $invoice->delete();
 
         return $this->success(null, 'Faktúra bola odstránená');
@@ -401,6 +409,7 @@ class InvoiceController extends Controller
 
         foreach ($invoices as $invoice) {
             $this->deleteStoredFile($invoice->path);
+            $this->invalidateInvoicePdf($invoice);
             $invoice->delete();
         }
 
@@ -447,6 +456,21 @@ class InvoiceController extends Controller
         }
     }
 
+    private function invalidateInvoicePdf(Invoice $invoice): void
+    {
+        $path = "invoices/pdf/{$invoice->id}.pdf";
+
+        if (Storage::disk('local')->exists($path)) {
+            Storage::disk('local')->delete($path);
+        }
+    }
+
+    private function hasCurrentInvoicePayload(mixed $payload): bool
+    {
+        return is_array($payload)
+            && ($payload['invoice_payload_version'] ?? null) === 2;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -459,8 +483,12 @@ class InvoiceController extends Controller
             'relatedInvoice:id,invoice_number',
         ]);
         $association = $this->getAssociatedDocumentsAndTotal($invoice, (int) ($actor->company_id ?? 0));
+        $servicesDeliveredAt = InvoiceDates::appliesToMonthlyService((string) $invoice->type)
+            ? InvoiceDates::deliveryDate((string) $invoice->period)->toDateString()
+            : null;
 
         return [
+            'invoice_payload_version' => 2,
             'company_name' => $invoice->user?->company?->name,
             'company_address' => $invoice->user?->company?->address,
             'company_city' => $invoice->user?->company?->city,
@@ -475,11 +503,11 @@ class InvoiceController extends Controller
             'invoice_id' => $invoice->id,
             'invoice_number' => $invoice->invoice_number,
             'constant_symbol' => '0308',
-            'due_date' => 'v zmysle zmluvy s poisťovňou',
+            'due_date' => $invoice->due_date?->toDateString(),
             'payment_method' => 'bankový prevod',
-            'invoice_created_at' => $invoice->created_at?->toDateTimeString(),
-            'invoice_sent_at' => $invoice->created_at?->toDateTimeString(),
-            'services_delivered_at' => $invoice->created_at?->toDateTimeString(),
+            'invoice_created_at' => $invoice->issued_at?->toDateString(),
+            'invoice_sent_at' => $invoice->sent_at?->toDateString(),
+            'services_delivered_at' => $servicesDeliveredAt,
 
             'insurance_company_id' => $invoice->insurance_company_id,
             'insurance_company_name' => $invoice->insuranceCompany?->name,
@@ -589,6 +617,7 @@ class InvoiceController extends Controller
 
         foreach ($existing as $invoice) {
             $this->deleteStoredFile($invoice->path);
+            $this->invalidateInvoicePdf($invoice);
             $invoice->delete();
         }
     }
@@ -621,6 +650,9 @@ class InvoiceController extends Controller
             'type' => $invoice->type,
             'total' => (float) $invoice->total,
             'invoice_number' => $invoice->invoice_number,
+            'issued_at' => $invoice->issued_at?->toDateString(),
+            'sent_at' => $invoice->sent_at?->toDateString(),
+            'due_date' => $invoice->due_date?->toDateString(),
             'related_invoice_id' => $invoice->related_invoice_id,
             'related_invoice_number' => $invoice->relatedInvoice?->invoice_number,
             'created_at' => $invoice->created_at?->toDateTimeString(),

@@ -263,7 +263,6 @@ class CompanyController extends Controller
                 'first_name',
                 'last_name',
                 'personal_number',
-                'latestCoverage' => ['foreign_insured_id'],
             ],
             allowedFilters: ['sex', 'nurse_id'],
             defaults: ['sort' => 'last_name']

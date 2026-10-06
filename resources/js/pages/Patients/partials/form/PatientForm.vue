@@ -10,7 +10,7 @@ import {
 } from '@/stores/patientStore'
 import { useApi } from '@/composables/useApi'
 import { useToast } from 'primevue/usetoast'
-import type { Branch, Doctor, InsuranceCompany, Patient, User } from '@/types/models'
+import type { Branch, Doctor, InsuranceCompany, User } from '@/types/models'
 import { formatBranchFullName, formatUserFullName } from '@/utils/formatUtils'
 import PatientCoverageFields from './PatientCoverageFields.vue'
 import {
@@ -569,9 +569,6 @@ const addressIsDatabaseReady = computed(() => {
     return hasRequiredAddressParts(localPatient.value)
 })
 
-const addressInvalid = computed(() => {
-    return !!localAddressError.value || !!errors.value.address || !!errors.value.city
-})
 
 function normalizeText(value: unknown): string {
     return String(value ?? '').trim()
@@ -614,14 +611,6 @@ function getPlaceLongitude(place: AddressPlace | null | undefined): number | nul
 
 function isSufficientAddressPlace(place: AddressPlace | null | undefined): boolean {
     return getPlaceAddress(place).length > 0 && getPlaceCity(place).length > 0
-}
-
-function composeAddressFromFields(address?: string | null, city?: string | null, zip?: string | null): string | null {
-    const parts = [address, city, zip]
-        .filter((part) => typeof part === 'string' && part.trim().length > 0)
-        .map((part) => String(part).trim())
-
-    return parts.length > 0 ? parts.join(', ') : null
 }
 
 function formatAddressLabel(place: AddressPlace) {
@@ -678,20 +667,28 @@ function applyValidAddressPlace(place: AddressPlace) {
 
     localPatient.value.address = address
     localPatient.value.city = city
-    localPatient.value.zip = zip || localPatient.value.zip
-    localPatient.value.latitude = latitude ?? localPatient.value.latitude
-    localPatient.value.longitude = longitude ?? localPatient.value.longitude
+    localPatient.value.zip = zip
+
+    if (latitude !== null) {
+        localPatient.value.latitude = latitude
+    }
+
+    if (longitude !== null) {
+        localPatient.value.longitude = longitude
+    }
 
     addressEntity.value = {
         ...(addressEntity.value ?? {}),
         address,
         city,
-        psc: zip || localPatient.value.zip,
-        latitude: latitude ?? localPatient.value.latitude,
-        longitude: longitude ?? localPatient.value.longitude,
+        psc: zip,
+        latitude: localPatient.value.latitude,
+        longitude: localPatient.value.longitude,
     }
 
-    addressQuery.value = formatAddressLabel(place) || composeAddressFromFields(address, city, zip)
+    // Only the street/address is displayed in the autocomplete input.
+    addressQuery.value = address
+
     clearAddressValidationError()
     setAddressValid(true)
 }
@@ -766,6 +763,7 @@ watch(
 
         addressEntity.value = { ...next, psc: next.zip }
         initAddressForm()
+        addressQuery.value = normalizeText(next.address)
 
         if (hasRequiredAddressParts(next)) {
             setAddressValid(true)
@@ -830,12 +828,17 @@ watch(
 )
 
 watch(
-    () => [localPatient.value.address, localPatient.value.city, localPatient.value.zip],
-    ([address, city, zip]) => {
-        const composed = composeAddressFromFields(address as string | null, city as string | null, zip as string | null)
-
-        if (composed) {
-            addressQuery.value = composed
+    () => [
+        localPatient.value.address,
+        localPatient.value.city,
+        localPatient.value.zip,
+    ],
+    ([address]) => {
+        if (
+            address
+            && addressQuery.value !== String(address)
+        ) {
+            addressQuery.value = String(address)
         }
 
         if (!hasRequiredAddressParts(localPatient.value)) {
@@ -899,7 +902,7 @@ defineExpose({
                 />
             </div>
 
-            <div class="col-span-2">
+            <div class="col-span-4">
                 <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
                     Pohlavie
                 </label>
@@ -916,7 +919,7 @@ defineExpose({
                 <small v-if="submitted && errors.sex" class="text-danger">{{ errors.sex }}</small>
             </div>
 
-            <div class="col-span-6">
+            <div class="col-span-8">
                 <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
                     Kontakt
                 </label>
@@ -935,7 +938,7 @@ defineExpose({
                 <label class="block text-normal text-accent">Zdravotné detaily</label>
             </div>
 
-            <div class="col-span-6">
+            <div class="col-span-12">
                 <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
                     Lekár
                 </label>
@@ -995,32 +998,125 @@ defineExpose({
                 <label class="block text-normal text-accent">Adresa</label>
             </div>
 
-            <div class="col-span-12">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Adresa (ulica, mesto, PSČ)
+            <!-- Address / Google autocomplete -->
+            <div class="col-span-6">
+                <label
+                    :class="[
+                        'block text-normal mb-1',
+                        disabled && 'opacity-50!',
+                    ]"
+                >
+                    Adresa
                 </label>
+
                 <AddressAutocomplete
                     v-model="addressQuery"
-                    @selected="onAutocompleteAddressSelected"
                     class="w-full"
                     :disabled="disabled"
-                    :invalid="addressInvalid || (submitted && !addressIsDatabaseReady)"
+                    :invalid="
+                        Boolean(localAddressError)
+                            || Boolean(errors.address)
+                            || (submitted && !localPatient.address)
+                    "
                     :class="{ 'opacity-50!': disabled }"
+                    @selected="onAutocompleteAddressSelected"
                 />
-                <small v-if="localAddressError" class="text-danger">
+
+                <small
+                    v-if="localAddressError"
+                    class="text-danger"
+                >
                     {{ localAddressError }}
                 </small>
-                <small v-else-if="submitted && !addressIsDatabaseReady" class="text-danger">
-                    Vyberte adresu zo zoznamu tak, aby obsahovala ulicu/adresu a mesto.
-                </small>
-                <small v-else-if="submitted && errors.address" class="text-danger">
+
+                <small
+                    v-else-if="submitted && errors.address"
+                    class="text-danger"
+                >
                     {{ errors.address }}
                 </small>
-                <small v-else-if="submitted && errors.city" class="text-danger">
-                    {{ errors.city }}
+
+                <small
+                    v-else-if="submitted && !localPatient.address"
+                    class="text-danger"
+                >
+                    Vyberte adresu zo zoznamu.
                 </small>
             </div>
 
+            <!-- City -->
+            <div class="col-span-4">
+                <label
+                    :class="[
+                        'block text-normal mb-1',
+                        disabled && 'opacity-50!',
+                    ]"
+                >
+                    Mesto
+                </label>
+
+                <InputText
+                    v-model.trim="localPatient.city"
+                    :disabled="disabled"
+                    fluid
+                    :invalid="
+                        Boolean(errors.city)
+                            || (submitted && !localPatient.city)
+                    "
+                    :class="{
+                        'bg-transparent!': disabled,
+                        'opacity-50!': disabled,
+                    }"
+                    @input="emit('clear-error', 'city')"
+                />
+
+                <small
+                    v-if="submitted && errors.city"
+                    class="text-danger"
+                >
+                    {{ errors.city }}
+                </small>
+
+                <small
+                    v-else-if="submitted && !localPatient.city"
+                    class="text-danger"
+                >
+                    Zadajte mesto.
+                </small>
+            </div>
+
+            <!-- ZIP -->
+            <div class="col-span-2">
+                <label
+                    :class="[
+                        'block text-normal mb-1',
+                        disabled && 'opacity-50!',
+                    ]"
+                >
+                    PSČ
+                </label>
+
+                <InputText
+                    v-model.trim="localPatient.zip"
+                    :disabled="disabled"
+                    fluid
+                    :invalid="Boolean(errors.zip)"
+                    :class="{
+                        'bg-transparent!': disabled,
+                        'opacity-50!': disabled,
+                    }"
+                    @input="emit('clear-error', 'zip')"
+                />
+
+                <small
+                    v-if="submitted && errors.zip"
+                    class="text-danger"
+                >
+                    {{ errors.zip }}
+                </small>
+            </div>
+
+            <!-- Map -->
             <div class="col-span-12">
                 <MapSelector
                     :latitude="localPatient.latitude"
@@ -1028,7 +1124,13 @@ defineExpose({
                     :disabled="authStore.currentRole === 'manager'"
                     @update="onMapAddressUpdate"
                 />
-                <small v-if="submitted && errors.coordinates" class="text-danger">{{ errors.coordinates }}</small>
+
+                <small
+                    v-if="submitted && errors.coordinates"
+                    class="text-danger"
+                >
+                    {{ errors.coordinates }}
+                </small>
             </div>
         </div>
 

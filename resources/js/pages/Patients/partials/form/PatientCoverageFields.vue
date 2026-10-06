@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import DatePicker from 'primevue/datepicker'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
+import Checkbox from 'primevue/checkbox'
+
 import api from '@/services/api'
 import type { PatientCoverageForm } from '@/composables/patientCoverage'
 
@@ -23,6 +25,7 @@ const props = withDefaults(defineProps<{
     errors?: Record<string, string>
     disabled?: boolean
     personalNumber?: string | null
+    bic?: string | null
     sex?: string | null
     verifying?: boolean
     loadingInsurance?: boolean
@@ -33,6 +36,7 @@ const props = withDefaults(defineProps<{
     errors: () => ({}),
     disabled: false,
     personalNumber: null,
+    bic: null,
     sex: null,
     verifying: false,
     loadingInsurance: false,
@@ -44,6 +48,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
     'update:modelValue': [value: PatientCoverageForm]
     'update:personalNumber': [value: string]
+    'update:bic': [value: string]
     'clear-error': [key: string]
     'verify': []
     'load-insurance': []
@@ -51,13 +56,13 @@ const emit = defineEmits<{
 
 const countries = ref<CountryOption[]>([])
 const countriesLoading = ref(false)
-const domesticUsesBic = ref(/[A-Za-z]/.test(String(props.personalNumber || '')))
 
 const euCountryCodes = new Set([
     'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
     'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SI',
     'ES', 'SE', 'IS', 'LI', 'NO', 'CH',
 ])
+
 const treatyCountryCodes = new Set(['RS', 'MK', 'ME'])
 
 const categoryOptions = [
@@ -75,17 +80,41 @@ const nonEuPathOptions = [
 ]
 
 const otherSituationOptions = [
-    { value: 'statutory_entitlement_9_3', label: 'Osoba s potvrdeným nárokom podľa § 9 ods. 3' },
-    { value: 'temporary_sk_card_foreign', label: 'Dočasný slovenský preukaz s potvrdeným zahraničným nárokom' },
-    { value: 'manager_review', label: 'Iná alebo nejasná situácia – posúdi manažér' },
+    {
+        value: 'statutory_entitlement_9_3',
+        label: 'Osoba s potvrdeným nárokom podľa § 9 ods. 3',
+    },
+    {
+        value: 'temporary_sk_card_foreign',
+        label: 'Dočasný slovenský preukaz s potvrdeným zahraničným nárokom',
+    },
+    {
+        value: 'manager_review',
+        label: 'Iná alebo nejasná situácia – posúdi manažér',
+    },
 ]
 
 const euDocumentOptions = [
-    { value: 'EHIC', label: 'Európsky preukaz zdravotného poistenia (EPZP/EHIC)' },
-    { value: 'REPLACEMENT_CERTIFICATE', label: 'Náhradný certifikát k EPZP' },
-    { value: 'S1', label: 'Formulár S1' },
-    { value: 'S2', label: 'Formulár S2' },
-    { value: 'OTHER_ENTITLEMENT_DOCUMENT', label: 'Iný potvrdený nárokový doklad' },
+    {
+        value: 'EHIC',
+        label: 'Európsky preukaz zdravotného poistenia (EPZP/EHIC)',
+    },
+    {
+        value: 'REPLACEMENT_CERTIFICATE',
+        label: 'Náhradný certifikát k EPZP',
+    },
+    {
+        value: 'S1',
+        label: 'Formulár S1',
+    },
+    {
+        value: 'S2',
+        label: 'Formulár S2',
+    },
+    {
+        value: 'OTHER_ENTITLEMENT_DOCUMENT',
+        label: 'Iný potvrdený nárokový doklad',
+    },
 ]
 
 const treatyDocuments: Record<string, Array<{ value: string, label: string }>> = {
@@ -109,11 +138,34 @@ const isDomestic = computed(() => props.modelValue.category === 'domestic')
 const isEu = computed(() => props.modelValue.category === 'eu')
 const isNonEu = computed(() => props.modelValue.category === 'non_eu')
 const isOther = computed(() => props.modelValue.category === 'other')
-const usesBicInput = computed(() => !isDomestic.value || domesticUsesBic.value)
-const isTreatyCase = computed(() => props.modelValue.other_subtype === 'treaty_document')
-const usesForeignIdentification = computed(() => props.modelValue.identification_method === 'foreign_triad')
-const needsEntitlementDocument = computed(() => isEu.value || isTreatyCase.value || props.modelValue.other_subtype === 'temporary_sk_card_foreign')
-const needsConfirmation = computed(() => props.modelValue.regime === 'eu' || props.modelValue.regime === 'special')
+
+const hasPersonalNumber = computed(() => !!props.personalNumber?.trim())
+const hasBic = computed(() => !!props.bic?.trim())
+
+const slovakIdentifierError = computed(() => {
+    return props.errors.bic
+        || props.errors.personal_number
+        || props.errors['coverage.bic']
+        || null
+})
+
+const isTreatyCase = computed(() => {
+    return props.modelValue.other_subtype === 'treaty_document'
+})
+
+const usesForeignIdentification = computed(() => {
+    return props.modelValue.identification_method === 'foreign_triad'
+})
+
+const needsEntitlementDocument = computed(() => {
+    return isEu.value
+        || isTreatyCase.value
+        || props.modelValue.other_subtype === 'temporary_sk_card_foreign'
+})
+
+const needsEntitlementConfirmation = computed(() => {
+    return needsEntitlementDocument.value
+})
 
 const countryOptions = computed(() => {
     const options = countries.value
@@ -135,7 +187,9 @@ const countryOptions = computed(() => {
             label: `${country.name} (${country.code.toUpperCase()})`,
         }))
 
-    return options.sort((left, right) => left.name.localeCompare(right.name, 'sk'))
+    return options.sort((left, right) => {
+        return left.name.localeCompare(right.name, 'sk')
+    })
 })
 
 const nonEuPath = computed(() => {
@@ -152,11 +206,20 @@ const nonEuPath = computed(() => {
 
 const documentOptions = computed(() => {
     if (props.modelValue.other_subtype === 'temporary_sk_card_foreign') {
-        return [{ value: 'TEMPORARY_SK_CARD', label: 'Dočasný slovenský preukaz' }]
+        return [
+            {
+                value: 'TEMPORARY_SK_CARD',
+                label: 'Dočasný slovenský preukaz',
+            },
+        ]
     }
 
     if (isTreatyCase.value) {
-        return treatyDocuments[String(props.modelValue.member_state_code || '').toUpperCase()] ?? []
+        const code = String(
+            props.modelValue.member_state_code || '',
+        ).toUpperCase()
+
+        return treatyDocuments[code] ?? []
     }
 
     return euDocumentOptions
@@ -164,55 +227,36 @@ const documentOptions = computed(() => {
 
 const verificationAvailable = computed(() => {
     return props.canVerifyInsurance
-        && !!props.personalNumber?.trim()
+        && hasPersonalNumber.value
         && isDomestic.value
-        && !domesticUsesBic.value
+})
+
+const showInsuranceActions = computed(() => {
+    return isDomestic.value && !hasBic.value
+})
+
+const showLoadInsuranceAction = computed(() => showInsuranceActions.value)
+const showVerifyInsuranceAction = computed(() => showInsuranceActions.value)
+
+const insuranceTypeColumnClass = computed(() => {
+    const visibleActions = Number(showLoadInsuranceAction.value)
+        + Number(showVerifyInsuranceAction.value)
+
+    if (visibleActions === 2) {
+        return 'col-span-6'
+    }
+
+    if (visibleActions === 1) {
+        return 'col-span-9'
+    }
+
+    return 'col-span-12'
 })
 
 const insuranceCompanyLabel = computed(() => {
     return isDomestic.value
-        ? 'Zdravotná poisťovňa *'
-        : 'Slovenská vykazujúca poisťovňa *'
-})
-
-const verificationHint = computed(() => {
-    if (domesticUsesBic.value) {
-        return 'Overenie cez ÚDZS nie je dostupné pre pridelený BIČ.'
-    }
-
-    if (!props.personalNumber?.trim()) {
-        return 'Najprv vyplňte rodné číslo pacienta.'
-    }
-
-    if (!props.modelValue.insurance_company_id) {
-        return 'Najprv vyberte poisťovňu.'
-    }
-
-    return 'ÚDZS porovná poistný vzťah s údajmi, ktoré sú práve vo formulári.'
-})
-
-const sexLabel = computed(() => {
-    if (props.sex === 'M') {
-        return 'Muž'
-    }
-
-    if (props.sex === 'F') {
-        return 'Žena'
-    }
-
-    return 'Pohlavie ešte nie je vyplnené v osobných údajoch.'
-})
-
-const incompleteMessage = computed(() => {
-    if (props.modelValue.regime !== 'unclassified') {
-        return null
-    }
-
-    if (isNonEu.value) {
-        return 'Bez potvrdeného nároku nie je možné pacienta zaradiť do dávky. Záznam môžete uložiť, export však zostane zablokovaný.'
-    }
-
-    return 'Túto situáciu musí pred vykázaním posúdiť manažér. Záznam môžete uložiť, export však zostane zablokovaný.'
+        ? 'Zdravotná poisťovňa'
+        : 'Slovenská vykazujúca poisťovňa'
 })
 
 function parseApiDate(value: string | null): Date | null {
@@ -226,7 +270,11 @@ function parseApiDate(value: string | null): Date | null {
         return null
     }
 
-    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+    return new Date(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3]),
+    )
 }
 
 function formatApiDate(value: Date | null): string | null {
@@ -251,9 +299,15 @@ const validToDate = computed<Date | null>({
     set: (value) => updateField('valid_to', formatApiDate(value)),
 })
 
-function emitCoverage(next: PatientCoverageForm, errorKeys: string[] = []) {
+function emitCoverage(
+    next: PatientCoverageForm,
+    errorKeys: string[] = [],
+) {
     emit('update:modelValue', next)
-    errorKeys.forEach((key) => emit('clear-error', `coverage.${key}`))
+
+    errorKeys.forEach((key) => {
+        emit('clear-error', `coverage.${key}`)
+    })
 }
 
 function resetSharedCoverage(): PatientCoverageForm {
@@ -285,28 +339,44 @@ function selectCategory(category: PatientCoverageForm['category']) {
     if (category === 'domestic') {
         next.regime = 'domestic'
         next.identification_method = 'slovak_identifier'
+        next.entitlement_confirmed = false
+        next.document_registered = false
     } else if (category === 'eu') {
         next.regime = 'eu'
         next.identification_method = 'foreign_triad'
+        next.entitlement_confirmed = true
+        next.document_registered = true
     } else if (category === 'homeless') {
         next.regime = 'special'
         next.identification_method = 'slovak_identifier'
         next.special_category = 'homeless'
         next.legal_basis = '§ 9 ods. 4'
+        next.entitlement_confirmed = false
+        next.document_registered = false
     } else if (category === 'non_eu') {
         next.regime = 'unclassified'
         next.identification_method = 'incomplete'
         next.other_subtype = 'unconfirmed'
         next.legal_basis = 'Nárok zatiaľ nie je potvrdený – export blokovaný'
+        next.entitlement_confirmed = false
+        next.document_registered = false
     } else {
         next.regime = 'unclassified'
         next.identification_method = 'incomplete'
+        next.entitlement_confirmed = false
+        next.document_registered = false
     }
 
-    emitCoverage(next, ['category', 'regime', 'identification_method'])
+    emitCoverage(
+        next,
+        ['category', 'regime', 'identification_method'],
+    )
 }
 
-function updateField<K extends keyof PatientCoverageForm>(key: K, value: PatientCoverageForm[K]) {
+function updateField<K extends keyof PatientCoverageForm>(
+    key: K,
+    value: PatientCoverageForm[K],
+) {
     const next = {
         ...props.modelValue,
         [key]: value,
@@ -319,57 +389,97 @@ function updateField<K extends keyof PatientCoverageForm>(key: K, value: Patient
     emitCoverage(next, [String(key)])
 }
 
-function updatePersonalIdentifier(value: string | null) {
-    const normalized = isDomestic.value && !domesticUsesBic.value
-        ? String(value || '').replace(/\D+/g, '')
-        : String(value || '').replace(/\s+/g, '').toUpperCase()
-
-    emit('update:personalNumber', normalized)
-    emit('clear-error', 'personal_number')
-
-    if (props.modelValue.is_verified) {
-        emitCoverage({
-            ...props.modelValue,
-            is_verified: false,
-        })
+function markInsuranceUnverified() {
+    if (!props.modelValue.is_verified) {
+        return
     }
-}
 
-function toggleDomesticIdentifier(event: Event) {
-    domesticUsesBic.value = (event.target as HTMLInputElement).checked
-    emit('update:personalNumber', '')
     emitCoverage({
         ...props.modelValue,
         is_verified: false,
     })
+}
+
+function updatePersonalNumber(value: string | null) {
+    const normalized = String(value || '').replace(/\D+/g, '')
+
+    emit('update:personalNumber', normalized)
+
+    if (normalized) {
+        emit('update:bic', '')
+    }
+
     emit('clear-error', 'personal_number')
+    emit('clear-error', 'bic')
+
+    markInsuranceUnverified()
+}
+
+function updateBic(value: string | null) {
+    const normalized = String(value || '')
+        .replace(/\s+/g, '')
+        .toUpperCase()
+
+    emit('update:bic', normalized)
+
+    if (normalized) {
+        emit('update:personalNumber', '')
+    }
+
+    emit('clear-error', 'personal_number')
+    emit('clear-error', 'bic')
+
+    markInsuranceUnverified()
 }
 
 function selectCountry(code: string | null) {
-    const normalizedCode = code ? String(code).toUpperCase() : null
+    const normalizedCode = code
+        ? String(code).toUpperCase()
+        : null
+
     const next = {
         ...props.modelValue,
         member_state_code: normalizedCode,
         entitlement_document_type: null,
         entitlement_document_number: null,
-        entitlement_confirmed: false,
     }
 
-    if (isTreatyCase.value && normalizedCode && !treatyCountryCodes.has(normalizedCode)) {
+    if (
+        isTreatyCase.value
+        && normalizedCode
+        && !treatyCountryCodes.has(normalizedCode)
+    ) {
         next.other_subtype = 'unconfirmed'
         next.regime = 'unclassified'
         next.identification_method = 'incomplete'
         next.legal_basis = 'Nárok zatiaľ nie je potvrdený – export blokovaný'
+        next.entitlement_confirmed = false
+        next.document_registered = false
+    } else if (
+        isEu.value
+        || (
+            isTreatyCase.value
+            && normalizedCode
+            && treatyCountryCodes.has(normalizedCode)
+        )
+        || props.modelValue.other_subtype === 'temporary_sk_card_foreign'
+    ) {
+        next.entitlement_confirmed = true
+        next.document_registered = true
     }
 
-    emitCoverage(next, ['member_state_code', 'entitlement_document_type'])
+    emitCoverage(
+        next,
+        ['member_state_code', 'entitlement_document_type'],
+    )
 }
 
 function selectNonEuPath(path: string) {
-    const next = {
+    const next: PatientCoverageForm = {
         ...props.modelValue,
         other_subtype: path,
         entitlement_confirmed: false,
+        document_registered: false,
         entitlement_document_type: null,
         entitlement_document_number: null,
         special_category: null,
@@ -380,6 +490,22 @@ function selectNonEuPath(path: string) {
         next.regime = 'eu'
         next.identification_method = 'foreign_triad'
         next.legal_basis = 'Medzinárodná zmluva – potvrdený nárokový doklad'
+
+        const countryCode = String(
+            next.member_state_code || '',
+        ).toUpperCase()
+
+        const validTreatyCountry = treatyCountryCodes.has(countryCode)
+
+        next.entitlement_confirmed = validTreatyCountry
+        next.document_registered = validTreatyCountry
+
+        if (countryCode && !validTreatyCountry) {
+            next.other_subtype = 'unconfirmed'
+            next.regime = 'unclassified'
+            next.identification_method = 'incomplete'
+            next.legal_basis = 'Nárok zatiaľ nie je potvrdený – export blokovaný'
+        }
     } else if (path === 'special_entitlement') {
         next.regime = 'special'
         next.identification_method = 'slovak_identifier'
@@ -391,7 +517,16 @@ function selectNonEuPath(path: string) {
         next.legal_basis = 'Nárok zatiaľ nie je potvrdený – export blokovaný'
     }
 
-    emitCoverage(next, ['regime', 'identification_method', 'special_category', 'legal_basis'])
+    emitCoverage(
+        next,
+        [
+            'regime',
+            'identification_method',
+            'special_category',
+            'legal_basis',
+            'entitlement_confirmed',
+        ],
+    )
 }
 
 function selectOtherSituation(situation: string) {
@@ -411,17 +546,26 @@ function selectOtherSituation(situation: string) {
         next.identification_method = 'foreign_triad'
         next.legal_basis = 'Dočasný slovenský preukaz bez rodného čísla'
         next.entitlement_document_type = 'TEMPORARY_SK_CARD'
+        next.entitlement_confirmed = true
+        next.document_registered = true
     } else {
         next.regime = 'unclassified'
         next.identification_method = 'incomplete'
         next.legal_basis = 'Nejasná situácia – vyžaduje posúdenie manažérom'
     }
 
-    emitCoverage(next, ['other_subtype', 'regime', 'identification_method'])
+    emitCoverage(
+        next,
+        [
+            'other_subtype',
+            'regime',
+            'identification_method',
+            'entitlement_confirmed',
+        ],
+    )
 }
 
-function updateEntitlementConfirmed(event: Event) {
-    const checked = (event.target as HTMLInputElement).checked
+function updateEntitlementConfirmed(checked: boolean) {
     emitCoverage({
         ...props.modelValue,
         entitlement_confirmed: checked,
@@ -435,6 +579,7 @@ async function loadCountries() {
     try {
         const response = await api.get('/v1/countries')
         const payload = response.data?.data
+
         countries.value = Array.isArray(payload)
             ? payload
             : (payload?.items ?? [])
@@ -446,305 +591,451 @@ async function loadCountries() {
 }
 
 onMounted(loadCountries)
-
-watch(
-    () => props.modelValue.category,
-    (category) => {
-        if (category === 'domestic') {
-            domesticUsesBic.value = /[A-Za-z]/.test(String(props.personalNumber || ''))
-        }
-    },
-)
-
-watch(
-    () => props.personalNumber,
-    (value) => {
-        if (isDomestic.value && /[A-Za-z]/.test(String(value || ''))) {
-            domesticUsesBic.value = true
-        }
-    },
-)
 </script>
 
 <template>
-    <section class="space-y-5">
-        <div>
-            <h3 class="font-medium text-darkgrey">Poistenie pacienta</h3>
-            <p class="text-sm text-gray-500">
-                Vyberte situáciu pacienta. Formulár zobrazí iba údaje, ktoré treba doplniť.
-            </p>
-        </div>
-
-        <div>
-            <label class="mb-1 block text-sm">Kto hradí zdravotnú starostlivosť? *</label>
-            <Select
-                :disabled="disabled"
-                :model-value="modelValue.category"
-                :options="categoryOptions"
-                option-label="label"
-                option-value="value"
-                class="w-full"
-                placeholder="Vyberte kategóriu poistenca"
-                @update:model-value="selectCategory"
-            />
-            <small v-if="errors['coverage.category']" class="text-danger">
-                {{ errors['coverage.category'] }}
-            </small>
-        </div>
-
-        <div v-if="modelValue.category" class="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-                <label class="mb-1 block text-sm">{{ insuranceCompanyLabel }}</label>
-                <Select
-                    :disabled="disabled"
-                    :model-value="modelValue.insurance_company_id"
-                    :options="insuranceCompanies"
-                    option-label="name"
-                    option-value="id"
-                    placeholder="Vyberte poisťovňu"
-                    class="w-full"
-                    @update:model-value="updateField('insurance_company_id', $event)"
-                />
-                <small v-if="errors['coverage.insurance_company_id']" class="text-danger">
-                    {{ errors['coverage.insurance_company_id'] }}
-                </small>
-            </div>
-
-            <div v-if="modelValue.identification_method === 'slovak_identifier'">
-                <label class="mb-1 block text-sm">
-                    {{ usesBicInput ? 'Pridelený BIČ *' : 'Rodné číslo *' }}
-                </label>
-                <InputText
-                    :disabled="disabled"
-                    :model-value="personalNumber"
-                    :maxlength="usesBicInput ? 20 : 11"
-                    :inputmode="usesBicInput ? 'text' : 'numeric'"
-                    :pattern="usesBicInput ? undefined : '[0-9]*'"
-                    class="w-full"
-                    @update:model-value="updatePersonalIdentifier(String($event || ''))"
-                />
-                <small v-if="errors.personal_number" class="text-danger">
-                    {{ errors.personal_number }}
-                </small>
-                <label v-if="isDomestic" class="mt-2 flex items-center gap-2 text-sm text-gray-600">
-                    <input
-                        type="checkbox"
-                        :disabled="disabled"
-                        :checked="domesticUsesBic"
-                        @change="toggleDomesticIdentifier"
-                    >
-                    Pacient nemá rodné číslo a má pridelený BIČ
+    <div class="flex flex-col gap-6">
+        <div class="grid grid-cols-12 gap-4">
+            <div class="col-span-12">
+                <label class="block text-normal text-accent">
+                    Poistenie pacienta
                 </label>
             </div>
 
-            <div v-if="isNonEu">
-                <label class="mb-1 block text-sm">Štát poistenia *</label>
-                <Select
-                    :disabled="disabled"
-                    :loading="countriesLoading"
-                    :model-value="modelValue.member_state_code"
-                    :options="countryOptions"
-                    option-label="label"
-                    option-value="code"
-                    filter
-                    placeholder="Vyhľadajte štát"
-                    class="w-full"
-                    @update:model-value="selectCountry"
-                />
-                <small v-if="errors['coverage.member_state_code']" class="text-danger">
-                    {{ errors['coverage.member_state_code'] }}
-                </small>
-            </div>
+            <div class="col-span-12 grid grid-cols-12 gap-4">
+                <div :class="insuranceTypeColumnClass">
+                    <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                        Typ poistenia
+                    </label>
 
-            <div v-if="isNonEu" class="md:col-span-2">
-                <label class="mb-1 block text-sm">Aký nárok na úhradu bol potvrdený? *</label>
-                <Select
-                    :disabled="disabled"
-                    :model-value="nonEuPath"
-                    :options="nonEuPathOptions"
-                    option-label="label"
-                    option-value="value"
-                    class="w-full"
-                    @update:model-value="selectNonEuPath"
-                />
-                <small v-if="isTreatyCase && modelValue.member_state_code && !treatyCountryCodes.has(String(modelValue.member_state_code))" class="text-danger">
-                    Pre vybraný štát nie je v systéme overený nárokový doklad zmluvného štátu.
-                </small>
-            </div>
-
-            <div v-if="isOther" class="md:col-span-2">
-                <label class="mb-1 block text-sm">Konkrétna situácia pacienta *</label>
-                <Select
-                    :disabled="disabled"
-                    :model-value="modelValue.other_subtype"
-                    :options="otherSituationOptions"
-                    option-label="label"
-                    option-value="value"
-                    class="w-full"
-                    placeholder="Vyberte situáciu"
-                    @update:model-value="selectOtherSituation"
-                />
-                <small v-if="errors['coverage.other_subtype']" class="text-danger">
-                    {{ errors['coverage.other_subtype'] }}
-                </small>
-            </div>
-
-            <div v-if="(isEu || modelValue.other_subtype === 'temporary_sk_card_foreign')">
-                <label class="mb-1 block text-sm">Štát poistenia *</label>
-                <Select
-                    :disabled="disabled"
-                    :loading="countriesLoading"
-                    :model-value="modelValue.member_state_code"
-                    :options="countryOptions"
-                    option-label="label"
-                    option-value="code"
-                    filter
-                    placeholder="Vyhľadajte štát"
-                    class="w-full"
-                    @update:model-value="selectCountry"
-                />
-                <small v-if="errors['coverage.member_state_code']" class="text-danger">
-                    {{ errors['coverage.member_state_code'] }}
-                </small>
-            </div>
-
-            <template v-if="usesForeignIdentification">
-                <div>
-                    <label class="mb-1 block text-sm">Identifikačné číslo poistenca *</label>
-                    <InputText
-                        :disabled="disabled"
-                        :model-value="modelValue.foreign_insured_id"
-                        maxlength="20"
-                        class="w-full"
-                        @update:model-value="updateField('foreign_insured_id', String($event || ''))"
-                    />
-                    <small class="text-gray-500">Nie je to číslo samotnej karty alebo dokladu.</small>
-                    <small v-if="errors['coverage.foreign_insured_id']" class="block text-danger">
-                        {{ errors['coverage.foreign_insured_id'] }}
-                    </small>
-                </div>
-
-                <div>
-                    <label class="mb-1 block text-sm">Pohlavie použité pri vykázaní *</label>
-                    <div class="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-                        {{ sexLabel }}
-                    </div>
-                    <small v-if="errors.sex" class="text-danger">{{ errors.sex }}</small>
-                </div>
-            </template>
-
-            <template v-if="needsEntitlementDocument">
-                <div>
-                    <label class="mb-1 block text-sm">Druh nárokového dokladu *</label>
                     <Select
-                        :disabled="disabled || (isTreatyCase && !treatyCountryCodes.has(String(modelValue.member_state_code || '')))"
-                        :model-value="modelValue.entitlement_document_type"
-                        :options="documentOptions"
+                        :disabled="disabled"
+                        :model-value="modelValue.category"
+                        :options="categoryOptions"
                         option-label="label"
                         option-value="value"
-                        placeholder="Vyberte doklad"
-                        class="w-full"
-                        @update:model-value="updateField('entitlement_document_type', $event)"
+                        placeholder="Vyberte kategóriu poistenca"
+                        fluid
+                        :invalid="Boolean(errors['coverage.category'])"
+                        :class="[
+                            'w-full!',
+                            { 'opacity-50!': disabled },
+                        ]"
+                        @update:model-value="selectCategory"
                     />
-                </div>
 
-                <div>
-                    <label class="mb-1 block text-sm">Číslo nárokového dokladu *</label>
-                    <InputText
-                        :disabled="disabled"
-                        :model-value="modelValue.entitlement_document_number"
-                        class="w-full"
-                        @update:model-value="updateField('entitlement_document_number', String($event || ''))"
-                    />
-                </div>
-            </template>
-
-            <template v-if="modelValue.regime !== 'unclassified'">
-                <div>
-                    <label class="mb-1 block text-sm">Platnosť poistenia alebo dokladu od</label>
-                    <DatePicker
-                        v-model="validFromDate"
-                        :disabled="disabled"
-                        date-format="dd.mm.yy"
-                        :manual-input="false"
-                        :max-date="validToDate ?? undefined"
-                        class="w-full"
-                        input-class="w-full!"
-                    />
-                </div>
-
-                <div>
-                    <label class="mb-1 block text-sm">Platnosť poistenia alebo dokladu do</label>
-                    <DatePicker
-                        v-model="validToDate"
-                        :disabled="disabled"
-                        date-format="dd.mm.yy"
-                        :manual-input="false"
-                        :min-date="validFromDate ?? undefined"
-                        class="w-full"
-                        input-class="w-full!"
-                    />
-                    <small v-if="errors['coverage.valid_to']" class="text-danger">
-                        {{ errors['coverage.valid_to'] }}
+                    <small
+                        v-if="errors['coverage.category']"
+                        class="text-danger"
+                    >
+                        {{ errors['coverage.category'] }}
                     </small>
                 </div>
-            </template>
 
-            <label v-if="needsConfirmation" class="flex items-start gap-2 md:col-span-2">
-                <input
-                    type="checkbox"
-                    class="mt-1"
-                    :disabled="disabled"
-                    :checked="modelValue.entitlement_confirmed"
-                    @change="updateEntitlementConfirmed"
+                <div
+                    v-if="showLoadInsuranceAction"
+                    class="col-span-3"
                 >
-                <span>
-                    Skontrolovala som nárokový doklad a potvrdzujem nárok pacienta na úhradu.
-                    <small class="block text-gray-500">Bez potvrdenia sa pacient nedá zaradiť do exportu dávky.</small>
-                </span>
-            </label>
-        </div>
+                    <label
+                        class="block text-normal mb-1 invisible select-none"
+                        aria-hidden="true"
+                    >
+                        Akcia
+                    </label>
 
-        <div v-if="incompleteMessage" class="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-warning">
-            {{ incompleteMessage }}
-        </div>
-
-        <div v-if="isDomestic" class="flex flex-col gap-2 rounded-md bg-gray-50 p-3 md:flex-row md:items-center md:justify-between">
-            <div class="space-y-1">
-                <div class="flex items-center gap-2">
-                    <span v-if="modelValue.is_verified" class="inline-flex rounded-md bg-success/15 px-2 py-1 text-sm text-success">
-                        Poistenie overené
-                    </span>
-                    <span v-else-if="verificationHasUnsavedChanges" class="inline-flex rounded-md bg-tag3 px-2 py-1 text-sm text-accent">
-                        Načítané údaje čakajú na uloženie
-                    </span>
-                    <span v-else class="inline-flex rounded-md bg-warning/15 px-2 py-1 text-sm text-warning">
-                        Poistenie nie je overené
-                    </span>
+                    <Button
+                        type="button"
+                        label="Načítať poistenie"
+                        :loading="loadingInsurance"
+                        :disabled="disabled || !canLoadInsurance || loadingInsurance"
+                        class="w-full! h-7! bg-accent! text-white! text-normal! rounded-md hover:bg-darkgrey! border-0!"
+                        @click="emit('load-insurance')"
+                    />
                 </div>
-                <p class="text-sm text-gray-500">{{ verificationHint }}</p>
+
+                <div
+                    v-if="showVerifyInsuranceAction"
+                    class="col-span-3"
+                >
+                    <label
+                        class="block text-normal mb-1 invisible select-none"
+                        aria-hidden="true"
+                    >
+                        Akcia
+                    </label>
+
+                    <Button
+                        type="button"
+                        label="Overiť poistný vzťah"
+                        :loading="verifying"
+                        :disabled="disabled || !verificationAvailable || verifying"
+                        class="w-full! h-7! bg-accent! text-white! text-normal! rounded-md hover:bg-darkgrey! border-0!"
+                        @click="emit('verify')"
+                    />
+                </div>
             </div>
 
-            <div class="flex shrink-0 flex-wrap gap-2">
-                <Button
-                    type="button"
-                    label="Načítať poistný vzťah"
-                    icon="bi bi-cloud-download"
-                    :loading="loadingInsurance"
-                    :disabled="disabled || !canLoadInsurance || loadingInsurance"
-                    class="bg-accent! text-white! hover:bg-darkgrey! border-0!"
-                    @click="emit('load-insurance')"
-                />
-                <Button
-                    type="button"
-                    label="Overiť poistenca"
-                    icon="bi bi-shield-check"
-                    :loading="verifying"
-                    :disabled="disabled || !verificationAvailable || verifying"
-                    class="bg-accent! text-white! hover:bg-darkgrey! border-0!"
-                    @click="emit('verify')"
-                />
-            </div>
+            <template v-if="modelValue.category">
+                <div class="col-span-6">
+                    <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                        {{ insuranceCompanyLabel }}
+                    </label>
+
+                    <Select
+                        :disabled="disabled"
+                        :model-value="modelValue.insurance_company_id"
+                        :options="insuranceCompanies"
+                        option-label="name"
+                        option-value="id"
+                        placeholder="Vyberte poisťovňu"
+                        fluid
+                        :invalid="Boolean(errors['coverage.insurance_company_id'])"
+                        :class="{ 'opacity-50!': disabled }"
+                        @update:model-value="updateField('insurance_company_id', $event)"
+                    />
+
+                    <small
+                        v-if="errors['coverage.insurance_company_id']"
+                        class="text-danger"
+                    >
+                        {{ errors['coverage.insurance_company_id'] }}
+                    </small>
+                </div>
+
+                <template v-if="modelValue.identification_method === 'slovak_identifier'">
+                    <div class="col-span-3">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            Rodné číslo
+                        </label>
+
+                        <InputText
+                            :disabled="disabled"
+                            :model-value="personalNumber"
+                            maxlength="10"
+                            inputmode="numeric"
+                            pattern="[0-9]*"
+                            fluid
+                            :invalid="Boolean(slovakIdentifierError)"
+                            :class="{
+                                'bg-transparent!': disabled,
+                                'opacity-50!': disabled,
+                            }"
+                            @update:model-value="updatePersonalNumber(String($event || ''))"
+                        />
+                    </div>
+
+                    <div class="col-span-3">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            BIČ
+                        </label>
+
+                        <InputText
+                            :disabled="disabled"
+                            :model-value="bic"
+                            maxlength="10"
+                            fluid
+                            :invalid="Boolean(slovakIdentifierError)"
+                            :class="{
+                                'bg-transparent!': disabled,
+                                'opacity-50!': disabled,
+                            }"
+                            @update:model-value="updateBic(String($event || ''))"
+                        />
+
+                        <small
+                            v-if="slovakIdentifierError"
+                            class="text-danger"
+                        >
+                            {{ slovakIdentifierError }}
+                        </small>
+                    </div>
+                </template>
+
+                <div
+                    v-if="isNonEu"
+                    class="col-span-3"
+                >
+                    <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                        Štát poistenia
+                    </label>
+
+                    <Select
+                        :disabled="disabled"
+                        :loading="countriesLoading"
+                        :model-value="modelValue.member_state_code"
+                        :options="countryOptions"
+                        option-label="label"
+                        option-value="code"
+                        filter
+                        placeholder="Vyhľadajte štát"
+                        fluid
+                        :invalid="Boolean(errors['coverage.member_state_code'])"
+                        :class="{ 'opacity-50!': disabled }"
+                        @update:model-value="selectCountry"
+                    />
+
+                    <small
+                        v-if="errors['coverage.member_state_code']"
+                        class="text-danger"
+                    >
+                        {{ errors['coverage.member_state_code'] }}
+                    </small>
+                </div>
+
+                <div
+                    v-if="isNonEu"
+                    class="col-span-3"
+                >
+                    <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                        Aký nárok na úhradu bol potvrdený?
+                    </label>
+
+                    <Select
+                        :disabled="disabled"
+                        :model-value="nonEuPath"
+                        :options="nonEuPathOptions"
+                        option-label="label"
+                        option-value="value"
+                        fluid
+                        :class="{ 'opacity-50!': disabled }"
+                        @update:model-value="selectNonEuPath"
+                    />
+
+                    <small
+                        v-if="
+                            isTreatyCase
+                                && modelValue.member_state_code
+                                && !treatyCountryCodes.has(
+                                    String(modelValue.member_state_code),
+                                )
+                        "
+                        class="text-danger"
+                    >
+                        Pre vybraný štát nie je v systéme overený nárokový
+                        doklad zmluvného štátu.
+                    </small>
+                </div>
+
+                <div
+                    v-if="isOther"
+                    class="col-span-12"
+                >
+                    <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                        Konkrétna situácia pacienta
+                    </label>
+
+                    <Select
+                        :disabled="disabled"
+                        :model-value="modelValue.other_subtype"
+                        :options="otherSituationOptions"
+                        option-label="label"
+                        option-value="value"
+                        placeholder="Vyberte situáciu"
+                        fluid
+                        :invalid="Boolean(errors['coverage.other_subtype'])"
+                        :class="{ 'opacity-50!': disabled }"
+                        @update:model-value="selectOtherSituation"
+                    />
+
+                    <small
+                        v-if="errors['coverage.other_subtype']"
+                        class="text-danger"
+                    >
+                        {{ errors['coverage.other_subtype'] }}
+                    </small>
+                </div>
+
+                <div
+                    v-if="
+                        isEu
+                            || modelValue.other_subtype
+                                === 'temporary_sk_card_foreign'
+                    "
+                    class="col-span-3"
+                >
+                    <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                        Štát poistenia
+                    </label>
+
+                    <Select
+                        :disabled="disabled"
+                        :loading="countriesLoading"
+                        :model-value="modelValue.member_state_code"
+                        :options="countryOptions"
+                        option-label="label"
+                        option-value="code"
+                        filter
+                        placeholder="Vyhľadajte štát"
+                        fluid
+                        :invalid="Boolean(errors['coverage.member_state_code'])"
+                        :class="{ 'opacity-50!': disabled }"
+                        @update:model-value="selectCountry"
+                    />
+
+                    <small
+                        v-if="errors['coverage.member_state_code']"
+                        class="text-danger"
+                    >
+                        {{ errors['coverage.member_state_code'] }}
+                    </small>
+                </div>
+
+                <template v-if="usesForeignIdentification">
+                    <div class="col-span-3">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            Identifikačné číslo poistenca
+                        </label>
+
+                        <InputText
+                            :disabled="disabled"
+                            :model-value="modelValue.foreign_insured_id"
+                            maxlength="20"
+                            fluid
+                            :invalid="Boolean(errors['coverage.foreign_insured_id'])"
+                            :class="{
+                                'bg-transparent!': disabled,
+                                'opacity-50!': disabled,
+                            }"
+                            @update:model-value="
+                                updateField(
+                                    'foreign_insured_id',
+                                    String($event || ''),
+                                )
+                            "
+                        />
+
+                        <small
+                            v-if="errors['coverage.foreign_insured_id']"
+                            class="block text-danger"
+                        >
+                            {{ errors['coverage.foreign_insured_id'] }}
+                        </small>
+                    </div>
+                </template>
+
+                <template v-if="needsEntitlementDocument">
+                    <div class="col-span-6">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            Druh nárokového dokladu
+                        </label>
+
+                        <Select
+                            :disabled="
+                                disabled
+                                    || (
+                                        isTreatyCase
+                                            && !treatyCountryCodes.has(
+                                                String(
+                                                    modelValue.member_state_code
+                                                        || '',
+                                                ),
+                                            )
+                                    )
+                            "
+                            :model-value="modelValue.entitlement_document_type"
+                            :options="documentOptions"
+                            option-label="label"
+                            option-value="value"
+                            placeholder="Vyberte doklad"
+                            fluid
+                            :class="{ 'opacity-50!': disabled }"
+                            @update:model-value="
+                                updateField(
+                                    'entitlement_document_type',
+                                    $event,
+                                )
+                            "
+                        />
+                    </div>
+
+                    <div class="col-span-6">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            Číslo nárokového dokladu
+                        </label>
+
+                        <InputText
+                            :disabled="disabled"
+                            :model-value="modelValue.entitlement_document_number"
+                            fluid
+                            :class="{
+                                'bg-transparent!': disabled,
+                                'opacity-50!': disabled,
+                            }"
+                            @update:model-value="
+                                updateField(
+                                    'entitlement_document_number',
+                                    String($event || ''),
+                                )
+                            "
+                        />
+                    </div>
+                </template>
+
+                <template v-if="modelValue.regime !== 'unclassified'">
+                    <div class="col-span-6">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            Platnosť poistenia alebo dokladu od
+                        </label>
+
+                        <DatePicker
+                            v-model="validFromDate"
+                            :disabled="disabled"
+                            date-format="dd.mm.yy"
+                            :manual-input="false"
+                            :max-date="validToDate ?? undefined"
+                            class="w-full"
+                            input-class="w-full!"
+                            :class="{ 'opacity-50!': disabled }"
+                        />
+                    </div>
+
+                    <div class="col-span-6">
+                        <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                            Platnosť poistenia alebo dokladu do
+                        </label>
+
+                        <DatePicker
+                            v-model="validToDate"
+                            :disabled="disabled"
+                            date-format="dd.mm.yy"
+                            :manual-input="false"
+                            :min-date="validFromDate ?? undefined"
+                            class="w-full"
+                            input-class="w-full!"
+                            :invalid="Boolean(errors['coverage.valid_to'])"
+                            :class="{ 'opacity-50!': disabled }"
+                        />
+
+                        <small
+                            v-if="errors['coverage.valid_to']"
+                            class="text-danger"
+                        >
+                            {{ errors['coverage.valid_to'] }}
+                        </small>
+                    </div>
+                </template>
+
+                <label
+                    v-if="needsEntitlementConfirmation"
+                    :class="[
+                        'col-span-12 flex items-start gap-2 text-normal cursor-pointer',
+                        disabled && 'opacity-50! cursor-default',
+                    ]"
+                >
+                    <Checkbox
+                        :model-value="modelValue.entitlement_confirmed"
+                        :disabled="disabled"
+                        binary
+                        class="mt-1"
+                        @update:model-value="updateEntitlementConfirmed"
+                    />
+
+                    <span>
+                        Skontrolovala som nárokový doklad a potvrdzujem nárok
+                        pacienta na úhradu.
+                    </span>
+                </label>
+            </template>
         </div>
-    </section>
+    </div>
 </template>

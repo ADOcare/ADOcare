@@ -100,7 +100,7 @@ const tableOptions = computed<DataTableOptions<PointCandidate>>(() => ({
     resetPageOnLocalItemsChange: true,
     rowKey: 'point_id',
     selectable: true,
-    defaultPageSize: 10,
+    defaultPageSize: 50,
     pageSizeOptions: [10, 25, 50],
     columns: [
         { field: 'service_date', header: 'Dátum výkonu', width: '8rem' },
@@ -159,10 +159,6 @@ function createBatch() {
                 <div class="text-mini text-darkgrey">Celková suma</div>
                 <div class="text-normal font-semibold">{{ formatAmount(selectedAmount) }} €</div>
             </div>
-        </div>
-
-        <div class="text-normal text-darkgrey">
-            Relevantné záznamy sú predvolene označené. Výber môžete pred vytvorením dávky upraviť.
         </div>
 
         <div class="h-[55vh] min-h-[24rem]">

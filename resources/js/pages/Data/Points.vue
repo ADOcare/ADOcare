@@ -651,7 +651,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         <DatePicker
                             v-model="dates"
                             view="month"
-                            dateFormat="mm/yy"
+                            dateFormat="MM yy"
                             :manualInput="false"
                             inputClass="w-full! border-none! shadow-none! bg-white! focus:ring-0! focus:shadow-none!"
                             fluid

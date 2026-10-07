@@ -498,7 +498,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         </small>
                     </div>
 
-                    <div class="col-span-12 md:col-span-3">
+                    <div class="col-span-12 md:col-span-4">
                         <label class="block text-normal mb-1">Poisťovňa</label>
                         <Select
                             v-model="insurance"
@@ -512,7 +512,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         </small>
                     </div>
 
-                    <div class="col-span-12 md:col-span-3">
+                    <div class="col-span-12 md:col-span-4">
                         <label class="block text-normal mb-1">Obdobie</label>
                         <DatePicker
                             v-model="dates"

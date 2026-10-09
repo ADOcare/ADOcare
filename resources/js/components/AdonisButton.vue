@@ -110,7 +110,7 @@ onBeforeUnmount(() => {
         @mouseleave="hovered = false"
         @focus="hovered = true"
         @blur="hovered = false"
-        class="group relative inline-flex h-7 items-center overflow-hidden rounded-md border-0 bg-darkgrey! px-3 text-white transition-all duration-300 ease-out cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 hover:shadow-[0_0_10px_rgba(92,158,173)]"
+        class="group relative inline-flex h-7 items-center overflow-hidden rounded-md border-0 bg-darkgrey! px-3 text-white transition-all duration-300 ease-out cursor-pointer disabled:cursor-not-allowed disabled:opacity-90 hover:shadow-[0_0_10px_rgba(92,158,173)]"
         :class="isExpanded ? 'gap-2 pr-4' : 'w-11 justify-center px-0'"
     >
         <span class="relative z-10 flex items-center">

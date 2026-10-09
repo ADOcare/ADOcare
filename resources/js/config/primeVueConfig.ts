@@ -87,7 +87,9 @@ export default {
         },
 
         button: {
-            root: { class: `p-xs! rounded-md! ${baseNoOutline}` },
+            root: {
+                class: `p-xs! rounded-md! ${baseNoOutline} disabled:bg-accent/50! disabled:border-accent/50! disabled:text-white! disabled:opacity-100! disabled:cursor-not-allowed!`,
+            },
         },
 
         menubar: {

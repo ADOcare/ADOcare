@@ -147,15 +147,15 @@ function createBatch() {
 <template>
     <div class="flex flex-col gap-4 min-h-0">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div class="bg-tag3/40 rounded-md p-3">
+            <div class="bg-tag3 rounded-md p-3">
                 <div class="text-mini text-darkgrey">Výkony</div>
                 <div class="text-normal font-semibold">{{ selectedCandidates.length }}</div>
             </div>
-            <div class="bg-tag3/40 rounded-md p-3">
+            <div class="bg-tag3 rounded-md p-3">
                 <div class="text-mini text-darkgrey">Pacienti</div>
                 <div class="text-normal font-semibold">{{ selectedPatientsCount }}</div>
             </div>
-            <div class="bg-tag3/40 rounded-md p-3">
+            <div class="bg-tag3 rounded-md p-3">
                 <div class="text-mini text-darkgrey">Celková suma</div>
                 <div class="text-normal font-semibold">{{ formatAmount(selectedAmount) }} €</div>
             </div>

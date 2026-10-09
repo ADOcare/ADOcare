@@ -310,6 +310,7 @@ class PointClaimSelectionService
         }
 
         return PointClaimBatch::query()
+            ->whereHas('document')
             ->where('healthcare_worker_id', $context['healthcare_worker_id'])
             ->where('insurance_company_id', $context['insurance_company_id'])
             ->whereDate('accounting_period', $context['accounting_period'])

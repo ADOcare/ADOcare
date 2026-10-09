@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Jobs\CreateMonthlyExports;
 use App\Models\Branch;
+use App\Models\Document;
 use App\Models\MonthlyExportRun;
 use App\Services\MonthlyExportArchiveService;
 use Carbon\CarbonImmutable;
@@ -75,6 +76,30 @@ class MonthlyExportController extends Controller
 
     private function runResponse(MonthlyExportRun $run, int $status): JsonResponse
     {
+        $results = collect($run->results ?? []);
+        $documentIds = $results
+            ->pluck('document_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique();
+        $existingDocumentIds = Document::query()
+            ->whereIn('id', $documentIds)
+            ->pluck('id')
+            ->mapWithKeys(fn ($id) => [(int) $id => true]);
+
+        $visibleResults = $results
+            ->filter(function (array $result) use ($existingDocumentIds): bool {
+                $documentId = (int) ($result['document_id'] ?? 0);
+
+                if ($documentId === 0) {
+                    return in_array($result['status'] ?? null, ['failed', 'skipped'], true);
+                }
+
+                return $existingDocumentIds->has($documentId);
+            })
+            ->values()
+            ->all();
+
         return response()->json([
             'success' => true,
             'data' => [
@@ -83,7 +108,7 @@ class MonthlyExportController extends Controller
                 'branch_id' => $run->branch_id,
                 'status' => $run->status,
                 'current_step' => $run->current_step,
-                'results' => $run->results ?? [],
+                'results' => $visibleResults,
                 'error_message' => $run->error_message,
                 'started_at' => $run->started_at,
                 'completed_at' => $run->completed_at,

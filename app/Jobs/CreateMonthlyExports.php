@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\CPDocumentService;
 use App\Services\DZCDocumentService;
 use App\Services\KilometersBatchDocumentService;
+use App\Services\MonthlyExportResetService;
 use App\Services\PointClaimSelectionService;
 use App\Services\PointsBatchDocumentService;
 use App\Services\Transport\ClaimExportService;
@@ -40,6 +41,7 @@ class CreateMonthlyExports implements ShouldQueue
         KilometersBatchDocumentService $kilometerDocuments,
         DZCDocumentService $dzcDocuments,
         CPDocumentService $cpDocuments,
+        MonthlyExportResetService $reset,
     ): void {
         $run = MonthlyExportRun::findOrFail($this->runId);
         $actor = User::findOrFail($run->user_id);
@@ -60,6 +62,8 @@ class CreateMonthlyExports implements ShouldQueue
         ]);
 
         try {
+            $reset->reset($actor->id, $branch->id, $month->format('Y-m'));
+
             $insurances = InsuranceCompany::query()->orderBy('id')->get(['id', 'name']);
             $regimes = [
                 'N' => 'tuzemskí poistenci',

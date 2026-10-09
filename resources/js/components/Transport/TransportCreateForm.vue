@@ -130,30 +130,6 @@ async function saveBatch() {
 </script>
 
 <template>
-    <form class="bg-tag3 p-6 rounded-md flex flex-col gap-4" @submit.prevent="generate">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div v-if="kind === 'batch'">
-                <label class="block mb-1" for="transport-type">Typ dávky</label>
-                <Select inputId="transport-type" v-model="character" :options="types" optionLabel="name" optionValue="code" :disabled="busy" fluid />
-            </div>
-            <div v-if="kind === 'batch'">
-                <label class="block mb-1" for="transport-insurance">Poisťovňa</label>
-                <Select inputId="transport-insurance" v-model="insurerId" :options="insurers" optionLabel="name" optionValue="id" :disabled="busy" fluid />
-            </div>
-            <div>
-                <label class="block mb-1" for="transport-month">Obdobie</label>
-                <DatePicker inputId="transport-month" v-model="month" view="month" dateFormat="mm/yy" :manualInput="false" :disabled="busy" fluid />
-            </div>
-            <div>
-                <label class="block mb-1" for="transport-car">Vozidlo používané v tomto období</label>
-                <Select inputId="transport-car" v-model="carId" :options="cars" optionLabel="evc" optionValue="id" :disabled="busy" fluid />
-                <small v-if="!cars.length">Najprv priraďte vozidlo pracovníkovi v nastaveniach vozidiel.</small>
-            </div>
-        </div>
-        <p class="text-sm">Trasa sa vypočíta automaticky zo všetkých evidovaných návštev. Každá spoločná adresa tvorí jednu zastávku. Kniha jázd obsahuje aj návrat na prevádzku.</p>
-        <p v-if="error && !showPreview" role="alert" class="text-danger whitespace-pre-line">{{ error }}</p>
-        <Button type="submit" :loading="busy" :disabled="busy" :label="kind === 'batch' ? 'Pripraviť výber dopravy' : 'Vytvoriť denný záznam ciest'" />
-    </form>
 
     <Dialog v-model:visible="showPreview" header="Výber dopravy do dávky" modal :closable="!busy" :style="{ width: '70rem', maxWidth: '96vw' }">
         <div v-if="preview" class="flex flex-col gap-4">

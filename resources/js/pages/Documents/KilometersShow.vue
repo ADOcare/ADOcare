@@ -49,6 +49,8 @@ const stored = computed(() => {
     return (payload.value.kilometers_batch ?? payload.value) as KilometersBatchPayload | null
 })
 
+const downloadFileName = computed(() => stored.value ? `davka.${stored.value.batchNumber}.txt` : 'davka.txt')
+
 function showErrorToasts(messages: string[]) {
     messages.slice(0, 8).forEach((message) => {
         toast.add({
@@ -74,11 +76,9 @@ const files = computed<FileItem[]>(() => {
         return []
     }
 
-    const fileName = stored.value.meta?.fileName ?? `davka.${stored.value.batchNumber}`
-
     return [
         {
-            title: fileName,
+            title: downloadFileName.value,
             description: 'Vykázaný súbor',
             downloads: [
                 {
@@ -87,7 +87,7 @@ const files = computed<FileItem[]>(() => {
                     payload: props.isPublic ? undefined : { document_id: stored.value.document_id ?? Number(route.params.documentId) },
                     fileType: 'TXT',
                     contentType: 'text/plain',
-                    filename: fileName,
+                    filename: downloadFileName.value,
                 },
             ],
         },
@@ -112,8 +112,6 @@ async function handleActionClick(actionId: string) {
         return
     }
 
-    const fileName = stored.value.meta?.fileName ?? `davka.${stored.value.batchNumber}`
-
     if (props.isPublic) {
         window.open(getPublicLink({ download: true, format: 'txt' }), '_blank')
         return
@@ -129,7 +127,7 @@ async function handleActionClick(actionId: string) {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = fileName
+        a.download = downloadFileName.value
         a.click()
         setTimeout(() => URL.revokeObjectURL(url), 100)
     } catch (err: any) {

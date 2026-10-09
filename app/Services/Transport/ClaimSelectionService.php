@@ -74,9 +74,6 @@ class ClaimSelectionService
         $patientFilter = array_map('intval', $context['patientIds']);
         foreach ($days as $day) {
             foreach ($day['legs'] as $leg) {
-                if ($leg['is_return']) {
-                    continue;
-                }
                 $previous = $history[$leg['journey_id']] ?? null;
                 $previousPayload = $previous ? json_decode($previous->payload, true, 512, JSON_THROW_ON_ERROR) : null;
                 $reportedKm = $this->reportedKilometers((int) $leg['distance_m'], $contract);

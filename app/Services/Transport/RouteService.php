@@ -56,10 +56,6 @@ class RouteService
             }
             $legs = $this->planner->plan($branchData, $stops, $date);
             foreach ($legs as &$leg) {
-                if ($leg['is_return']) {
-                    $leg['journey_id'] = null;
-                    continue;
-                }
                 $journeyIdentity = $identity + ['stop_key' => $leg['stop_key']];
                 DB::table('transport_journeys')->insertOrIgnore($journeyIdentity + ['created_at' => now(), 'updated_at' => now()]);
                 $leg['journey_id'] = (int) DB::table('transport_journeys')->where($journeyIdentity)->value('id');
@@ -83,7 +79,7 @@ class RouteService
         // Preserve the application's automatic assigned-car selection, with a stable order.
         $car = $user->cars()->where('company_id', $branch->company_id)
             ->when($carId !== null, fn ($query) => $query->whereKey($carId))->orderBy('id')->first();
-        if (!$car) {
+        if (!$car instanceof Car) {
             throw ValidationException::withMessages(['car_id' => [
                 $carId === null
                     ? 'Používateľ nemá priradené vozidlo v spoločnosti aktuálnej prevádzky. Doplňte priradenie vozidla v nastaveniach.'

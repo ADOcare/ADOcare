@@ -21,7 +21,7 @@ Staršia verzia 793n účinná od roku 2024 sa nepoužíva. Pre obdobie, pre kto
 | 753d | 38 polí a typ starostlivosti 850, ale vlastné rozhodovanie identifikácie a nesprávna kontrola zahraničného ID | Spoločný resolver; zahraničný režim vyprázdni RČ a používa polia 20–22; chýbajúci dátum žiadanky sa nevymýšľa |
 | 793n | Iba N/O a domáci poistenec | N/O/A, E/F/G, I/J/K, historické krytie a rovnaký resolver ako 753d |
 | Číslo dávky | 793n ho zadával používateľ | Automaticky `UUMMPP` pre obe dávky |
-| Trasa 793n | Každý pacient sa počítal od pobočky | Prvý úsek od pobočky, ďalší od predchádzajúceho pacienta; návrat sa nevytvára |
+| Trasa 793n | Každý pacient sa počítal od pobočky | Prvý úsek od pobočky, ďalší od predchádzajúceho pacienta a posledný úsek späť do pobočky |
 | Formát súboru | Lokálne formátovanie v každom controllery | Spoločný generátor kontroluje počet polí, zakazuje `|`/nový riadok, používa trailing `|` a CRLF |
 
 ## Matica režimov

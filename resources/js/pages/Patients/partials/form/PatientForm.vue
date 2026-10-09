@@ -738,7 +738,6 @@ watch(
             :errors="errors"
             :submitted="submitted"
             :disabled="disabled"
-            :map-disabled="authStore.currentRole === 'manager'"
             @clear-error="emit('clear-error', $event)"
         />
 

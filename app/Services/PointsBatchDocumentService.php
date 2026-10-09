@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Branch;
 use App\Models\Document;
+use App\Models\InsuranceCompany;
 use App\Models\PointClaimBatch;
 use App\Models\PointClaimLine;
 use Illuminate\Support\Facades\Storage;
@@ -34,11 +35,12 @@ class PointsBatchDocumentService
     {
         $insuranceId = (int) data_get($data, 'insurance.id');
         $branchId  = (int) data_get($data, 'branch.id');
-        $branch = Branch::query()->findOrFail($branchId);
+        $branch = Branch::query()->with('company')->findOrFail($branchId);
         abort_unless($actor && $actor->isInBranch($branchId), 403);
 
         $companyId = (int) $branch->company_id;
         $insuranceId = (int) data_get($data, 'insurance.id');
+        $insurance = InsuranceCompany::query()->findOrFail($insuranceId);
 
         $periodFromRaw = (string) data_get($data, 'period.0');
         $periodToRaw   = (string) data_get($data, 'period.1');
@@ -56,7 +58,7 @@ class PointsBatchDocumentService
 
         return DB::transaction(function () use (
             $data, $actor, $branchId, $companyId, $periodFromRaw, $periodToRaw, $periodKey, $subtype, $insuranceId,
-            $isNewBatch, $batchNumber,
+            $isNewBatch, $batchNumber, $branch, $insurance,
         ) {
             $type = 'points_batch';
 
@@ -153,6 +155,11 @@ class PointsBatchDocumentService
             $meta = (array) data_get($data, 'meta', []);
             $meta['fileName'] = 'davka.' . $batchNumber . '.txt';
             $meta['amount'] = round((float) $selectedRows->sum('amount'), 2);
+            $meta['performedBy'] = trim(($actor->first_name ?? '') . ' ' . ($actor->last_name ?? ''));
+            $meta['performedDate'] = now()->timezone('Europe/Bratislava')->toDateString();
+            $meta['companyName'] = (string) ($branch->company?->name ?? '');
+            $meta['branchName'] = trim(($branch->city ?? '') . ', ' . ($branch->address ?? ''), ' ,');
+            $meta['insuranceName'] = (string) ($insurance->name ?? '');
 
             $payload = [
                 'document_id' => $document->id,

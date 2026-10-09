@@ -127,6 +127,6 @@ class KilometersBatchDocumentService
         }
         return response($payload['claim_content'])
             ->header('Content-Type', 'text/plain; charset=UTF-8')
-            ->header('Content-Disposition', 'attachment; filename="davka.' . $payload['batchNumber'] . '"');
+            ->header('Content-Disposition', 'attachment; filename="davka.' . $payload['batchNumber'] . '.txt"');
     }
 }

@@ -8,6 +8,7 @@ import Macros from '@/pages/Settings/Macros/MacrosPage.vue'
 import Data from '@/pages/Data/DataPage.vue'
 import Points from '@/pages/Data/Points.vue'
 import Kilometers from '@/pages/Data/Kilometers.vue'
+import MonthlyExportWizard from '@/pages/Data/MonthlyExportWizard.vue'
 import Routes from '@/pages/Data/Routes.vue'
 import Patient from '@/pages/Patients/PatientDetailPage.vue'
 import PatientPoints from '@/pages/Patients/Points/PatientPointsPage.vue'
@@ -93,6 +94,17 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Dopravná',
                     link: 'dopravná',
+                    sidebar: showOnSidebar,
+                    navbar: true,
+                },
+            },
+            {
+                path: 'monthly-export',
+                name: 'monthly-export-wizard',
+                component: MonthlyExportWizard,
+                meta: {
+                    title: 'Mesačná uzávierka',
+                    link: 'mesačná uzávierka',
                     sidebar: showOnSidebar,
                     navbar: true,
                 },

@@ -6,6 +6,7 @@ use App\Http\Requests\StoreKilometersBatchRequest;
 use App\Models\Branch;
 use App\Models\Document;
 use App\Models\User;
+use App\Services\DocumentService;
 use App\Services\KilometersBatchDocumentService;
 use App\Services\Transport\LegacyClaimExportService;
 use App\Services\Transport\RoutePlanner;
@@ -65,6 +66,45 @@ class KilometersCompatibilityTest extends TransportTestCase
             $document = (new Document())->forceFill(['id' => 7, 'path' => $path]);
             self::assertNull((new KilometersBatchDocumentService())->getKilometersBatchPayload($document));
         }
+    }
+
+    public function test_bulk_deletion_soft_deletes_document_before_removing_asset(): void
+    {
+        $this->database();
+        Schema::table('documents', function ($table) {
+            $table->string('path')->nullable();
+            $table->timestamps();
+        });
+        $documentId = DB::table('documents')->insertGetId([
+            'company_id' => 1, 'branch_id' => 1, 'user_id' => 1, 'insurance_company_id' => 1,
+            'period' => '2026-07', 'type' => 'kilometers_batch', 'path' => 'batch.json',
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        Storage::swap(new class($documentId) {
+            public function __construct(private int $documentId)
+            {
+            }
+
+            public function disk(string $name): self
+            {
+                return $this;
+            }
+
+            public function exists(string $path): bool
+            {
+                return true;
+            }
+
+            public function delete(string $path): bool
+            {
+                \PHPUnit\Framework\Assert::assertNotNull(DB::table('documents')->where('id', $this->documentId)->value('deleted_at'));
+                return true;
+            }
+        });
+
+        (new DocumentService())->deleteManyDocumentsWithAssets([$documentId]);
+
+        self::assertTrue(Document::withTrashed()->findOrFail($documentId)->trashed());
     }
 
     public function test_legacy_txt_uses_saved_owner_and_branch_and_does_not_enter_new_generator(): void

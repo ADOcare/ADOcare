@@ -2,7 +2,7 @@
 
 return [
     // Existing route service URL/authentication remains in config/services.php.
-    'route_version' => 2,
+    'route_version' => 3,
     'contracts' => [
         // Override by company ID, then insurance code (24, 25, 27).
         // Rates are read from the existing procedure_company_prices, procedure 0000.

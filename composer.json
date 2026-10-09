@@ -17,7 +17,8 @@
         "laravel/tinker": "^2.10.1",
         "league/flysystem-google-cloud-storage": "^3.0",
         "spatie/laravel-backup": "^10.2",
-        "spatie/laravel-ignition": "*"
+        "spatie/laravel-ignition": "*",
+        "symfony/process": "^7.4"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

@@ -448,6 +448,22 @@ export interface SubscriptionTier {
   companies_exists: boolean
 }
 
+export interface MonthlyExportRun {
+  // columns
+  id: number
+  user_id: number
+  branch_id: number
+  month: string
+  status: string
+  current_step: string | null
+  results: Array<unknown> | null
+  error_message: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export interface Company {
   // columns
   id: number

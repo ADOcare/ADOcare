@@ -7,6 +7,7 @@ use App\Mail\GenericEmail;
 use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Document;
+use App\Models\InsuranceCompany;
 use App\Models\Invoice;
 use App\Models\Patient;
 use App\Models\User;
@@ -250,6 +251,8 @@ class DocumentService
     {
         $documents = Document::query()->whereIn('id', $ids)->get();
 
+        Document::whereIn('id', $documents->modelKeys())->delete();
+
         foreach ($documents as $document) {
             if (!$document instanceof Document) {
                 continue;
@@ -271,8 +274,6 @@ class DocumentService
                 ]);
             }
         }
-
-        Document::whereIn('id', $ids)->delete();
     }
 
     public function documentExists(array $data, int $userId): array
@@ -342,8 +343,7 @@ class DocumentService
 
 
         if ($disk->exists($cachePath)) {
-            // $disk->delete($cachePath);
-            // return $cachePath;
+            $disk->delete($cachePath);
         }
 
         $pdfData = $this->buildTravelPdfAttachment($document);
@@ -376,6 +376,13 @@ class DocumentService
         $meta = (array) ($payload['meta'] ?? []);
         $batchNumber = (string) ($payload['batchNumber'] ?? '0');
         $period = (array) ($payload['period'] ?? []);
+        $user = User::query()->find((int) data_get($payload, 'user.id'));
+        $branch = Branch::query()->find((int) data_get($payload, 'branch.id'));
+        $company = Company::query()->find((int) data_get($payload, 'company.id'));
+        $insurance = InsuranceCompany::query()->find((int) data_get($payload, 'insurance.id'));
+        $performedBy = trim(($user?->first_name ?? '') . ' ' . ($user?->last_name ?? ''));
+        $branchName = trim(($branch?->city ?? '') . ', ' . ($branch?->address ?? ''), ' ,');
+        $savedAt = data_get($payload, 'saved_at');
 
         return [
             'fileType' => $type === 'kilometers' ? 'vykázané kilometre' : 'vykázané body',
@@ -384,11 +391,11 @@ class DocumentService
             'amount' => (string) ($meta['amount'] ?? '0'),
             'periodFrom' => (string) ($period[0] ?? ''),
             'periodTo' => (string) ($period[1] ?? ''),
-            'performedBy' => (string) ($meta['performedBy'] ?? ''),
-            'performedDate' => (string) ($meta['performedDate'] ?? now()->toDateString()),
-            'companyName' => (string) ($meta['companyName'] ?? ''),
-            'branchName' => (string) ($meta['branchName'] ?? ''),
-            'insuranceName' => (string) ($meta['insuranceName'] ?? ''),
+            'performedBy' => (string) ($meta['performedBy'] ?? $performedBy),
+            'performedDate' => (string) ($meta['performedDate'] ?? ($savedAt ? Carbon::parse($savedAt)->toDateString() : now()->toDateString())),
+            'companyName' => (string) ($meta['companyName'] ?? $company?->name ?? ''),
+            'branchName' => (string) ($meta['branchName'] ?? $branchName),
+            'insuranceName' => (string) ($meta['insuranceName'] ?? $insurance?->name ?? ''),
         ];
     }
 
@@ -484,7 +491,7 @@ class DocumentService
             return null;
         }
     }
-    private function getTravelDocumentPdfCachePath(Document $document): string
+    public function getTravelDocumentPdfCachePath(Document $document): string
     {
         return sprintf('documents/pdf/%s/%d.pdf', $document->type, $document->id);
     }

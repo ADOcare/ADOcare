@@ -5,7 +5,6 @@ import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
 import type { InsuranceCompany } from '@/types/models'
 import { useAuthStore } from '@/stores/auth'
-import { useUiOverlayStore } from '@/stores/uiOverlay'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import ActionButtons from '@/components/table-columns/ActionButtons.vue'
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
@@ -17,7 +16,6 @@ const authStore = useAuthStore()
 const toast = useToast()
 const { openEmailDocumentsDialog } = useEmailDocumentsDialog()
 const branchId = computed(() => authStore.currentBranch?.id ?? null)
-const uiOverlayStore = useUiOverlayStore()
 const router = useRouter()
 const { openModal } = useModal()
 const busy = ref(false)
@@ -45,6 +43,11 @@ type DocRow = {
     created_at?: string
     updated_at?: string
     insurance_company_name?: string
+}
+
+type BatchSelection = {
+    journeyIds: number[]
+    correction?: { confirmed: boolean; reason: string }
 }
 
 const batchType = ref<BatchType | null>(null)
@@ -130,9 +133,6 @@ async function onSubmit() {
     const insuranceId = insurance.value.id
 
     try {
-        uiOverlayStore.setContentLoading(true)
-        await authStore.waitUntilInitialized()
-        if (version !== formVersion) return
         const selectedBranchId = authStore.currentBranch?.id
         if (!selectedBranchId) throw new Error('Vyberte aktuálnu prevádzku.')
         const request = {
@@ -141,43 +141,54 @@ async function onSubmit() {
             branch: { id: selectedBranchId },
             period: [periodFrom, periodTo],
         }
-        const response = await api.post('/v1/batches/kilometers/preview', {
-            ...request,
-            candidatesOnly: true,
-        })
-        if (version !== formVersion) return
-        const preview = response.data?.data
-        if (!preview || !Array.isArray(preview.candidates) || !preview.previewToken) {
-            throw new Error('Nepodarilo sa načítať náhľad dopravnej dávky.')
-        }
-        uiOverlayStore.setContentLoading(false)
         const result = await openModal(markRaw(KilometersBatchPreviewModal), {
-            candidates: preview.candidates,
-            initialSelectedJourneyIds: preview.candidates.filter((row: any) => row.suggested).map((row: any) => row.journey_id),
-            blocked: preview.blocked ?? [],
-            routeChanges: preview.route_changes ?? [],
-            canCreate: preview.can_create,
             batchType: type,
-            comparisonBasis: preview.comparison_basis,
+            loadPreview: async () => {
+                await authStore.waitUntilInitialized()
+
+                if (version !== formVersion || authStore.currentBranch?.id !== selectedBranchId) {
+                    throw new Error('Výber prevádzky alebo filtrov sa zmenil. Otvorte náhľad znova.')
+                }
+
+                const response = await api.post('/v1/batches/kilometers/preview', {
+                    ...request,
+                    candidatesOnly: true,
+                })
+                const preview = response.data?.data
+
+                if (!preview || !Array.isArray(preview.candidates) || !preview.previewToken) {
+                    throw new Error('Nepodarilo sa načítať náhľad dopravnej dávky.')
+                }
+
+                return preview
+            },
+            createBatch: async (selection: BatchSelection, preview: any) => {
+                if (version !== formVersion || authStore.currentBranch?.id !== selectedBranchId) {
+                    throw new Error('Výber prevádzky alebo filtrov sa zmenil. Otvorte náhľad znova.')
+                }
+
+                const saved = await api.post('/v1/kilometers-batches', {
+                    ...request,
+                    car_id: preview.car.id,
+                    journeyIds: selection.journeyIds,
+                    previewToken: preview.previewToken,
+                    correction: selection.correction,
+                })
+                const documentId = saved.data?.data?.document_id
+
+                if (!documentId) {
+                    throw new Error('Server nevrátil číslo vytvoreného dokumentu.')
+                }
+
+                return Number(documentId)
+            },
         }, {
             header: 'Náhľad dát dopravnej dávky',
             style: { width: '90vw', maxWidth: '1440px' },
-            closable: true,
+            closable: false,
+            dismissableMask: false,
         })
-        if (!result?.journeyIds?.length) return
-        if (version !== formVersion || authStore.currentBranch?.id !== selectedBranchId) {
-            throw new Error('Výber prevádzky alebo filtrov sa zmenil. Otvorte náhľad znova.')
-        }
-        uiOverlayStore.setContentLoading(true)
-        const saved = await api.post('/v1/kilometers-batches', {
-            ...request,
-            car_id: preview.car.id,
-            journeyIds: result.journeyIds,
-            previewToken: preview.previewToken,
-            correction: result.correction,
-        })
-        const documentId = saved.data?.data?.document_id
-        if (!documentId) throw new Error('Server nevrátil číslo vytvoreného dokumentu.')
+        if (!result?.documentId) return
 
         // Corrections/additions must not overwrite the original travel journal.
         if (['N', 'E', 'I'].includes(type)) {
@@ -193,7 +204,7 @@ async function onSubmit() {
                 }
             })
         }
-        await router.push({ name: 'documents-kilometers-show', params: { documentId } })
+        await router.push({ name: 'documents-kilometers-show', params: { documentId: result.documentId } })
     } catch (error: any) {
         const body = error?.response?.data
         const messages = body?.errors && typeof body.errors === 'object'
@@ -204,7 +215,6 @@ async function onSubmit() {
         }))
     } finally {
         busy.value = false
-        uiOverlayStore.setContentLoading(false)
     }
 }
 
@@ -213,7 +223,6 @@ watch([branchId, () => batchType.value?.code, () => insurance.value?.id, dates],
 })
 onBeforeUnmount(() => {
     formVersion++
-    uiOverlayStore.setContentLoading(false)
 })
 
 onMounted(() => {

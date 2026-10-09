@@ -82,7 +82,7 @@ const savePatient = async () => {
 
 
 <template>
-    <PatientForm :disabled="props.isManagerView" v-if="patient?.id" v-model:patient="patient" :submitted="submitted"
+    <PatientForm v-if="patient?.id" v-model:patient="patient" :submitted="submitted"
         :errors="errors" @clear-error="clearError"
         :allow-assignment-editing="props.isManagerView || authStore.isSuperadmin" />
 

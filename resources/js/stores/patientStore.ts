@@ -157,9 +157,9 @@ export const usePatientStore = defineStore('patient', {
 
                 if (useAuthStore().isManager) {
                     const payload = {
+                        ...serializePatient(patient),
                         branch_id: patient.branch_id,
                         nurse_id: patient.nurse_id,
-                        death_date: patient.death_date,
                     }
                     const response = await api.put(`/v1/patients/${patient.id}`, payload)
 

@@ -36,7 +36,6 @@ class KilometersExportController extends Controller
             'blocked' => $selection['blocked'], 'previewToken' => $selection['preview_token'],
             'can_create' => $selection['can_create'], 'car' => $selection['car'],
             'route_changes' => $selection['route_changes'],
-            'comparison_basis' => 'Posledné uložené znenie každej jazdy v danej poisťovni a období; uloženie nepotvrdzuje prijatie poisťovňou.',
             'notice' => 'Trasa a kilometre sú vypočítané podľa evidovaných návštev. Opravná dávka slúži na reklamáciu neuznaných riadkov; zmena výkonu sama nepotvrdzuje zamietnutie poisťovňou.',
         ]]);
     }

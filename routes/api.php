@@ -48,6 +48,7 @@ use App\Http\Controllers\Api\BatchDocumentController;
 use App\Http\Controllers\Api\VisitsController;
 use App\Http\Controllers\Api\CityController;
 use App\Http\Controllers\Api\ManagerController;
+use App\Http\Controllers\Api\MonthlyExportController;
 use App\Http\Controllers\Api\TotalsController;
 use App\Http\Controllers\Api\CountryController;
 use App\Http\Controllers\Api\ScanSessionController;
@@ -384,6 +385,14 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class)
         ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
+
+    Route::post('/monthly-exports', [MonthlyExportController::class, 'store'])
+        ->middleware('role:any');
+    Route::get('/monthly-exports/{monthlyExportRun}', [MonthlyExportController::class, 'show'])
+        ->middleware('role:any');
+    Route::get('/monthly-exports/{monthlyExportRun}/download', [MonthlyExportController::class, 'download'])
+        ->withoutMiddleware(ForceJsonResponse::class)
+        ->middleware('role:any');
 
     Route::get('/geocode/autocomplete', [GeocodeController::class, 'autocomplete']);
     Route::get('/geocode/details', [GeocodeController::class, 'details']);

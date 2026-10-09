@@ -45,7 +45,7 @@ class ClaimExportService
         $context['patientIds'] = $context['rows']->pluck('patient_id')->unique()->values()->all();
         $sheet = [
             'batchNumber' => $context['batchNumber'],
-            'fileName' => 'davka.' . $context['batchNumber'],
+            'fileName' => 'davka.' . $context['batchNumber'] . '.txt',
             'amount' => round(array_sum(array_column($selection['selected'], 'amount')), 2),
             'kilometers' => $context['rows']->sum('reported_km'),
             'periodFrom' => $context['from'], 'periodTo' => $context['to'],

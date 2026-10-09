@@ -59,7 +59,13 @@ class RoutePlanner
                 if ($remaining !== [] || !$this->sameCoordinates($end, [$branch['longitude'], $branch['latitude']])) {
                     $this->fail('Trasa neobsahuje všetky zastávky alebo návrat do prevádzky.');
                 }
-                $stop = ['key' => 'return', 'address' => $branch['address'], 'city' => $branch['city'], 'patient_ids' => []];
+                $lastLeg = $legs[array_key_last($legs)] ?? null;
+                $stop = [
+                    'key' => 'return',
+                    'address' => $branch['address'],
+                    'city' => $branch['city'],
+                    'patient_ids' => $lastLeg['patient_ids'] ?? [],
+                ];
             } else {
                 $matches = array_keys(array_filter($remaining, fn ($stop) => $this->sameCoordinates($end, [$stop['longitude'], $stop['latitude']])));
                 if ($matches === []) {

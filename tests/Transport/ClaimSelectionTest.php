@@ -26,7 +26,8 @@ class ClaimSelectionTest extends TransportTestCase
         $this->days = [['date' => '2026-09-01', 'fingerprint' => str_repeat('a', 64), 'legs' => [
             ['journey_id' => 51, 'is_return' => false, 'distance_m' => 10000, 'patient_ids' => [1, 2],
                 'origin' => ['address' => 'Základňa 1', 'city' => 'Nitra'], 'destination' => ['address' => 'A 1', 'city' => 'Nitra']],
-            ['journey_id' => null, 'is_return' => true, 'distance_m' => 10000, 'patient_ids' => []],
+            ['journey_id' => 52, 'is_return' => true, 'distance_m' => 10000, 'patient_ids' => [1, 2],
+                'origin' => ['address' => 'A 1', 'city' => 'Nitra'], 'destination' => ['address' => 'Základňa 1', 'city' => 'Nitra']],
         ]]];
     }
 
@@ -76,12 +77,13 @@ class ClaimSelectionTest extends TransportTestCase
     {
         $rows = [$this->point(11, 1), $this->point(12, 2, 'eu')];
         $domestic = $this->select('N', $rows);
-        self::assertCount(1, $domestic['selected']);
+        self::assertCount(2, $domestic['selected']);
         self::assertSame(1, $domestic['selected'][0]['patient_id']);
         self::assertSame(10, $domestic['selected'][0]['kilometers']);
+        self::assertSame('Základňa 1, Nitra', $domestic['selected'][1]['destination']);
         self::assertSame([], $this->select('E', $rows)['selected']);
         // A different insurer is allowed its own representative at the same stop.
-        self::assertCount(1, $this->select('E', [$rows[1]], insurer: 2)['selected']);
+        self::assertCount(2, $this->select('E', [$rows[1]], insurer: 2)['selected']);
     }
 
     public function test_addition_does_not_charge_a_new_patient_at_an_already_billed_stop(): void
@@ -103,7 +105,8 @@ class ClaimSelectionTest extends TransportTestCase
         $replacement = $this->select('N', [$point]);
 
         self::assertTrue($replacement['can_create']);
-        self::assertCount(1, $replacement['selected']);
+        self::assertCount(2, $replacement['selected']);
+        self::assertSame('Základňa 1, Nitra', $replacement['selected'][1]['destination']);
     }
 
     public function test_correction_keeps_journey_and_patient_when_an_earlier_point_is_added(): void
@@ -163,7 +166,10 @@ class ClaimSelectionTest extends TransportTestCase
 
     public function test_new_addition_does_not_require_an_artificial_empty_new_batch(): void
     {
-        self::assertCount(1, $this->select('A', [$this->point(11, 1)])['selected']);
+        $selection = $this->select('A', [$this->point(11, 1)]);
+
+        self::assertCount(2, $selection['selected']);
+        self::assertSame('Základňa 1, Nitra', $selection['selected'][1]['destination']);
     }
 
     public function test_stale_preview_is_rejected(): void

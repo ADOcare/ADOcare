@@ -82,8 +82,10 @@ class RouteAndOdometerTest extends TransportTestCase
         $legs = (new RoutePlanner())->mapLegs($branch, $stops, $raw, '2026-09-01', $start, 600);
         self::assertCount(3, $legs);
         self::assertSame(['Základňa 1', 'A 1', 'B 2'], array_column(array_column($legs, 'origin'), 'address'));
+        self::assertSame(['A 1', 'B 2', 'Základňa 1'], array_column(array_column($legs, 'destination'), 'address'));
         self::assertSame([false, false, true], array_column($legs, 'is_return'));
         self::assertSame([1, 2], $legs[0]['patient_ids']);
+        self::assertSame([3], $legs[2]['patient_ids']);
         self::assertSame(6000, array_sum(array_column($legs, 'distance_m')));
         self::assertSame(1200, $legs[0]['service_seconds']);
         self::assertSame([120, 120, 120], array_column($legs, 'travel_seconds'));

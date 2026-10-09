@@ -103,17 +103,7 @@ class LegacyClaimExportService
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
             ->join('branches as b', 'b.id', '=', 'pp.branch_id')
-            ->join('patient_coverages as pc', function ($join) {
-                $join->on('pc.patient_id', '=', 'p.id')
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_from')
-                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
-                    })
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_to')
-                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
-                    });
-            })
+            ->join('patient_coverages as pc', 'pc.patient_id', '=', 'p.id')
             ->leftJoin('procedures as proc', function ($join) {
                 $join->where('proc.code', '=', '0000');
             })
@@ -129,7 +119,7 @@ class LegacyClaimExportService
             ->whereColumn('p.branch_id', 'pp.branch_id')
             ->whereBetween('pp.date', [$from, $to])
             ->whereIn('pp.procedure_code', ['3439', '3440'])
-            ->where('pc.regime', $this->regimeForCharacter($type))
+            ->where('pc.category', $this->categoryForCharacter($type))
             ->when(!empty($patientIds), fn ($query) => $query->whereIn('pp.patient_id', $patientIds))
             ->orderBy('pp.date')
             ->orderBy('pp.patient_id')
@@ -159,20 +149,15 @@ class LegacyClaimExportService
                 'b.longitude as branch_lng',
 
                 'pcp.price',
-                'pc.regime',
+                'pc.category',
                 'pc.identification_method',
                 'pc.member_state_code',
                 'pc.foreign_insured_id',
                 'pc.special_category',
-                'pc.entitlement_document_type',
-                'pc.entitlement_confirmed',
-                'pc.valid_from as coverage_valid_from',
             ])
             ->get()
             ->groupBy('id')
-            ->map(fn ($matches) => $matches->sortByDesc(
-                fn ($match) => $match->coverage_valid_from ?? '0000-00-00'
-            )->first())
+            ->map(fn ($matches) => $matches->first())
             ->values();
 
         $rows = $this->normalizeAddressAndCityFields($rows);
@@ -944,7 +929,7 @@ class LegacyClaimExportService
         return $calculatedRows;
     }
 
-    private function regimeForCharacter(string $character): string
+    private function categoryForCharacter(string $character): string
     {
         return match (true) {
             in_array($character, ['N', 'O', 'A'], true) => 'domestic',
@@ -966,7 +951,7 @@ class LegacyClaimExportService
                 'patient_id' => $row->patient_id ?? null,
                 'service_date' => $row->date ?? null,
                 'character' => $resolved->character,
-                'regime' => $resolved->regime,
+                'regime' => $resolved->category,
                 'identification_method' => $resolved->identificationMethod,
                 'used' => [
                     'personal_number' => $resolved->personalNumber,

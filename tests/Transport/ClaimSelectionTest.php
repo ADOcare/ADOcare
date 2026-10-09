@@ -30,13 +30,13 @@ class ClaimSelectionTest extends TransportTestCase
         ]]];
     }
 
-    private function point(int $id, int $patient, string $regime = 'domestic'): object
+    private function point(int $id, int $patient, string $category = 'domestic'): object
     {
         return (object) [
             'id' => $id, 'patient_id' => $patient, 'date' => '2026-09-01', 'first_name' => 'Test', 'last_name' => 'Pacient',
             'procedure_code' => '3439', 'diagnosis_code' => 'I10', 'personal_number' => '1234567890', 'price' => '0.50',
-            'regime' => $regime, 'identification_method' => $regime === 'domestic' ? 'slovak_identifier' : 'foreign_triad',
-            'member_state_code' => 'CZ', 'foreign_insured_id' => 'CZ001', 'sex' => 'F', 'entitlement_confirmed' => true,
+            'category' => $category, 'identification_method' => $category === 'domestic' ? 'slovak_identifier' : 'foreign_triad',
+            'member_state_code' => 'CZ', 'foreign_insured_id' => 'CZ001', 'sex' => 'F',
             'created_at' => '2026-09-01 08:00:00', 'updated_at' => '2026-09-01 08:00:00',
         ];
     }
@@ -52,10 +52,15 @@ class ClaimSelectionTest extends TransportTestCase
         ], $this->actor, $this->branch, $preview);
     }
 
-    private function save(array $line, string $character = 'N', int $insurer = 1): void
+    private function save(array $line, string $character = 'N', int $insurer = 1): int
     {
+        $documentId = 100 + DB::table('transport_claim_batches')->count();
+        DB::table('documents')->insert([
+            'id' => $documentId, 'company_id' => 1, 'branch_id' => 1, 'user_id' => 1,
+            'insurance_company_id' => $insurer, 'period' => '2026-09', 'type' => 'kilometers_batch',
+        ]);
         $id = DB::table('transport_claim_batches')->insertGetId([
-            'document_id' => 100 + DB::table('transport_claim_batches')->count(), 'company_id' => 1, 'branch_id' => 1, 'user_id' => 1,
+            'document_id' => $documentId, 'company_id' => 1, 'branch_id' => 1, 'user_id' => 1,
             'insurance_company_id' => $insurer, 'period' => '2026-09', 'character' => $character, 'revision' => 1, 'payload' => '{}',
         ]);
         DB::table('transport_claim_lines')->insert([
@@ -63,6 +68,8 @@ class ClaimSelectionTest extends TransportTestCase
             'patient_id' => $line['patient_id'], 'patient_point_id' => $line['point_id'], 'character' => $character,
             'fingerprint' => $line['fingerprint'], 'payload' => json_encode($line, JSON_THROW_ON_ERROR),
         ]);
+
+        return $documentId;
     }
 
     public function test_one_stop_has_one_representative_across_domestic_and_eu_batches(): void
@@ -83,6 +90,20 @@ class ClaimSelectionTest extends TransportTestCase
         $this->save($this->select('N', [$original])['selected'][0]);
         self::assertSame([], $this->select('A', [$original, $this->point(12, 2)])['selected']);
         self::assertFalse($this->select('N', [$original])['can_create']);
+    }
+
+    public function test_new_batch_can_be_recreated_after_its_document_is_deleted(): void
+    {
+        $point = $this->point(11, 1);
+        $original = $this->select('N', [$point])['selected'][0];
+        $documentId = $this->save($original);
+
+        DB::table('documents')->where('id', $documentId)->update(['deleted_at' => now()]);
+
+        $replacement = $this->select('N', [$point]);
+
+        self::assertTrue($replacement['can_create']);
+        self::assertCount(1, $replacement['selected']);
     }
 
     public function test_correction_keeps_journey_and_patient_when_an_earlier_point_is_added(): void

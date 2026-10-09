@@ -25,15 +25,15 @@ const selectedIds = ref<number[]>([])
 const showPreview = ref(false)
 let formVersion = 0
 const types = [
-    { code: 'N', name: 'Nová – tuzemskí (N)' },
-    { code: 'O', name: 'Opravná – tuzemskí (O)' },
-    { code: 'A', name: 'Aditívna – tuzemskí (A)' },
-    { code: 'E', name: 'Nová – zahraničný nárok (E)' },
-    { code: 'F', name: 'Opravná – zahraničný nárok (F)' },
-    { code: 'G', name: 'Aditívna – zahraničný nárok (G)' },
-    { code: 'I', name: 'Nová – osobitný režim (I)' },
-    { code: 'J', name: 'Opravná – osobitný režim (J)' },
-    { code: 'K', name: 'Aditívna – osobitný režim (K)' },
+    { code: 'N', name: 'Nová dávka' },
+    { code: 'O', name: 'Opravná dávka' },
+    { code: 'A', name: 'Aditívna dávka' },
+    { code: 'E', name: 'Nová dávka – poistenci EÚ' },
+    { code: 'F', name: 'Opravná dávka – poistenci EÚ' },
+    { code: 'G', name: 'Aditívna dávka – poistenci EÚ' },
+    { code: 'I', name: 'Nová dávka - osobitný režim' },
+    { code: 'J', name: 'Opravná dávka – osobitný režim' },
+    { code: 'K', name: 'Aditívna dávka – osobitný režim' },
 ]
 const selected = computed(() => (preview.value?.candidates ?? []).filter((row: any) => selectedIds.value.includes(row.journey_id)))
 const totalKm = computed(() => selected.value.reduce((sum: number, row: any) => sum + row.kilometers, 0))

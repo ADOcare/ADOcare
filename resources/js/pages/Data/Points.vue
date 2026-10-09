@@ -96,7 +96,7 @@ const batchTypes = ref<BatchType[]>([
     { code: 'E', name: 'Nová dávka – poistenci EÚ' },
     { code: 'F', name: 'Opravná dávka – poistenci EÚ' },
     { code: 'G', name: 'Aditívna dávka – poistenci EÚ' },
-    { code: 'I', name: 'Dávka cudzinci mimo EU, bezdomovci' },
+    { code: 'I', name: 'Nová dávka - osobitný režim' },
     { code: 'J', name: 'Opravná dávka – osobitný režim' },
     { code: 'K', name: 'Aditívna dávka – osobitný režim' },
 ])

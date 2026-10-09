@@ -44,6 +44,7 @@ abstract class TransportTestCase extends TestCase
             }
             $table->string('period');
             $table->string('type');
+            $table->softDeletes();
         });
         $migration = require __DIR__ . '/../../database/migrations/2026_10_06_120000_create_transport_records.php';
         $migration->up();

@@ -20,17 +20,17 @@ class ExportFormatTest extends TransportTestCase
             $this->createMock(ClaimSelectionService::class));
         $method = new \ReflectionMethod($service, 'build793nAdosContent');
         foreach (['N', 'O', 'A', 'E', 'F', 'G', 'I', 'J', 'K'] as $character) {
-            $eu = in_array($character, ['E', 'F', 'G'], true);
+            $foreign = in_array($character, ['E', 'F', 'G', 'J'], true);
             $special = in_array($character, ['I', 'J', 'K'], true);
             $row = (object) [
                 'date' => '2026-09-01', 'patient_id' => 1, 'personal_number' => '1234567890',
                 'first_name' => 'Žofia', 'last_name' => 'Šťastná', 'diagnosis_code' => 'I10',
                 'branch_city' => 'Nitra', 'branch_address' => 'Základňa 1', 'patient_city' => 'Nitra', 'patient_address' => 'Hlavná 1',
                 'journey_id' => 51, 'reported_km' => 10, 'doctor_pzs' => 'P12345678901', 'doctor_zpr' => 'A12345678',
-                'regime' => $eu ? 'eu' : ($special ? 'special' : 'domestic'),
-                'identification_method' => $eu ? 'foreign_triad' : 'slovak_identifier',
+                'category' => $special ? 'special' : ($foreign ? 'eu' : 'domestic'),
+                'identification_method' => $foreign ? 'foreign_triad' : 'slovak_identifier',
                 'member_state_code' => 'CZ', 'foreign_insured_id' => 'CZ001', 'sex' => 'F',
-                'entitlement_confirmed' => true, 'special_category' => $special ? 'statutory_test_category' : null,
+                'special_category' => $special ? 'statutory_entitlement_9_3' : null,
             ];
             $content = $method->invoke($service, [
                 'type' => $character, 'batchNumber' => '010925', 'from' => '2026-09-01', 'rows' => collect([$row]),
@@ -50,10 +50,10 @@ class ExportFormatTest extends TransportTestCase
             self::assertSame('10', $body[8]);
             self::assertSame('ADOS', $body[7]);
             self::assertSame('0', $body[15]);
-            self::assertSame($eu ? '' : '1234567890', $body[2]);
-            self::assertSame($eu ? 'CZ' : '', $body[20]);
-            self::assertSame($eu ? 'CZ001' : '', $body[21]);
-            self::assertSame($eu ? 'F' : '', $body[22]);
+            self::assertSame($foreign ? '' : '1234567890', $body[2]);
+            self::assertSame($foreign ? 'CZ' : '', $body[20]);
+            self::assertSame($foreign ? 'CZ001' : '', $body[21]);
+            self::assertSame($foreign ? 'F' : '', $body[22]);
         }
     }
 

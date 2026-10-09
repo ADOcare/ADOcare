@@ -1,20 +1,15 @@
 import { ref } from 'vue';
 import type { Patient } from '@/types/models';
 import useAuthStore from '@/stores/auth';
+import { isValidEmail } from '@/composables/companySettingsShared';
 
 type PatientCoverageForm = {
-    regime?: 'domestic' | 'eu' | 'special' | 'unclassified' | null;
-    category?: 'domestic' | 'eu' | 'non_eu' | 'homeless' | 'other' | null;
-    identification_method?: 'slovak_identifier' | 'foreign_triad' | 'incomplete' | null;
+    category?: 'domestic' | 'eu' | 'special' | null;
+    identification_method?: 'slovak_identifier' | 'foreign_triad' | null;
     insurance_company_id?: number | null;
     member_state_code?: string | null;
     foreign_insured_id?: string | null;
     special_category?: string | null;
-    other_subtype?: string | null;
-    legal_basis?: string | null;
-    entitlement_confirmed?: boolean;
-    valid_from?: string | null;
-    valid_to?: string | null;
 };
 
 type PatientWithCoverage = Patient & {
@@ -42,20 +37,16 @@ export default function usePatientFormValidation(patient: { value: PatientWithCo
         if (!p.last_name?.trim()) e.last_name = 'Priezvisko je povinné.';
         if (!p.sex) e.sex = 'Pohlavie je povinné.';
         if (!p.doctor_id) e.doctor_id = 'Lekár je povinný.';
+        if (p.contact?.trim() && !isValidEmail(p.contact)) {
+            e.contact = 'Zadajte platnú emailovú adresu.';
+        }
         const coverage = p.coverage ?? {};
 
         if (!coverage.category) {
             e['coverage.category'] = 'Vyberte kategóriu poistenca.';
         }
 
-        if (!coverage.regime) {
-            e['coverage.regime'] = 'Vyberte kategóriu poistenca.';
-        }
-
-        if (
-            coverage.regime !== 'unclassified'
-            && !coverage.insurance_company_id
-        ) {
+        if (!coverage.insurance_company_id) {
             e['coverage.insurance_company_id'] = 'Poisťovňa je povinná.';
         }
 
@@ -66,7 +57,7 @@ export default function usePatientFormValidation(patient: { value: PatientWithCo
             e.personal_number = 'Rodné číslo alebo pridelený BIČ je povinný.';
         }
 
-        if (coverage.regime === 'eu') {
+        if (coverage.identification_method === 'foreign_triad') {
             if (!coverage.member_state_code?.trim()) {
                 e['coverage.member_state_code'] = 'Štát poistenia je povinný.';
             }
@@ -76,27 +67,8 @@ export default function usePatientFormValidation(patient: { value: PatientWithCo
             }
         }
 
-        if (coverage.regime === 'special' && !coverage.special_category) {
+        if (coverage.category === 'special' && !coverage.special_category) {
             e['coverage.special_category'] = 'Kategória osobitného nároku je povinná.';
-        }
-
-        if (coverage.category === 'other' && !coverage.other_subtype?.trim()) {
-            e['coverage.other_subtype'] = 'Vyberte konkrétnu situáciu pacienta.';
-        }
-
-        if (
-            ['non_eu', 'homeless', 'other'].includes(coverage.category ?? '')
-            && !coverage.legal_basis?.trim()
-        ) {
-            e['coverage.legal_basis'] = 'Chýba určenie právneho nároku pacienta.';
-        }
-
-        if (
-            coverage.valid_from
-            && coverage.valid_to
-            && coverage.valid_to < coverage.valid_from
-        ) {
-            e['coverage.valid_to'] = 'Koniec platnosti nemôže byť pred začiatkom platnosti.';
         }
 
         if (!p.city?.trim()) e.city = 'Mesto je povinné.';

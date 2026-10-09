@@ -31,6 +31,7 @@ class ClaimSelectionService
             ->where('d.type', 'kilometers_batch')->where('d.company_id', $branch->company_id)
             ->where('d.branch_id', $branch->id)->where('d.user_id', $actor->id)
             ->where('d.insurance_company_id', $context['insuranceId'])->where('d.period', $period)
+            ->whereNull('d.deleted_at')
             ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('transport_claim_batches as b')
                 ->whereColumn('b.document_id', 'd.id'))->exists();
         if ($legacyExists) {
@@ -52,7 +53,13 @@ class ClaimSelectionService
             throw ValidationException::withMessages(['transport' => ['Doprava je pre túto spoločnosť a poisťovňu vypnutá.']]);
         }
         $existingNew = $operation === 'N'
-            ? DB::table('transport_claim_batches')->where($scope)->where('character', $newCharacter)->first()
+            ? DB::table('transport_claim_batches as b')
+                ->join('documents as d', 'd.id', '=', 'b.document_id')
+                ->whereNull('d.deleted_at')
+                ->where($this->batchScope($scope))
+                ->where('b.character', $newCharacter)
+                ->select('b.*')
+                ->first()
             : null;
         $candidates = [];
         $blocked = $existingNew ? [['date' => '', 'address' => '', 'reason' => 'Nová dávka už je uložená ako dokument ' . $existingNew->document_id . '. Použite jej pôvodný súbor alebo zvoľte opravnú či aditívnu dávku.']] : [];
@@ -211,7 +218,7 @@ class ClaimSelectionService
         if (!$previewOnly && $expected && !hash_equals($token, $expected)) {
             throw ValidationException::withMessages(['previewToken' => ['Údaje sa od náhľadu zmenili. Obnovte náhľad.']]);
         }
-        if (!$previewOnly && $operation !== 'N') {
+        if (!$previewOnly && $operation !== 'N' && $patientFilter === []) {
             if (!is_array($selectedIds) || $selectedIds === [] || !$expected) {
                 throw ValidationException::withMessages(['journeyIds' => ['Najprv otvorte náhľad a vyberte konkrétne jazdy do dávky.']]);
             }
@@ -229,8 +236,10 @@ class ClaimSelectionService
 
     public function history(array $scope): array
     {
-        // Deleting a visible document never erases generated claim history.
-        $query = DB::table('transport_claim_lines as l')->join('transport_claim_batches as b', 'b.id', '=', 'l.batch_id')
+        $query = DB::table('transport_claim_lines as l')
+            ->join('transport_claim_batches as b', 'b.id', '=', 'l.batch_id')
+            ->join('documents as d', 'd.id', '=', 'b.document_id')
+            ->whereNull('d.deleted_at')
             ->whereColumn('l.revision', 'b.revision');
         foreach ($scope as $field => $value) {
             $query->where('b.' . $field, $value);
@@ -238,10 +247,15 @@ class ClaimSelectionService
         return $query->select('l.*', 'b.document_id')->orderByDesc('l.id')->get()->unique('journey_id')->keyBy('journey_id')->all();
     }
 
+    private function batchScope(array $scope): array
+    {
+        return collect($scope)->mapWithKeys(fn ($value, $field) => ['b.' . $field => $value])->all();
+    }
+
     private function fingerprint(array $row, array $routeData): string
     {
         $fields = ['id', 'patient_id', 'date', 'diagnosis_code', 'procedure_code', 'personal_number',
-            'first_name', 'last_name', 'sex', 'doctor_pzs', 'doctor_zpr', 'regime', 'identification_method',
+            'first_name', 'last_name', 'sex', 'doctor_pzs', 'doctor_zpr', 'category', 'identification_method',
             'member_state_code', 'foreign_insured_id', 'special_category', 'price'];
         $values = [];
         foreach ($fields as $key) {

@@ -421,12 +421,13 @@ const options = computed<DataTableOptions<Patient>>(() => {
                 key: 'add',
                 icon: 'bi bi-plus-lg',
                 class: 'bg-accent!',
-                handler: async () => {
+                handler: async ({ remote }) => {
                     await openModal(
                         markRaw(CreatePatientForm),
                         {},
                         { header: 'Pridať Pacienta', style: { width: '90%' } },
                     )
+                    remote.reload()
                 },
             },
             {

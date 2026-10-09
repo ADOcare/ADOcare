@@ -23,10 +23,12 @@ class PatientStoreRequest extends FormRequest
             'last_name' => 'required|string|max:255',
             'title' => 'nullable|string|max:255',
             'personal_number' => 'nullable|string|max:255',
-            'sex' => 'nullable|in:M,F',
-            'contact' => 'nullable|string|max:255',
+            'sex' => 'required|in:M,F',
+            'contact' => 'nullable|email|max:255',
+            'country_code_phone' => ['nullable', 'string', 'regex:/^\+[1-9]\d{0,3}$/'],
+            'phone' => 'nullable|string|max:30',
 
-            'doctor_id' => 'nullable|integer|exists:doctors,id',
+            'doctor_id' => 'required|integer|exists:doctors,id',
             'insurance_company_id' => 'nullable|integer|exists:insurance_companies,id',
             'nurse_id' => 'nullable|integer|exists:users,id',
 

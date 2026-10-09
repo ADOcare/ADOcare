@@ -14,7 +14,7 @@ class Patient extends Model
 
     protected $table = 'patients';
 
-    protected $fillable = ['first_name', 'last_name', 'title', 'personal_number', 'sex', 'contact', 'doctor_id', 'insurance_company_id', 'address', 'city', 'zip', 'latitude', 'longitude', 'reference_date', 'dekurz_number', 'branch_id', 'nurse_id', 'death_date'];
+    protected $fillable = ['first_name', 'last_name', 'title', 'personal_number', 'sex', 'contact', 'country_code_phone', 'phone', 'doctor_id', 'insurance_company_id', 'address', 'city', 'zip', 'latitude', 'longitude', 'reference_date', 'dekurz_number', 'branch_id', 'nurse_id', 'death_date'];
 
     public function nurse()
     {
@@ -48,17 +48,7 @@ class Patient extends Model
 
     public function currentCoverage()
     {
-        return $this->hasOne(PatientCoverage::class)
-            ->where(function ($query) {
-                $query->whereNull('valid_from')
-                    ->orWhereDate('valid_from', '<=', today());
-            })
-            ->where(function ($query) {
-                $query->whereNull('valid_to')
-                    ->orWhereDate('valid_to', '>=', today());
-            })
-            ->orderByRaw("COALESCE(valid_from, DATE '0001-01-01') DESC")
-            ->orderByDesc('id');
+        return $this->latestCoverage();
     }
 
     public function latestCoverage()

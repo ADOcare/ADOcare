@@ -7,21 +7,12 @@ const STORAGE_KEY = 'selected-patient'
 
 export type PatientCoverage = {
     id?: number
-    regime: 'domestic' | 'eu' | 'special' | 'unclassified' | null
-    category: 'domestic' | 'eu' | 'non_eu' | 'homeless' | 'other' | null
-    identification_method: 'slovak_identifier' | 'foreign_triad' | 'incomplete' | null
+    category: 'domestic' | 'eu' | 'special' | null
+    identification_method: 'slovak_identifier' | 'foreign_triad' | null
     insurance_company_id: number | null
     member_state_code: string | null
     foreign_insured_id: string | null
     special_category: string | null
-    other_subtype: string | null
-    legal_basis: string | null
-    entitlement_confirmed: boolean
-    document_registered: boolean
-    entitlement_document_type: string | null
-    entitlement_document_number: string | null
-    valid_from: string | null
-    valid_to: string | null
     is_verified: boolean
 }
 
@@ -62,21 +53,12 @@ function serializeCoverage(patient: PatientWithCoverage): PatientCoverage | null
 
     return {
         id: patient.coverage.id,
-        regime: patient.coverage.regime,
         category: patient.coverage.category,
         identification_method: patient.coverage.identification_method,
         insurance_company_id: patient.coverage.insurance_company_id,
         member_state_code: patient.coverage.member_state_code,
         foreign_insured_id: patient.coverage.foreign_insured_id,
         special_category: patient.coverage.special_category,
-        other_subtype: patient.coverage.other_subtype,
-        legal_basis: patient.coverage.legal_basis,
-        entitlement_confirmed: patient.coverage.entitlement_confirmed,
-        document_registered: patient.coverage.document_registered,
-        entitlement_document_type: patient.coverage.entitlement_document_type,
-        entitlement_document_number: patient.coverage.entitlement_document_number,
-        valid_from: patient.coverage.valid_from,
-        valid_to: patient.coverage.valid_to,
         is_verified: patient.coverage.is_verified,
     }
 }
@@ -89,6 +71,8 @@ function serializePatient(patient: PatientWithCoverage) {
         personal_number: patient.personal_number,
         sex: patient.sex,
         contact: patient.contact,
+        country_code_phone: patient.country_code_phone,
+        phone: patient.phone,
         doctor_id: patient.doctor_id,
         address: patient.address,
         city: patient.city,
@@ -271,7 +255,7 @@ export const usePatientStore = defineStore('patient', {
             first_name: string
             last_name: string
             insurance_company_id: number
-            regime: string
+            category: string
         }): Promise<PatientInsuranceCheckResult> {
             try {
                 const response = await api.post('/v1/patients/insurance-check', payload)

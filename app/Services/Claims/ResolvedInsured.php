@@ -6,7 +6,7 @@ final readonly class ResolvedInsured
 {
     public function __construct(
         public string $character,
-        public string $regime,
+        public string $category,
         public string $identificationMethod,
         public ?string $personalNumber,
         public ?string $memberStateCode,

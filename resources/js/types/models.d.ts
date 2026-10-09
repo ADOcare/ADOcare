@@ -146,23 +146,14 @@ export interface PatientCoverage {
   id: number
   patient_id: number
   insurance_company_id: number | null
-  regime: PatientCoverageRegime
   member_state_code: string | null
   foreign_insured_id: string | null
   special_category: PatientSpecialCoverageCategory | null
-  entitlement_document_type: string | null
-  entitlement_document_number: string | null
-  valid_from: string | null
-  valid_to: string | null
   is_verified: boolean
   created_at: string | null
   updated_at: string | null
   category: PatientCoverageCategory
   identification_method: PatientIdentificationMethod
-  other_subtype: string | null
-  legal_basis: string | null
-  entitlement_confirmed: boolean
-  document_registered: boolean
   // relations
   patient: Patient
   insurance_company: InsuranceCompany
@@ -286,7 +277,7 @@ export interface User {
   signature_path: string | null
   deleted_at: string | null
   // overrides
-    branch_roles: Array<{ branch_id: number, role_id: number | null, position: string | null }>
+  branch_roles: Array<{ branch_id: int, role_id: ?int, position: ?string }>
   // relations
   cars: Car[]
   branches: Branch[]
@@ -678,30 +669,30 @@ export interface PatientPoint {
 }
 
 export interface Car {
-    // columns
-    id: number
-    evc: string | null
-    vin?: string | null
-    company_id: number | null
-    user_id: number | null
-    created_at: string | null
-    updated_at: string | null
-    model: string | null
-    fuel_consumption_l_per_100km: number | null
-    owner_name: string | null
-    // relations
-    company: Company
-    user: User
-    documents: CarDocument[]
-    services: CarService[]
-    // counts
-    documents_count: number
-    services_count: number
-    // exists
-    company_exists: boolean
-    user_exists: boolean
-    documents_exists: boolean
-    services_exists: boolean
+  // columns
+  id: number
+  evc: string | null
+  company_id: number | null
+  user_id: number | null
+  created_at: string | null
+  updated_at: string | null
+  model: string | null
+  fuel_consumption_l_per_100km: number | null
+  owner_name: string | null
+  vin: string | null
+  // relations
+  company: Company
+  user: User
+  documents: CarDocument[]
+  services: CarService[]
+  // counts
+  documents_count: number
+  services_count: number
+  // exists
+  company_exists: boolean
+  user_exists: boolean
+  documents_exists: boolean
+  services_exists: boolean
 }
 
 export interface Visit {
@@ -781,6 +772,8 @@ export interface Patient {
   nurse_id: number | null
   country_id: number | null
   death_date: string | null
+  country_code_phone: string | null
+  phone: string | null
   // relations
   nurse: User
   branch: Branch
@@ -788,7 +781,6 @@ export interface Patient {
   visits: Visit[]
   insurance_company: InsuranceCompany
   coverages: PatientCoverage[]
-  current_coverage: PatientCoverage
   latest_coverage: PatientCoverage
   // counts
   visits_count: number
@@ -800,7 +792,6 @@ export interface Patient {
   visits_exists: boolean
   insurance_company_exists: boolean
   coverages_exists: boolean
-  current_coverage_exists: boolean
   latest_coverage_exists: boolean
 }
 
@@ -868,15 +859,6 @@ export interface Macro {
   user_exists: boolean
 }
 
-const PatientCoverageRegime = {
-  DOMESTIC: 'domestic',
-  EU: 'eu',
-  SPECIAL: 'special',
-  UNCLASSIFIED: 'unclassified',
-} as const;
-
-export type PatientCoverageRegime = typeof PatientCoverageRegime[keyof typeof PatientCoverageRegime]
-
 const PatientSpecialCoverageCategory = {
   HOMELESS: 'homeless',
   NON_EU_FOREIGNER: 'non_eu_foreigner',
@@ -888,9 +870,7 @@ export type PatientSpecialCoverageCategory = typeof PatientSpecialCoverageCatego
 const PatientCoverageCategory = {
   DOMESTIC: 'domestic',
   EU: 'eu',
-  NON_EU: 'non_eu',
-  HOMELESS: 'homeless',
-  OTHER: 'other',
+  SPECIAL: 'special',
 } as const;
 
 export type PatientCoverageCategory = typeof PatientCoverageCategory[keyof typeof PatientCoverageCategory]
@@ -898,7 +878,6 @@ export type PatientCoverageCategory = typeof PatientCoverageCategory[keyof typeo
 const PatientIdentificationMethod = {
   SLOVAK_IDENTIFIER: 'slovak_identifier',
   FOREIGN_TRIAD: 'foreign_triad',
-  INCOMPLETE: 'incomplete',
 } as const;
 
 export type PatientIdentificationMethod = typeof PatientIdentificationMethod[keyof typeof PatientIdentificationMethod]

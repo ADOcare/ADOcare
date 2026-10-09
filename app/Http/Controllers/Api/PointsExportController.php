@@ -212,17 +212,7 @@ class PointsExportController extends Controller
         $rows = DB::table('patient_points as pp')
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
-            ->join('patient_coverages as pc', function ($join) {
-                $join->on('pc.patient_id', '=', 'p.id')
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_from')
-                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
-                    })
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_to')
-                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
-                    });
-            })
+            ->join('patient_coverages as pc', 'pc.patient_id', '=', 'p.id')
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($companyId) {
                 $join->on('pcp.procedure_id', '=', 'pp.procedure_id')
                     ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')
@@ -234,9 +224,9 @@ class PointsExportController extends Controller
             ->whereBetween('pp.date', [$from, $to])
             ->when(!empty($pointIds), fn ($query) => $query->whereIn('pp.id', $pointIds))
             ->when(empty($pointIds), fn ($query) => $query->whereIn('pp.patient_id', $legacyPatientIds))
-            ->when(in_array($type, ['N', 'O', 'A'], true), fn ($query) => $query->where('pc.regime', 'domestic'))
-            ->when(in_array($type, ['E', 'F', 'G'], true), fn ($query) => $query->where('pc.regime', 'eu'))
-            ->when(in_array($type, ['I', 'J', 'K'], true), fn ($query) => $query->where('pc.regime', 'special'))
+            ->when(in_array($type, ['N', 'O', 'A'], true), fn ($query) => $query->where('pc.category', 'domestic'))
+            ->when(in_array($type, ['E', 'F', 'G'], true), fn ($query) => $query->where('pc.category', 'eu'))
+            ->when(in_array($type, ['I', 'J', 'K'], true), fn ($query) => $query->where('pc.category', 'special'))
             ->orderBy('pp.date')
             ->select([
                 'pp.id as patient_point_id',
@@ -252,12 +242,9 @@ class PointsExportController extends Controller
                 'p.longitude',
                 'pc.member_state_code as country_code',
                 'pc.foreign_insured_id',
-                'pc.regime',
+                'pc.category',
                 'pc.identification_method',
                 'pc.special_category',
-                'pc.entitlement_document_type',
-                'pc.entitlement_confirmed',
-                'pc.valid_from as coverage_valid_from',
 
                 'pp.diagnosis_code',
                 'pp.procedure_code',
@@ -273,9 +260,7 @@ class PointsExportController extends Controller
             ])
             ->get()
             ->groupBy('patient_point_id')
-            ->map(fn ($matches) => $matches->sortByDesc(
-                fn ($match) => $match->coverage_valid_from ?? '0000-00-00'
-            )->first())
+            ->map(fn ($matches) => $matches->first())
             ->values();
 
         $claimBatch = null;
@@ -1091,7 +1076,7 @@ class PointsExportController extends Controller
                 'patient_id' => $row->patient_id ?? null,
                 'service_date' => $row->date ?? null,
                 'character' => $resolved->character,
-                'regime' => $resolved->regime,
+                'regime' => $resolved->category,
                 'identification_method' => $resolved->identificationMethod,
                 'used' => [
                     'personal_number' => $resolved->personalNumber,

@@ -2,21 +2,15 @@
 
 namespace App\Services\Claims;
 
-use App\Enums\PatientCoverageRegime;
+use App\Enums\PatientCoverageCategory;
 use App\Enums\PatientIdentificationMethod;
 
 class InsuredClaimResolver
 {
-    private const CHARACTER_BY_REGIME = [
-        PatientCoverageRegime::DOMESTIC->value => ['N' => 'N', 'O' => 'O', 'A' => 'A'],
-        PatientCoverageRegime::EU->value => ['N' => 'E', 'O' => 'F', 'A' => 'G'],
-        PatientCoverageRegime::SPECIAL->value => ['N' => 'I', 'O' => 'J', 'A' => 'K'],
-    ];
-
-    private const TREATY_DOCUMENTS = [
-        'RS' => ['SRB/SK 111', 'SRB/SK 123'],
-        'MK' => ['RM/SK 111', 'RM/SK 112', 'RM/SK 123'],
-        'ME' => ['MNE/SK 111', 'MNE/SK 112', 'MNE/SK 123'],
+    private const CHARACTER_BY_CATEGORY = [
+        PatientCoverageCategory::DOMESTIC->value => ['N' => 'N', 'O' => 'O', 'A' => 'A'],
+        PatientCoverageCategory::EU->value => ['N' => 'E', 'O' => 'F', 'A' => 'G'],
+        PatientCoverageCategory::SPECIAL->value => ['N' => 'I', 'O' => 'J', 'A' => 'K'],
     ];
 
     public function resolve(object|array $source, string $operation): ResolvedInsured
@@ -26,40 +20,27 @@ class InsuredClaimResolver
             : ($source->{$key} ?? null);
 
         $operation = strtoupper($operation);
-        $regime = $this->stringValue($value('regime'));
+        $category = $this->stringValue($value('category') ?? $value('regime'));
         $method = $this->stringValue($value('identification_method'));
         $state = strtoupper($this->stringValue($value('member_state_code') ?? $value('country_code')));
         $foreignId = $this->stringValue($value('foreign_insured_id'));
-        $personalNumber = $this->stringValue($value('personal_number'));
+        $personalNumber = $this->stringValue($value('personal_number') ?? $value('bic'));
         $sex = strtoupper($this->stringValue($value('sex')));
         $specialCategory = $this->stringValue($value('special_category'));
         $errors = [];
-        $entitlementConfirmed = filter_var($value('entitlement_confirmed'), FILTER_VALIDATE_BOOL);
 
         if (! in_array($operation, ['N', 'O', 'A'], true)) {
             $errors[] = 'Neznáma operácia dávky; očakáva sa N, O alebo A.';
         }
 
-        if (! isset(self::CHARACTER_BY_REGIME[$regime])) {
+        if (! isset(self::CHARACTER_BY_CATEGORY[$category])) {
             $errors[] = 'Poistný režim nie je podporovaný pre export.';
         }
 
         if ($method === '') {
-            $method = $regime === PatientCoverageRegime::DOMESTIC->value
-                || $regime === PatientCoverageRegime::SPECIAL->value
-                    ? PatientIdentificationMethod::SLOVAK_IDENTIFIER->value
-                    : PatientIdentificationMethod::FOREIGN_TRIAD->value;
-        }
-
-        if ($regime === PatientCoverageRegime::EU->value && isset(self::TREATY_DOCUMENTS[$state])) {
-            $documentType = strtoupper($this->stringValue($value('entitlement_document_type')));
-            if (! $entitlementConfirmed || ! in_array($documentType, self::TREATY_DOCUMENTS[$state], true)) {
-                $errors[] = 'Zmluvný štát vyžaduje potvrdený príslušný nárokový doklad.';
-            }
-        }
-
-        if ($regime === PatientCoverageRegime::EU->value && ! $entitlementConfirmed) {
-            $errors[] = 'Zahraničný režim vyžaduje potvrdený nárokový doklad.';
+            $method = $category === PatientCoverageCategory::EU->value
+                ? PatientIdentificationMethod::FOREIGN_TRIAD->value
+                : PatientIdentificationMethod::SLOVAK_IDENTIFIER->value;
         }
 
         if ($method === PatientIdentificationMethod::SLOVAK_IDENTIFIER->value) {
@@ -86,19 +67,15 @@ class InsuredClaimResolver
             $errors[] = 'Nie je určený použiteľný spôsob identifikácie poistenca.';
         }
 
-        if ($regime === PatientCoverageRegime::SPECIAL->value && $specialCategory === '') {
+        if ($category === PatientCoverageCategory::SPECIAL->value && $specialCategory === '') {
             $errors[] = 'Osobitný režim vyžaduje konkrétnu právnu kategóriu.';
         }
 
-        if ($regime === PatientCoverageRegime::SPECIAL->value && ! $entitlementConfirmed) {
-            $errors[] = 'Osobitný režim vyžaduje potvrdený právny nárok.';
-        }
-
-        $character = self::CHARACTER_BY_REGIME[$regime][$operation] ?? '';
+        $character = self::CHARACTER_BY_CATEGORY[$category][$operation] ?? '';
 
         return new ResolvedInsured(
             character: $character,
-            regime: $regime,
+            category: $category,
             identificationMethod: $method,
             personalNumber: $personalNumber ?: null,
             memberStateCode: $state ?: null,

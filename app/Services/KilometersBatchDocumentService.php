@@ -45,7 +45,14 @@ class KilometersBatchDocumentService
                 'period' => substr($context['from'], 0, 7), 'character' => $character,
             ];
             $isNew = in_array($character, ['N', 'E', 'I'], true);
-            $existing = $isNew ? DB::table('transport_claim_batches')->where($scope)->first() : null;
+            $existing = $isNew
+                ? DB::table('transport_claim_batches as b')
+                    ->join('documents as d', 'd.id', '=', 'b.document_id')
+                    ->whereNull('d.deleted_at')
+                    ->where(collect($scope)->mapWithKeys(fn ($value, $field) => ['b.' . $field => $value])->all())
+                    ->select('b.*')
+                    ->first()
+                : null;
             if ($existing) {
                 throw ValidationException::withMessages(['batchType' => [
                     'Nová dávka už bola uložená ako dokument ' . $existing->document_id . '. Stiahnite pôvodný súbor alebo zvoľte opravnú či aditívnu dávku podľa stavu podania.',

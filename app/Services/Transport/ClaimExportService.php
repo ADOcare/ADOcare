@@ -125,17 +125,7 @@ class ClaimExportService
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
             ->join('branches as b', 'b.id', '=', 'pp.branch_id')
-            ->join('patient_coverages as pc', function ($join) {
-                $join->on('pc.patient_id', '=', 'p.id')
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_from')
-                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
-                    })
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_to')
-                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
-                    });
-            })
+            ->join('patient_coverages as pc', 'pc.patient_id', '=', 'p.id')
             ->leftJoin('procedures as proc', function ($join) {
                 $join->where('proc.code', '=', '0000');
             })
@@ -181,20 +171,15 @@ class ClaimExportService
                 'b.longitude as branch_lng',
 
                 'pcp.price',
-                'pc.regime',
+                'pc.category',
                 'pc.identification_method',
                 'pc.member_state_code',
                 'pc.foreign_insured_id',
                 'pc.special_category',
-                'pc.entitlement_document_type',
-                'pc.entitlement_confirmed',
-                'pc.valid_from as coverage_valid_from',
             ])
             ->get()
             ->groupBy('id')
-            ->map(fn ($matches) => $matches->sortByDesc(
-                fn ($match) => ($match->coverage_valid_from ?? '0000-00-00') . '|' . str_pad((string) $match->coverage_id, 20, '0', STR_PAD_LEFT)
-            )->first())
+            ->map(fn ($matches) => $matches->first())
             ->filter(fn ($row) => (int) $row->insurance_company_id === $insuranceId)
             ->values();
 
@@ -857,16 +842,6 @@ class ClaimExportService
         ])->all();
     }
 
-    private function regimeForCharacter(string $character): string
-    {
-        return match (true) {
-            in_array($character, ['N', 'O', 'A'], true) => 'domestic',
-            in_array($character, ['E', 'F', 'G'], true) => 'eu',
-            in_array($character, ['I', 'J', 'K'], true) => 'special',
-            default => 'unclassified',
-        };
-    }
-
     private function normalizedInsuredRows(array $context): array
     {
         $operation = $this->insuredResolver->operationForCharacter($context['type']);
@@ -879,7 +854,7 @@ class ClaimExportService
                 'patient_id' => $row->patient_id ?? null,
                 'service_date' => $row->date ?? null,
                 'character' => $resolved->character,
-                'regime' => $resolved->regime,
+                'regime' => $resolved->category,
                 'identification_method' => $resolved->identificationMethod,
                 'used' => [
                     'personal_number' => $resolved->personalNumber,

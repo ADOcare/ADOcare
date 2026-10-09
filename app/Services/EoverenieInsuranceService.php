@@ -102,9 +102,9 @@ class EoverenieInsuranceService
             return $this->unknown('missing_coverage');
         }
 
-        $regime = $coverage->regime?->value ?? $coverage->regime;
+        $category = $coverage->category?->value ?? $coverage->category;
 
-        if ($regime !== 'domestic') {
+        if ($category !== 'domestic') {
             return [
                 'status' => 'not_applicable',
                 'reason' => 'non_domestic_coverage',
@@ -152,9 +152,9 @@ class EoverenieInsuranceService
         ?string $firstName,
         ?string $lastName,
         ?int $insuranceCompanyId,
-        ?string $regime,
+        ?string $category,
     ): array {
-        if ($regime !== 'domestic') {
+        if ($category !== 'domestic') {
             return [
                 'status' => 'not_applicable',
                 'reason' => 'non_domestic_coverage',

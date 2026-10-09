@@ -72,7 +72,6 @@ function patientIsComplete(p: PatientWithCoverage | null) {
     const lng = p.longitude
 
     if (!first || !last || !sex || !doctorId || !coverage) return false
-    if (coverage.regime === 'unclassified') return false
     if (!insuranceId) return false
 
     if (coverage.identification_method === 'slovak_identifier' && !personalNumber) {
@@ -86,13 +85,13 @@ function patientIsComplete(p: PatientWithCoverage | null) {
         if (!state || !foreignId) return false
     }
 
-    if (!coverage.identification_method || coverage.identification_method === 'incomplete') {
+    if (!coverage.identification_method) {
         return false
     }
 
     if (
-        coverage.regime === 'special'
-        && (!coverage.special_category || !coverage.entitlement_confirmed)
+        coverage.category === 'special'
+        && !coverage.special_category
     ) {
         return false
     }

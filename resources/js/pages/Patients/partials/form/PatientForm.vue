@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref, watch, computed } from 'vue'
-import AddressAutocomplete from '@/components/Address/AddressAutocomplete.vue'
-import MapSelector from '@/components/Address/MapSelector.vue'
-import { useAddressForm } from '@/composables/address'
+import AddressFields from '@/components/Address/AddressFields.vue'
+import EmailInput from '@/components/Contact/EmailInput.vue'
+import PhoneNumberInput from '@/components/Contact/PhoneNumberInput.vue'
 import useAuthStore from '@/stores/auth'
 import {
     usePatientStore,
@@ -31,7 +31,6 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'update:patient', patient: PatientWithCoverage): void
     (e: 'clear-error', key: string): void
-    (e: 'address-valid-change', value: boolean): void
 }>()
 
 const submitted = computed(() => !!props.submitted)
@@ -50,10 +49,6 @@ const nursesError = ref<Error | null>(null)
 const emptyPatient: PatientWithCoverage = normalizePatientCoverage()
 const localPatient = ref<PatientWithCoverage>(normalizePatientCoverage(props.patient))
 
-const insufficientAddressMessage = 'Vyberte inú adresu, pretože táto adresa nie je dostatočná na uloženie pacienta.'
-const localAddressError = ref('')
-const selectedAddressIsValid = ref(false)
-
 // -------------------- Doctors / Insurance --------------------
 const sexOptions = [
     { label: 'Muž', value: 'M' },
@@ -70,7 +65,7 @@ const insuranceVerificationBaseline = ref<{
     firstName: string
     lastName: string
     personalNumber: string
-    regime: string | null
+    category: string | null
     insuranceCompanyId: number | null
 } | null>(null)
 
@@ -86,18 +81,18 @@ const insuranceVerificationHasUnsavedChanges = computed(() => {
     return baseline.firstName !== String(localPatient.value.first_name ?? '')
         || baseline.lastName !== String(localPatient.value.last_name ?? '')
         || baseline.personalNumber !== String(localPatient.value.personal_number ?? '')
-        || baseline.regime !== (localPatient.value.coverage.regime ?? null)
+        || baseline.category !== (localPatient.value.coverage.category ?? null)
         || baseline.insuranceCompanyId !== (localPatient.value.coverage.insurance_company_id ?? null)
 })
 
 const canPrefillInsurance = computed(() => {
     const personalNumber = String(localPatient.value.personal_number ?? '').replace(/\D+/g, '')
-    const regime = localPatient.value.coverage.regime
+    const category = localPatient.value.coverage.category
 
     return [9, 10].includes(personalNumber.length)
         && !!String(localPatient.value.first_name ?? '').trim()
         && !!String(localPatient.value.last_name ?? '').trim()
-        && (regime === null || ['domestic', 'unclassified'].includes(regime))
+        && (category === null || category === 'domestic')
 })
 
 const canVerifyInsurance = computed(() => {
@@ -106,7 +101,7 @@ const canVerifyInsurance = computed(() => {
     return [9, 10].includes(personalNumber.length)
         && !!String(localPatient.value.first_name ?? '').trim()
         && !!String(localPatient.value.last_name ?? '').trim()
-        && localPatient.value.coverage.regime === 'domestic'
+        && localPatient.value.coverage.category === 'domestic'
         && !!localPatient.value.coverage.insurance_company_id
 })
 
@@ -156,7 +151,7 @@ async function verifyInsurance() {
             first_name: String(localPatient.value.first_name ?? '').trim(),
             last_name: String(localPatient.value.last_name ?? '').trim(),
             insurance_company_id: Number(localPatient.value.coverage.insurance_company_id),
-            regime: String(localPatient.value.coverage.regime),
+            category: String(localPatient.value.coverage.category),
         })
         localPatient.value.coverage.is_verified = result.is_verified
 
@@ -166,7 +161,7 @@ async function verifyInsurance() {
                 firstName: String(localPatient.value.first_name ?? ''),
                 lastName: String(localPatient.value.last_name ?? ''),
                 personalNumber: String(localPatient.value.personal_number ?? ''),
-                regime: localPatient.value.coverage.regime,
+                category: localPatient.value.coverage.category,
                 insuranceCompanyId: localPatient.value.coverage.insurance_company_id,
             }
 
@@ -241,14 +236,14 @@ async function prefillInsurance(force = false) {
     const personalNumber = String(localPatient.value.personal_number ?? '').replace(/\D+/g, '')
     const firstName = String(localPatient.value.first_name ?? '').trim()
     const lastName = String(localPatient.value.last_name ?? '').trim()
-    const regime = localPatient.value.coverage.regime
+    const category = localPatient.value.coverage.category
 
     if (
         insurancePrefillLoading.value
         || ![9, 10].includes(personalNumber.length)
         || !firstName
         || !lastName
-        || (regime !== null && !['domestic', 'unclassified'].includes(regime))
+        || (category !== null && category !== 'domestic')
     ) {
         return
     }
@@ -285,20 +280,12 @@ async function prefillInsurance(force = false) {
 
             localPatient.value.coverage = {
                 ...localPatient.value.coverage,
-                regime: 'domestic',
                 category: 'domestic',
                 identification_method: 'slovak_identifier',
                 insurance_company_id: company.id,
                 member_state_code: null,
                 foreign_insured_id: null,
                 special_category: null,
-                other_subtype: null,
-                legal_basis: null,
-                entitlement_confirmed: true,
-                entitlement_document_type: null,
-                entitlement_document_number: null,
-                valid_from: result.valid_from ?? null,
-                valid_to: result.valid_to ?? null,
                 is_verified: false,
             }
 
@@ -549,189 +536,6 @@ watch(
     },
 )
 
-// -------------------- Address --------------------
-type AddressPlace = {
-    address?: string | null
-    street?: string | null
-    city?: string | null
-    zip?: string | null
-    psc?: string | null
-    latitude?: number | null
-    longitude?: number | null
-    lat?: number | null
-    lon?: number | null
-}
-
-const addressEntity = ref<Record<string, any> | null>(null)
-const { addressQuery, init: initAddressForm, onMapClick: addressOnMapClick } = useAddressForm(addressEntity)
-
-const addressIsDatabaseReady = computed(() => {
-    return hasRequiredAddressParts(localPatient.value)
-})
-
-
-function normalizeText(value: unknown): string {
-    return String(value ?? '').trim()
-}
-
-function hasRequiredAddressParts(patient: Partial<PatientWithCoverage>): boolean {
-    return normalizeText(patient.address).length > 0 && normalizeText(patient.city).length > 0
-}
-
-function getPlaceAddress(place: AddressPlace | null | undefined): string {
-    if (!place) {
-        return ''
-    }
-
-    const street = normalizeText(place.street)
-    const address = normalizeText(place.address)
-
-    return street || address
-}
-
-function getPlaceCity(place: AddressPlace | null | undefined): string {
-    return normalizeText(place?.city)
-}
-
-function getPlaceZip(place: AddressPlace | null | undefined): string {
-    return normalizeText(place?.zip ?? place?.psc)
-}
-
-function getPlaceLatitude(place: AddressPlace | null | undefined): number | null {
-    const value = place?.latitude ?? place?.lat
-
-    return typeof value === 'number' ? value : null
-}
-
-function getPlaceLongitude(place: AddressPlace | null | undefined): number | null {
-    const value = place?.longitude ?? place?.lon
-
-    return typeof value === 'number' ? value : null
-}
-
-function isSufficientAddressPlace(place: AddressPlace | null | undefined): boolean {
-    return getPlaceAddress(place).length > 0 && getPlaceCity(place).length > 0
-}
-
-function formatAddressLabel(place: AddressPlace) {
-    const address = getPlaceAddress(place)
-    const city = getPlaceCity(place)
-    const zip = getPlaceZip(place)
-
-    return [address, city, zip]
-        .filter((part) => part.length > 0)
-        .join(', ')
-}
-
-function setAddressValid(value: boolean) {
-    selectedAddressIsValid.value = value
-    emit('address-valid-change', value)
-}
-
-function setInsufficientAddressError() {
-    localAddressError.value = insufficientAddressMessage
-    setAddressValid(false)
-}
-
-function clearAddressValidationError() {
-    localAddressError.value = ''
-    emit('clear-error', 'address')
-    emit('clear-error', 'city')
-    emit('clear-error', 'zip')
-    emit('clear-error', 'coordinates')
-}
-
-function clearStoredAddressFields() {
-    localPatient.value.address = ''
-    localPatient.value.city = ''
-    localPatient.value.zip = ''
-    localPatient.value.latitude = null
-    localPatient.value.longitude = null
-
-    addressEntity.value = {
-        ...(addressEntity.value ?? {}),
-        address: '',
-        city: '',
-        psc: '',
-        latitude: null,
-        longitude: null,
-    }
-}
-
-function applyValidAddressPlace(place: AddressPlace) {
-    const address = getPlaceAddress(place)
-    const city = getPlaceCity(place)
-    const zip = getPlaceZip(place)
-    const latitude = getPlaceLatitude(place)
-    const longitude = getPlaceLongitude(place)
-
-    localPatient.value.address = address
-    localPatient.value.city = city
-    localPatient.value.zip = zip
-
-    if (latitude !== null) {
-        localPatient.value.latitude = latitude
-    }
-
-    if (longitude !== null) {
-        localPatient.value.longitude = longitude
-    }
-
-    addressEntity.value = {
-        ...(addressEntity.value ?? {}),
-        address,
-        city,
-        psc: zip,
-        latitude: localPatient.value.latitude,
-        longitude: localPatient.value.longitude,
-    }
-
-    // Only the street/address is displayed in the autocomplete input.
-    addressQuery.value = address
-
-    clearAddressValidationError()
-    setAddressValid(true)
-}
-
-function onAutocompleteAddressSelected(place: AddressPlace) {
-    if (!isSufficientAddressPlace(place)) {
-        clearStoredAddressFields()
-        addressQuery.value = formatAddressLabel(place)
-        setInsufficientAddressError()
-        return
-    }
-
-    applyValidAddressPlace(place)
-}
-
-async function onMapAddressUpdate(geo: { lat: number | null; lon: number | null }) {
-    try {
-        const place = await addressOnMapClick(geo) as AddressPlace | null
-
-        if (!place || !isSufficientAddressPlace(place)) {
-            clearStoredAddressFields()
-            localPatient.value.latitude = geo.lat
-            localPatient.value.longitude = geo.lon
-            addressQuery.value = place ? formatAddressLabel(place) : ''
-            setInsufficientAddressError()
-            return
-        }
-
-        applyValidAddressPlace({
-            ...place,
-            latitude: place.latitude ?? geo.lat,
-            longitude: place.longitude ?? geo.lon,
-        })
-    } catch (err) {
-        console.error('Map address update failed', err)
-
-        clearStoredAddressFields()
-        localPatient.value.latitude = geo.lat
-        localPatient.value.longitude = geo.lon
-        setInsufficientAddressError()
-    }
-}
-
 const doctorSelectRef = ref<any>(null)
 
 const onDoctorSelectShow = async () => {
@@ -756,21 +560,11 @@ watch(
                 firstName: String(next.first_name ?? ''),
                 lastName: String(next.last_name ?? ''),
                 personalNumber: String(next.personal_number ?? ''),
-                regime: next.coverage.regime,
+                category: next.coverage.category,
                 insuranceCompanyId: next.coverage.insurance_company_id,
             }
         }
 
-        addressEntity.value = { ...next, psc: next.zip }
-        initAddressForm()
-        addressQuery.value = normalizeText(next.address)
-
-        if (hasRequiredAddressParts(next)) {
-            setAddressValid(true)
-            localAddressError.value = ''
-        } else {
-            setAddressValid(false)
-        }
     },
     { immediate: true },
 )
@@ -780,7 +574,7 @@ watch(
         localPatient.value.first_name,
         localPatient.value.last_name,
         localPatient.value.personal_number,
-        localPatient.value.coverage.regime,
+        localPatient.value.coverage.category,
         localPatient.value.coverage.insurance_company_id,
     ],
     () => {
@@ -806,51 +600,6 @@ watch(
     { deep: true },
 )
 
-watch(
-    addressEntity,
-    (val) => {
-        if (!val) {
-            return
-        }
-
-        localPatient.value.address = val.address ?? localPatient.value.address
-        localPatient.value.city = val.city ?? localPatient.value.city
-        localPatient.value.zip = val.psc ?? localPatient.value.zip
-        localPatient.value.latitude = val.latitude ?? localPatient.value.latitude
-        localPatient.value.longitude = val.longitude ?? localPatient.value.longitude
-
-        if (hasRequiredAddressParts(localPatient.value)) {
-            localAddressError.value = ''
-            setAddressValid(true)
-        }
-    },
-    { deep: true },
-)
-
-watch(
-    () => [
-        localPatient.value.address,
-        localPatient.value.city,
-        localPatient.value.zip,
-    ],
-    ([address]) => {
-        if (
-            address
-            && addressQuery.value !== String(address)
-        ) {
-            addressQuery.value = String(address)
-        }
-
-        if (!hasRequiredAddressParts(localPatient.value)) {
-            setAddressValid(false)
-        }
-    },
-)
-
-defineExpose({
-    addressIsDatabaseReady,
-    selectedAddressIsValid,
-})
 </script>
 
 <template>
@@ -890,7 +639,7 @@ defineExpose({
                 <small v-if="submitted && errors.last_name" class="text-danger">{{ errors.last_name }}</small>
             </div>
 
-            <div class="col-span-4">
+            <div class="col-span-2">
                 <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
                     Titul
                 </label>
@@ -902,7 +651,7 @@ defineExpose({
                 />
             </div>
 
-            <div class="col-span-4">
+            <div class="col-span-2">
                 <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
                     Pohlavie
                 </label>
@@ -917,19 +666,6 @@ defineExpose({
                     :class="{ 'opacity-50!': disabled }"
                 />
                 <small v-if="submitted && errors.sex" class="text-danger">{{ errors.sex }}</small>
-            </div>
-
-            <div class="col-span-8">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Kontakt
-                </label>
-                <InputText
-                    :disabled="disabled"
-                    v-model.trim="localPatient.contact"
-                    fluid
-                    :class="{ 'opacity-50!': disabled }"
-                />
-                <small v-if="submitted && errors.contact" class="text-danger">{{ errors.contact }}</small>
             </div>
         </div>
 
@@ -993,144 +729,48 @@ defineExpose({
             @load-insurance="prefillInsurance(true)"
         />
 
+        <AddressFields
+            v-model:address="localPatient.address"
+            v-model:city="localPatient.city"
+            v-model:zip="localPatient.zip"
+            v-model:latitude="localPatient.latitude"
+            v-model:longitude="localPatient.longitude"
+            :errors="errors"
+            :submitted="submitted"
+            :disabled="disabled"
+            :map-disabled="authStore.currentRole === 'manager'"
+            @clear-error="emit('clear-error', $event)"
+        />
+
         <div class="grid grid-cols-12 gap-4">
             <div class="col-span-12">
-                <label class="block text-normal text-accent">Adresa</label>
+                <label class="block text-normal text-accent">Kontakt</label>
             </div>
 
-            <!-- Address / Google autocomplete -->
             <div class="col-span-6">
-                <label
-                    :class="[
-                        'block text-normal mb-1',
-                        disabled && 'opacity-50!',
-                    ]"
-                >
-                    Adresa
+                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                    Email
                 </label>
 
-                <AddressAutocomplete
-                    v-model="addressQuery"
-                    class="w-full"
+                <EmailInput
+                    v-model="localPatient.contact"
                     :disabled="disabled"
-                    :invalid="
-                        Boolean(localAddressError)
-                            || Boolean(errors.address)
-                            || (submitted && !localPatient.address)
-                    "
-                    :class="{ 'opacity-50!': disabled }"
-                    @selected="onAutocompleteAddressSelected"
+                    :error="submitted ? errors.contact : null"
                 />
-
-                <small
-                    v-if="localAddressError"
-                    class="text-danger"
-                >
-                    {{ localAddressError }}
-                </small>
-
-                <small
-                    v-else-if="submitted && errors.address"
-                    class="text-danger"
-                >
-                    {{ errors.address }}
-                </small>
-
-                <small
-                    v-else-if="submitted && !localPatient.address"
-                    class="text-danger"
-                >
-                    Vyberte adresu zo zoznamu.
-                </small>
             </div>
 
-            <!-- City -->
-            <div class="col-span-4">
-                <label
-                    :class="[
-                        'block text-normal mb-1',
-                        disabled && 'opacity-50!',
-                    ]"
-                >
-                    Mesto
+            <div class="col-span-6">
+                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
+                    Telefón
                 </label>
 
-                <InputText
-                    v-model.trim="localPatient.city"
+                <PhoneNumberInput
+                    v-model="localPatient.phone"
+                    v-model:country-code="localPatient.country_code_phone"
                     :disabled="disabled"
-                    fluid
-                    :invalid="
-                        Boolean(errors.city)
-                            || (submitted && !localPatient.city)
-                    "
-                    :class="{
-                        'bg-transparent!': disabled,
-                        'opacity-50!': disabled,
-                    }"
-                    @input="emit('clear-error', 'city')"
+                    :invalid="Boolean(errors.phone)"
                 />
-
-                <small
-                    v-if="submitted && errors.city"
-                    class="text-danger"
-                >
-                    {{ errors.city }}
-                </small>
-
-                <small
-                    v-else-if="submitted && !localPatient.city"
-                    class="text-danger"
-                >
-                    Zadajte mesto.
-                </small>
-            </div>
-
-            <!-- ZIP -->
-            <div class="col-span-2">
-                <label
-                    :class="[
-                        'block text-normal mb-1',
-                        disabled && 'opacity-50!',
-                    ]"
-                >
-                    PSČ
-                </label>
-
-                <InputText
-                    v-model.trim="localPatient.zip"
-                    :disabled="disabled"
-                    fluid
-                    :invalid="Boolean(errors.zip)"
-                    :class="{
-                        'bg-transparent!': disabled,
-                        'opacity-50!': disabled,
-                    }"
-                    @input="emit('clear-error', 'zip')"
-                />
-
-                <small
-                    v-if="submitted && errors.zip"
-                    class="text-danger"
-                >
-                    {{ errors.zip }}
-                </small>
-            </div>
-
-            <!-- Map -->
-            <div class="col-span-12">
-                <MapSelector
-                    :latitude="localPatient.latitude"
-                    :longitude="localPatient.longitude"
-                    :disabled="authStore.currentRole === 'manager'"
-                    @update="onMapAddressUpdate"
-                />
-
-                <small
-                    v-if="submitted && errors.coordinates"
-                    class="text-danger"
-                >
-                    {{ errors.coordinates }}
-                </small>
+                <small v-if="submitted && errors.phone" class="text-danger">{{ errors.phone }}</small>
             </div>
         </div>
 

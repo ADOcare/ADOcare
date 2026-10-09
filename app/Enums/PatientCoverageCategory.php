@@ -6,9 +6,7 @@ enum PatientCoverageCategory: string
 {
     case DOMESTIC = 'domestic';
     case EU = 'eu';
-    case NON_EU = 'non_eu';
-    case HOMELESS = 'homeless';
-    case OTHER = 'other';
+    case SPECIAL = 'special';
 
     public static function values(): array
     {

@@ -2,15 +2,14 @@
 
 namespace App\Services;
 
-use App\Enums\PatientCoverageRegime;
 use App\Models\Branch;
 use App\Models\Document;
 use App\Models\Patient;
+use App\Models\PatientCoverage;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use Carbon\CarbonImmutable;
 
 class PatientService
 {
@@ -77,6 +76,7 @@ class PatientService
         ) {
             $coverageData = $data['coverage'] ?? null;
             $legacyInsuranceCompanyWasProvided = array_key_exists('insurance_company_id', $data);
+            /** @var PatientCoverage|null $currentCoverage */
             $currentCoverage = $patient->latestCoverage()->first();
             $personalNumberChanged = array_key_exists('personal_number', $data)
                 && $this->normalizePersonalNumber((string) $data['personal_number'])
@@ -122,13 +122,13 @@ class PatientService
                 $insuranceChanged = array_key_exists('insurance_company_id', $coverageData)
                     && (int) ($coverageData['insurance_company_id'] ?? 0)
                         !== (int) ($currentCoverage?->insurance_company_id ?? 0);
-                $regimeChanged = array_key_exists('regime', $coverageData)
-                    && (string) $coverageData['regime']
-                        !== (string) ($currentCoverage?->regime?->value ?? $currentCoverage?->regime ?? '');
+                $categoryChanged = array_key_exists('category', $coverageData)
+                    && (string) $coverageData['category']
+                        !== (string) ($currentCoverage?->category?->value ?? $currentCoverage?->category ?? '');
 
                 if ($verificationRequested) {
                     $coverageData['is_verified'] = $insuranceWasVerified;
-                } elseif ($verificationIdentityChanged || $insuranceChanged || $regimeChanged) {
+                } elseif ($verificationIdentityChanged || $insuranceChanged || $categoryChanged) {
                     $coverageData['is_verified'] = false;
                 } else {
                     unset($coverageData['is_verified']);
@@ -230,12 +230,9 @@ class PatientService
             }
 
             $coverageData = [
-                'regime' => PatientCoverageRegime::UNCLASSIFIED->value,
-                'category' => 'other',
-                'identification_method' => 'incomplete',
-                'other_subtype' => 'Nezaradený poistný vzťah',
+                'category' => 'domestic',
+                'identification_method' => 'slovak_identifier',
                 'insurance_company_id' => $patient->insurance_company_id,
-                'valid_from' => null,
                 'is_verified' => false,
             ];
         }
@@ -245,34 +242,10 @@ class PatientService
 
         $coverageData = $this->normalizeCoverageData($coverageData);
 
+        /** @var PatientCoverage|null $coverage */
         $coverage = $coverageId
             ? $patient->coverages()->whereKey($coverageId)->first()
             : $patient->latestCoverage()->first();
-
-        if ($coverage && $this->coverageIdentityChanged($coverage, $coverageData)) {
-            $effectiveFrom = $coverageData['valid_from'] ?? null;
-
-            if (! $effectiveFrom) {
-                throw ValidationException::withMessages([
-                    'coverage.valid_from' => [
-                        'Pri zmene poisťovne, režimu alebo identifikácie zadajte dátum začiatku nového poistného vzťahu.',
-                    ],
-                ]);
-            }
-
-            $effectiveDate = CarbonImmutable::parse($effectiveFrom)->startOfDay();
-
-            if ($coverage->valid_from && $effectiveDate->lte($coverage->valid_from)) {
-                throw ValidationException::withMessages([
-                    'coverage.valid_from' => ['Nový poistný vzťah musí začínať po začiatku aktuálneho vzťahu.'],
-                ]);
-            }
-
-            $coverage->update(['valid_to' => $effectiveDate->subDay()->toDateString()]);
-            $patient->coverages()->create($coverageData);
-
-            return;
-        }
 
         if ($coverage) {
             $coverage->update($coverageData);
@@ -289,38 +262,15 @@ class PatientService
             $coverageData['member_state_code'] = strtoupper(trim($coverageData['member_state_code']));
         }
 
-        $regime = $coverageData['regime'] ?? null;
-
-        if (! isset($coverageData['category'])) {
-            $coverageData['category'] = match (true) {
-                $regime === PatientCoverageRegime::DOMESTIC->value => 'domestic',
-                $regime === PatientCoverageRegime::EU->value => 'eu',
-                ($coverageData['special_category'] ?? null) === 'homeless' => 'homeless',
-                ($coverageData['special_category'] ?? null) === 'non_eu_foreigner' => 'non_eu',
-                default => 'other',
-            };
-        }
-
-        if (! isset($coverageData['identification_method'])) {
-            $coverageData['identification_method'] = match ($regime) {
-                PatientCoverageRegime::DOMESTIC->value,
-                PatientCoverageRegime::SPECIAL->value => 'slovak_identifier',
-                PatientCoverageRegime::EU->value => 'foreign_triad',
-                default => 'incomplete',
-            };
-        }
-
-        if ($coverageData['category'] === 'other' && blank($coverageData['other_subtype'] ?? null)) {
-            $coverageData['other_subtype'] = 'Nezaradený poistný vzťah';
-        }
-
-        if ($regime === PatientCoverageRegime::DOMESTIC->value) {
+        if (($coverageData['category'] ?? null) === 'domestic') {
+            $coverageData['identification_method'] = 'slovak_identifier';
             $coverageData['member_state_code'] = null;
             $coverageData['foreign_insured_id'] = null;
             $coverageData['special_category'] = null;
         }
 
-        if ($regime === PatientCoverageRegime::EU->value) {
+        if (($coverageData['category'] ?? null) === 'eu') {
+            $coverageData['identification_method'] = 'foreign_triad';
             $coverageData['special_category'] = null;
         }
 
@@ -331,16 +281,11 @@ class PatientService
     {
         $identityFields = [
             'insurance_company_id',
-            'regime',
             'category',
             'identification_method',
             'member_state_code',
             'foreign_insured_id',
             'special_category',
-            'other_subtype',
-            'legal_basis',
-            'entitlement_document_type',
-            'entitlement_document_number',
         ];
 
         foreach ($identityFields as $field) {
@@ -387,7 +332,7 @@ class PatientService
             isset($coverage['insurance_company_id'])
                 ? (int) $coverage['insurance_company_id']
                 : $patient?->latestCoverage?->insurance_company_id,
-            (string) ($coverage['regime'] ?? $patient?->latestCoverage?->regime?->value ?? ''),
+            (string) ($coverage['category'] ?? $patient?->latestCoverage?->category?->value ?? ''),
         );
 
         return ($result['status'] ?? null) === 'verified';

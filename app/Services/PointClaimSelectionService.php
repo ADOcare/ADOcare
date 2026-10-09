@@ -85,7 +85,7 @@ class PointClaimSelectionService
                 'quantity' => (int) ($row->quantity ?? 0),
                 'unit_price' => (float) ($row->price ?? 0),
                 'amount' => round((int) ($row->quantity ?? 0) * (float) ($row->price ?? 0), 2),
-                'regime' => (string) $row->regime,
+                'regime' => (string) $row->category,
                 'special_category' => $row->special_category,
                 'edited' => $wasEdited,
                 'added_after_new_batch' => $isAdditional,
@@ -206,7 +206,7 @@ class PointClaimSelectionService
 
         return [
             'batch_type' => $batchType,
-            'regime' => $this->regimeFor($batchType),
+            'category' => $this->categoryFor($batchType),
             'insurance_company_id' => (int) $data['insurance_company_id'],
             'branch_id' => (int) $branch->id,
             'company_id' => (int) $branch->company_id,
@@ -222,17 +222,7 @@ class PointClaimSelectionService
         return DB::table('patient_points as pp')
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
-            ->join('patient_coverages as pc', function ($join) {
-                $join->on('pc.patient_id', '=', 'p.id')
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_from')
-                            ->orWhereColumn('pc.valid_from', '<=', 'pp.date');
-                    })
-                    ->where(function ($query) {
-                        $query->whereNull('pc.valid_to')
-                            ->orWhereColumn('pc.valid_to', '>=', 'pp.date');
-                    });
-            })
+            ->join('patient_coverages as pc', 'pc.patient_id', '=', 'p.id')
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($context) {
                 $join->on('pcp.procedure_id', '=', 'pp.procedure_id')
                     ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')
@@ -241,10 +231,9 @@ class PointClaimSelectionService
             ->where('pp.user_id', $context['healthcare_worker_id'])
             ->where('pp.branch_id', $context['branch_id'])
             ->where('pc.insurance_company_id', $context['insurance_company_id'])
-            ->where('pc.regime', $context['regime'])
+            ->where('pc.category', $context['category'])
             ->whereBetween('pp.date', [$context['from'], $context['to']])
             ->orderBy('pp.id')
-            ->orderByDesc('pc.valid_from')
             ->select([
                 'pp.id as patient_point_id',
                 'pp.date',
@@ -264,15 +253,11 @@ class PointClaimSelectionService
                 'p.latitude',
                 'p.longitude',
                 'pc.id as coverage_id',
-                'pc.regime',
                 'pc.identification_method',
                 'pc.category',
                 'pc.member_state_code',
                 'pc.foreign_insured_id',
                 'pc.special_category',
-                'pc.entitlement_document_type',
-                'pc.entitlement_document_number',
-                'pc.entitlement_confirmed',
                 'd.pzs as current_doctor_pzs',
                 'd.zpr as current_doctor_zpr',
                 'pcp.price',
@@ -387,7 +372,7 @@ class PointClaimSelectionService
         return array_values(array_unique($reasons));
     }
 
-    private function regimeFor(string $batchType): string
+    private function categoryFor(string $batchType): string
     {
         return match (true) {
             in_array($batchType, ['N', 'O', 'A'], true) => 'domestic',

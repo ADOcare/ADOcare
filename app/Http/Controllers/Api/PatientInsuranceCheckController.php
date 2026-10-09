@@ -47,7 +47,7 @@ class PatientInsuranceCheckController extends Controller
             'first_name' => ['required', 'string', 'max:255'],
             'last_name' => ['required', 'string', 'max:255'],
             'insurance_company_id' => ['required', 'integer', 'exists:insurance_companies,id'],
-            'regime' => ['required', Rule::in(['domestic', 'eu', 'special'])],
+            'category' => ['required', Rule::in(['domestic', 'eu', 'special'])],
         ]);
 
         $result = $this->service->verifyInput(
@@ -55,7 +55,7 @@ class PatientInsuranceCheckController extends Controller
             $data['first_name'],
             $data['last_name'],
             (int) $data['insurance_company_id'],
-            $data['regime'],
+            $data['category'],
         );
 
         return $this->success($result, 'Overenie poistného vzťahu bolo dokončené.');

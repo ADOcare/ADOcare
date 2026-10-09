@@ -54,6 +54,9 @@ useInsuranceCheck({
 const isLoggedIn = computed(() => auth.isAuthenticated)
 const showNavbar = computed(() => route.meta.shownavbar !== false)
 const showFooter = computed(() => route.meta.showfooter !== false)
+const pageContextKey = computed(() => {
+    return `${route.fullPath}:${auth.currentRole ?? 'guest'}:${auth.currentBranch?.id ?? 'none'}`
+})
 
 const isSidebarOpen = ref(false)
 function handleToggleSidebar() {
@@ -109,7 +112,7 @@ onBeforeUnmount(() => {
                 <AccessPaymentWarningBanner v-if="isLoggedIn" class="mb-5" />
 
                 <AccessError v-if="navigationAccessError" />
-                <router-view v-else />
+                <router-view v-else :key="pageContextKey" />
             </div>
 
             <Sidebar v-if="isSidebarOpen && isLoggedIn"

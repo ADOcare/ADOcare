@@ -105,8 +105,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Mesačná uzávierka',
                     link: 'mesačná uzávierka',
-                    sidebar: showOnSidebar,
-                    navbar: true,
+                    sidebar: false,
+                    navbar: false,
                 },
             },
         ]

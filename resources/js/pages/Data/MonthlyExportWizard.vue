@@ -57,6 +57,10 @@ const loadingRun = ref(false)
 const downloadingZip = ref(false)
 let pollTimer: number | null = null
 
+function activeRunKey() {
+    return `${ACTIVE_RUN_KEY}:${authStore.currentBranch?.id ?? 'none'}`
+}
+
 const isRunning = computed(() => ['pending', 'processing'].includes(run.value?.status ?? ''))
 const readyResults = computed(() => run.value?.results.filter((result) => result.document_id) ?? [])
 const visibleResults = computed(() => run.value?.results.filter((result) => result.status !== 'skipped') ?? [])
@@ -136,7 +140,7 @@ async function startRun() {
     }
 
     run.value = data.data
-    localStorage.setItem(ACTIVE_RUN_KEY, String(run.value.id))
+    localStorage.setItem(activeRunKey(), String(run.value.id))
     schedulePoll()
 }
 
@@ -148,7 +152,7 @@ async function loadRun(id: number) {
     loadingRun.value = false
 
     if (error || !data?.data) {
-        localStorage.removeItem(ACTIVE_RUN_KEY)
+        localStorage.removeItem(activeRunKey())
         stopPolling()
         return
     }
@@ -302,7 +306,7 @@ async function downloadZip() {
 }
 
 onMounted(() => {
-    const activeRunId = Number(localStorage.getItem(ACTIVE_RUN_KEY))
+    const activeRunId = Number(localStorage.getItem(activeRunKey()))
     if (activeRunId > 0) void loadRun(activeRunId)
 })
 

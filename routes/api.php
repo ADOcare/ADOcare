@@ -378,9 +378,11 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/batches/kilometers/download', [KilometersExportController::class, 'download'])
         ->middleware('role:any')
+        ->withoutMiddleware(ForceJsonResponse::class)
         ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
     Route::post('/batches/kilometers/statement-pdf', [KilometersExportController::class, 'statementPdf'])
         ->middleware('role:any')
+        ->withoutMiddleware(ForceJsonResponse::class)
         ->withoutMiddleware('subscription.active')->middleware('subscription.active:read');
 
     Route::get('/geocode/autocomplete', [GeocodeController::class, 'autocomplete']);
@@ -411,6 +413,14 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
 
     Route::documentRoutes('cps', CPDocumentController::class);
     Route::documentRoutes('dzcs', DZCDocumentController::class);
+
+    Route::get('/transport/cars', [DZCDocumentController::class, 'cars'])
+        ->middleware('role:any');
+    Route::get('/dzcs/{document}/export-options', [DZCDocumentController::class, 'exportOptions'])
+        ->middleware(['role:any', 'can:view,document']);
+    Route::post('/dzcs/{document}/xlsx', [DZCDocumentController::class, 'exportXlsx'])
+        ->withoutMiddleware(ForceJsonResponse::class)
+        ->middleware(['role:any', 'can:update,document', 'subscription.active:write']);
 
     Route::get('/dzcs/{document}/csv', [DZCDocumentController::class, 'exportCsv'])
         ->middleware(['role:any', 'can:view,document']);

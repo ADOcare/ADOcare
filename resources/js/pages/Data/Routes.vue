@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
+import TransportCreateForm from '@/components/Transport/TransportCreateForm.vue'
 import ActionButtons from '@/components/table-columns/ActionButtons.vue'
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
 import type { DataTableOptions } from '@/types/datatable'
@@ -231,6 +232,7 @@ watch([() => batchType.value, () => dates.value], () => {
 
 <template>
     <div class="flex flex-col gap-6">
+        <TransportCreateForm kind="journal" />
         <section>
             <UniversalDataTable ref="tableRef" :options="options">
                 <template #actions="{ row }">

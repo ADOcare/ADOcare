@@ -96,6 +96,9 @@
 <body>
     <div class="document-content">
         <div class="title">DENNÝ ZÁZNAM CIEST</div>
+        @if(!empty($dzcData['calculation_note']))
+            <p>{{ $dzcData['calculation_note'] }}</p>
+        @endif
 
         @php
             $month = $dzcData['month'] ?? '';

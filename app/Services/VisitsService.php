@@ -26,7 +26,7 @@ class VisitsService
             $data['user_id'] = Auth::id();
         }
 
-        $month = Carbon::parse($data['month'])->toDateString();
+        $month = Carbon::parse($data['month'])->startOfMonth()->toDateString();
 
         DB::table('visit_calculations')->updateOrInsert(
             [
@@ -58,7 +58,7 @@ class VisitsService
             $userId = Auth::id();
         }
 
-        $month = Carbon::parse($monthYmd)->toDateString();
+        $month = Carbon::parse($monthYmd)->startOfMonth()->toDateString();
 
         $calc = DB::table('visit_calculations')
             ->where('user_id', $userId)

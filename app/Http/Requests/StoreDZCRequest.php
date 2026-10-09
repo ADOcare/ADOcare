@@ -22,8 +22,9 @@ class StoreDZCRequest extends FormRequest
     {
         return [
             'start' => 'required|date',
-            'end' => 'required|date',
+            'end' => 'required|date|after_or_equal:start',
             'branch_id' => 'required|exists:branches,id',
+            'car_id' => 'nullable|integer|min:1',
         ];
     }
 }

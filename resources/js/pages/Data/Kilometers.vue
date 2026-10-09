@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, markRaw, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
 import type { InsuranceCompany } from '@/types/models'
-import type { PatientWithCoverage } from '@/stores/patientStore'
-import { getPatientIdentifier } from '@/utils/patientIdentifier'
 import { useAuthStore } from '@/stores/auth'
 import { useUiOverlayStore } from '@/stores/uiOverlay'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import ActionButtons from '@/components/table-columns/ActionButtons.vue'
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
 import type { DataTableOptions } from '@/types/datatable'
+import useModal from '@/composables/useModal'
+import KilometersBatchPreviewModal from './KilometersBatchPreviewModal.vue'
 
 const authStore = useAuthStore()
 const toast = useToast()
@@ -19,6 +19,9 @@ const { openEmailDocumentsDialog } = useEmailDocumentsDialog()
 const branchId = computed(() => authStore.currentBranch?.id ?? null)
 const uiOverlayStore = useUiOverlayStore()
 const router = useRouter()
+const { openModal } = useModal()
+const busy = ref(false)
+let formVersion = 0
 
 const ROUTES_TOAST_GROUP = 'kilometers-routes-toast'
 
@@ -31,12 +34,6 @@ type Insurance = {
     id: number
     code: string | null
     name: string
-}
-
-type Patient = {
-    id: number
-    name: string
-    personalNumber: string
 }
 
 type DocRow = {
@@ -56,12 +53,7 @@ const insurance = ref<Insurance | null>(null)
 const now = new Date()
 const dates = ref<Date | null>(new Date(now.getFullYear(), now.getMonth() - 1, 1))
 
-const allPatients = ref<Patient[]>([])
-const filteredPatients = ref<Patient[]>([])
-const selectedPatients = ref<Patient[]>([])
-
 const submitted = ref(false)
-const patientsLoading = ref(false)
 
 const batchTypes = ref<BatchType[]>([
     { code: 'N', name: 'Nová – tuzemskí (N)' },
@@ -77,8 +69,6 @@ const batchTypes = ref<BatchType[]>([
 
 const insurances = ref<Insurance[]>([])
 
-const isCorrectionBatch = computed(() => ['O', 'F', 'J', 'A', 'G', 'K'].includes(batchType.value?.code ?? ''))
-
 function mapInsuranceCompanyToOption(company: InsuranceCompany): Insurance {
     const displayName = company.name ?? ''
 
@@ -87,14 +77,6 @@ function mapInsuranceCompanyToOption(company: InsuranceCompany): Insurance {
         code: company.code,
         name: displayName ? `${displayName}` : displayName || `#${company.id}`,
     }
-}
-
-function mapPatients(items: PatientWithCoverage[]): Patient[] {
-    return items.map((p) => ({
-        id: p.id,
-        name: `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim(),
-        personalNumber: getPatientIdentifier(p),
-    }))
 }
 
 async function loadInsurances() {
@@ -117,55 +99,6 @@ async function loadInsurances() {
     }
 }
 
-async function loadAllPatients() {
-    const id = branchId.value
-
-    if (!id) {
-        allPatients.value = []
-        return
-    }
-
-    try {
-        patientsLoading.value = true
-
-        const res = await api.get(`/v1/branches/${id}/patients`, {
-            params: {
-                paginate: 0,
-            },
-        })
-
-        const data = res.data?.data
-        const items = ((Array.isArray(data) ? data : data?.items) as PatientWithCoverage[]) ?? []
-
-        allPatients.value = mapPatients(items)
-    } catch (e) {
-        console.error('Failed to load patients', e)
-        allPatients.value = []
-    } finally {
-        patientsLoading.value = false
-    }
-}
-
-function searchPatients(event: { query: string }) {
-    const q = (event.query ?? '').toLowerCase().trim()
-
-    if (!q) {
-        filteredPatients.value = []
-        return
-    }
-
-    filteredPatients.value = allPatients.value.filter((p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.personalNumber.toLowerCase().includes(q),
-    )
-}
-
-function removePatient(patient: Patient) {
-    selectedPatients.value = selectedPatients.value.filter(
-        (p) => p.id !== patient.id,
-    )
-}
-
 function showRoutesGeneratedToast() {
     toast.add({
         group: ROUTES_TOAST_GROUP,
@@ -184,170 +117,110 @@ const formatLocalDate = (date: Date) => {
 }
 
 async function onSubmit() {
+    if (busy.value) return
     submitted.value = true
+    if (!batchType.value || !insurance.value || !dates.value) return
 
-    const hasPeriod = !!dates.value
-    const needsPatients = isCorrectionBatch.value
-
-    if (
-        !batchType.value ||
-        !insurance.value ||
-        !hasPeriod ||
-        (needsPatients && !selectedPatients.value.length)
-    ) {
-        return
-    }
-
-    if (!dates.value) {
-        return
-    }
-
-    const monthDate = dates.value as Date
-    const year = monthDate.getFullYear()
-    const month = monthDate.getMonth()
-    const periodFrom = new Date(year, month, 1)
-    const periodTo = new Date(year, month + 1, 0)
-
-    const periodFromLocal = formatLocalDate(periodFrom)
-    const periodToLocal = formatLocalDate(periodTo)
-    const selectedBranchId = authStore.currentBranch?.id
-
-    uiOverlayStore.setContentLoading(true)
+    busy.value = true
+    const version = formVersion
+    const monthDate = dates.value
+    const periodFrom = formatLocalDate(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1))
+    const periodTo = formatLocalDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0))
+    const type = batchType.value.code
+    const insuranceId = insurance.value.id
 
     try {
-        const res = await api.post('/v1/batches/kilometers/preview', {
-            batchType: { code: batchType.value.code },
-            insurance: { id: insurance.value.id },
-            period: [periodFromLocal, periodToLocal],
-            user: { id: authStore.user?.id },
-            branch: { id: authStore.currentBranch?.id },
-            company: { id: authStore.currentBranch?.company_id },
-            patients: selectedPatients.value.map((p) => ({ id: p.id })),
-        })
-
-        const sheet = res.data?.data?.sheet
-
-        if (!sheet) {
-            console.error('Missing sheet in response:', res.data)
-            return
+        uiOverlayStore.setContentLoading(true)
+        await authStore.waitUntilInitialized()
+        if (version !== formVersion) return
+        const selectedBranchId = authStore.currentBranch?.id
+        if (!selectedBranchId) throw new Error('Vyberte aktuálnu prevádzku.')
+        const request = {
+            batchType: { code: type },
+            insurance: { id: insuranceId },
+            branch: { id: selectedBranchId },
+            period: [periodFrom, periodTo],
         }
+        const response = await api.post('/v1/batches/kilometers/preview', {
+            ...request,
+            candidatesOnly: true,
+        })
+        if (version !== formVersion) return
+        const preview = response.data?.data
+        if (!preview || !Array.isArray(preview.candidates) || !preview.previewToken) {
+            throw new Error('Nepodarilo sa načítať náhľad dopravnej dávky.')
+        }
+        uiOverlayStore.setContentLoading(false)
+        const result = await openModal(markRaw(KilometersBatchPreviewModal), {
+            candidates: preview.candidates,
+            initialSelectedJourneyIds: preview.candidates.filter((row: any) => row.suggested).map((row: any) => row.journey_id),
+            blocked: preview.blocked ?? [],
+            routeChanges: preview.route_changes ?? [],
+            canCreate: preview.can_create,
+            batchType: type,
+            comparisonBasis: preview.comparison_basis,
+        }, {
+            header: 'Náhľad dát dopravnej dávky',
+            style: { width: '90vw', maxWidth: '1440px' },
+            closable: true,
+        })
+        if (!result?.journeyIds?.length) return
+        if (version !== formVersion || authStore.currentBranch?.id !== selectedBranchId) {
+            throw new Error('Výber prevádzky alebo filtrov sa zmenil. Otvorte náhľad znova.')
+        }
+        uiOverlayStore.setContentLoading(true)
+        const saved = await api.post('/v1/kilometers-batches', {
+            ...request,
+            car_id: preview.car.id,
+            journeyIds: result.journeyIds,
+            previewToken: preview.previewToken,
+            correction: result.correction,
+        })
+        const documentId = saved.data?.data?.document_id
+        if (!documentId) throw new Error('Server nevrátil číslo vytvoreného dokumentu.')
 
-        if (selectedBranchId) {
+        // Corrections/additions must not overwrite the original travel journal.
+        if (['N', 'E', 'I'].includes(type)) {
             void Promise.allSettled([
-                api.post('/v1/cps', {
-                    start: periodFromLocal,
-                    end: periodToLocal,
-                    branch_id: selectedBranchId,
-                }),
-                api.post('/v1/dzcs', {
-                    start: periodFromLocal,
-                    end: periodToLocal,
-                    branch_id: selectedBranchId,
-                }),
-            ]).then(([cpResult, dzcResult]) => {
-                if (cpResult.status === 'fulfilled' && dzcResult.status === 'fulfilled') {
+                api.post('/v1/cps', { start: periodFrom, end: periodTo, branch_id: selectedBranchId }),
+                api.post('/v1/dzcs', { start: periodFrom, end: periodTo, branch_id: selectedBranchId }),
+            ]).then((results) => {
+                if (results.every((result) => result.status === 'fulfilled')) {
                     showRoutesGeneratedToast()
-                    return
+                } else {
+                    toast.add({ severity: 'warn', summary: 'Dávka uložená',
+                        detail: 'Dopravná dávka je uložená, ale CP alebo denný záznam ciest sa nepodarilo vytvoriť.', life: 8000 })
                 }
-
-                toast.add({
-                    severity: 'warn',
-                    summary: 'Čiastočný úspech',
-                    detail: 'Kilometre boli vytvorené, ale CP alebo DZC sa nepodarilo vygenerovať.',
-                    life: 4500,
-                })
-            })
-        } else {
-            toast.add({
-                severity: 'info',
-                summary: 'Informácia',
-                detail: 'Kilometre boli vytvorené, ale CP/DZC sa negenerovali, pretože chýba pobočka.',
-                life: 4000,
             })
         }
-
-        await router.push({
-            path: '/documents/kilometers',
-            query: {
-                batchNumber: sheet.batchNumber,
-                fileName: sheet.fileName,
-                amount: sheet.amount,
-                kilometers: sheet.kilometers,
-                periodFrom: sheet.periodFrom,
-                periodTo: sheet.periodTo,
-                performedBy: sheet.performedBy,
-                performedDate: sheet.performedDate,
-                companyName: sheet.companyName,
-                branchName: sheet.branchName,
-                insuranceId: insurance.value.id,
-                batchTypeCode: batchType.value.code,
-                period0: periodFromLocal,
-                period1: periodToLocal,
-                insuranceName: sheet.insuranceName,
-                patientIds: JSON.stringify(sheet.patients ?? []),
-            },
-        })
+        await router.push({ name: 'documents-kilometers-show', params: { documentId } })
     } catch (error: any) {
-        console.error('Generation failed', error)
-
-        const errors = error?.response?.data?.errors?.kilometers_export
-
-        if (Array.isArray(errors) && errors.length) {
-            errors.slice(0, 8).forEach((message: string) => {
-                toast.add({
-                    severity: 'error',
-                    summary: 'Chýbajúce údaje',
-                    detail: message,
-                    life: 20000,
-                })
-            })
-
-            if (errors.length > 8) {
-                toast.add({
-                    severity: 'warn',
-                    summary: 'Ďalšie chyby',
-                    detail: `Našlo sa ešte ${errors.length - 8} ďalších chýb. Skontrolujte údaje pacientov, lekárov, prevádzky a poisťovne.`,
-                    life: 20000,
-                })
-            }
-
-            return
-        }
-
-        toast.add({
-            severity: 'error',
-            summary: 'Chyba',
-            detail: error?.response?.data?.message ?? 'Nepodarilo sa vygenerovať kilometre.',
-            life: 4000,
-        })
+        const body = error?.response?.data
+        const messages = body?.errors && typeof body.errors === 'object'
+            ? Object.values(body.errors).flat().map(String) : []
+        const errors = messages.length ? messages : [body?.message ?? error?.message ?? 'Nepodarilo sa vytvoriť dopravnú dávku.']
+        errors.slice(0, 8).forEach((message) => toast.add({
+            severity: 'error', summary: 'Dopravná dávka', detail: message, life: 15000,
+        }))
     } finally {
+        busy.value = false
         uiOverlayStore.setContentLoading(false)
     }
 }
 
-watch(branchId, (id) => {
-    if (!id) {
-        return
-    }
-
-    loadAllPatients()
-}, { immediate: true })
+watch([branchId, () => batchType.value?.code, () => insurance.value?.id, dates], () => {
+    formVersion++
+})
+onBeforeUnmount(() => {
+    formVersion++
+    uiOverlayStore.setContentLoading(false)
+})
 
 onMounted(() => {
     loadInsurances()
 })
 
-const formatSubtype = (code?: string) => {
-    if (code === 'N') {
-        return 'Nová dávka'
-    }
-
-    if (code === 'O') {
-        return 'Opravná dávka'
-    }
-
-    return code ?? ''
-}
+const formatSubtype = (code?: string) => batchTypes.value.find((item) => item.code === code)?.name ?? code ?? ''
 
 const formatDateWithTime = (dateStr?: string) => {
     if (!dateStr) {
@@ -488,6 +361,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         <label class="block text-normal mb-1">Typ dávky</label>
                         <Select
                             v-model="batchType"
+                            :disabled="busy"
                             :options="batchTypes"
                             optionLabel="name"
                             fluid
@@ -502,6 +376,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         <label class="block text-normal mb-1">Poisťovňa</label>
                         <Select
                             v-model="insurance"
+                            :disabled="busy"
                             :options="insurances"
                             optionLabel="name"
                             fluid
@@ -516,6 +391,7 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         <label class="block text-normal mb-1">Obdobie</label>
                         <DatePicker
                             v-model="dates"
+                            :disabled="busy"
                             view="month"
                             dateFormat="MM yy"
                             :manualInput="false"
@@ -528,72 +404,17 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                         </small>
                     </div>
 
-                    <div v-if="isCorrectionBatch" class="col-span-12">
-                        <label class="block text-normal mb-2">
-                            Vyhľadajte pacienta
-                        </label>
-
-                        <AutoComplete
-                            v-model="selectedPatients"
-                            :suggestions="filteredPatients"
-                            multiple
-                            optionLabel="name"
-                            :minLength="1"
-                            @complete="searchPatients"
-                            :loading="patientsLoading"
-                            fluid
-                            class="w-full"
-                        >
-                            <template #option="slotProps">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <span class="text-normal text-darkgrey">
-                                        {{ slotProps.option.name }}
-                                    </span>
-                                    <span class="bg-darkgrey rounded-md text-mini text-white px-2 py-0.5">
-                                        {{ slotProps.option.personalNumber }}
-                                    </span>
-                                </div>
-                            </template>
-
-                            <template #chip="slotProps">
-                                <div
-                                    class="
-                                        inline-flex items-center gap-2
-                                        bg-darkgrey text-lightgrey
-                                        px-3 py-1 rounded-md
-                                        text-xs sm:text-sm
-                                    "
-                                >
-                                    <span class="pr-2 border-r border-lightgrey truncate max-w-32 sm:max-w-40">
-                                        {{ slotProps.value.name }}
-                                    </span>
-                                    <span class="px-1 sm:px-2 whitespace-nowrap">
-                                        {{ slotProps.value.personalNumber }}
-                                    </span>
-                                    <i
-                                        class="bi bi-x-lg cursor-pointer text-[0.6rem] sm:text-[0.7rem]"
-                                        @click.stop="removePatient(slotProps.value)"
-                                    ></i>
-                                </div>
-                            </template>
-                        </AutoComplete>
-
-                        <small
-                            v-if="submitted && isCorrectionBatch && !selectedPatients.length"
-                            class="text-danger block mt-1"
-                        >
-                            Pri opravnej dávke je potrebné vybrať aspoň jedného pacienta.
-                        </small>
-                    </div>
                 </div>
             </section>
 
             <div class="flex justify-end">
                 <Button
                     type="submit"
+                    :disabled="busy"
+                    :loading="busy"
                     class="bg-accent! border-0! hover:bg-darkgrey! px-4! rounded-md! text-white! text-normal! h-7!"
                 >
-                    Vytvoriť dávku
+                    Zobraziť náhľad dávky
                 </Button>
             </div>
         </form>

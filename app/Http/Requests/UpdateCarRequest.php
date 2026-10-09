@@ -15,6 +15,7 @@ class UpdateCarRequest extends FormRequest
     {
         return [
             'evc' => 'sometimes|required|string|max:255',
+            'vin' => ['nullable', 'string', 'regex:/^[A-HJ-NPR-Z0-9]{17}$/i'],
             'model' => 'nullable|string|max:255',
             'owner_name' => 'nullable|string|max:255',
             'fuel_consumption_l_per_100km' => 'nullable|numeric|min:0|max:99.99',

@@ -15,6 +15,13 @@ class StoreKilometersBatchRequest extends FormRequest
     {
         return [
             'batchNumber' => ['nullable', 'regex:/^\d{6}$/'],
+            'car_id' => ['nullable', 'integer', 'min:1'],
+            'journeyIds' => ['sometimes', 'array', 'min:1'],
+            'journeyIds.*' => ['integer', 'min:1', 'distinct'],
+            'previewToken' => ['nullable', 'string', 'size:64'],
+            'correction' => ['sometimes', 'array'],
+            'correction.confirmed' => ['sometimes', 'boolean'],
+            'correction.reason' => ['nullable', 'string', 'max:2000'],
             'insurance.id' => ['required', 'integer', 'min:1'],
             'period' => ['required', 'array', 'size:2'],
             'period.0' => ['required', 'date'],

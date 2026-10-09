@@ -4,7 +4,6 @@ import { useRoute } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
 import { usePublicDocument, type PublicDocumentProps } from '@/composables/usePublicDocument'
-import { useAuthStore } from '@/stores/auth'
 import DocumentShell, { type FileItem } from '@/components/DocumentShell.vue'
 
 type KilometersBatchPayload = {
@@ -17,6 +16,7 @@ type KilometersBatchPayload = {
     branch?: { id: number }
     company?: { id: number | null }
     patients?: { id: number }[]
+    correction_review?: { reason: string; reviewed_at: string; confirmed_rejected: boolean } | null
     meta?: {
         fileName?: string
         amount?: number
@@ -32,7 +32,6 @@ type KilometersBatchPayload = {
 const props = defineProps<PublicDocumentProps>()
 const route = useRoute()
 const toast = useToast()
-const authStore = useAuthStore()
 
 const { data: payload, previewUrl, getPublicLink } = usePublicDocument<KilometersBatchPayload>(props, {
     privateDataUrl: `/v1/kilometers-batches/${route.params.documentId}`,
@@ -49,46 +48,6 @@ const stored = computed(() => {
     // @ts-ignore
     return (payload.value.kilometers_batch ?? payload.value) as KilometersBatchPayload | null
 })
-
-function normalizeDateOnly(value: string): string {
-    const match = String(value ?? '').match(/^(\d{4}-\d{2}-\d{2})/)
-
-    if (match) {
-        return match[1] ?? ''
-    }
-
-    return value
-}
-
-function buildDownloadPayloadFromStored(p: any) {
-    const insuranceId = Number(p.insurance?.id || p.insurance_id || 0)
-    const branchId = Number(p.branch?.id || p.branch_id || authStore.currentBranch?.id || 0)
-    const userId = Number(p.user?.id || p.user_id || authStore.user?.id || 0)
-    const companyId = p.company?.id || p.company_id || authStore.currentBranch?.company_id || null
-
-    const batchTypeCode = p.batchType?.code || p.batch_type_code || 'N'
-
-    const normalizedPeriod = (p.period ?? [])
-        .map((d: string) => normalizeDateOnly(d))
-        .filter(Boolean)
-
-    const patients = (p.patients ?? [])
-        .map((x: any) => {
-            const id = x && typeof x === 'object' ? (x.id || x.patient_id) : x
-            return { id: id ? Number(id) : 0 }
-        })
-        .filter((x: any) => x.id > 0)
-
-    return {
-        batchType: { code: batchTypeCode },
-        insurance: { id: insuranceId },
-        period: normalizedPeriod,
-        user: { id: userId },
-        branch: { id: branchId },
-        company: companyId ? { id: Number(companyId) } : null,
-        patients,
-    }
-}
 
 function showErrorToasts(messages: string[]) {
     messages.slice(0, 8).forEach((message) => {
@@ -115,7 +74,7 @@ const files = computed<FileItem[]>(() => {
         return []
     }
 
-    const fileName = stored.value.meta?.fileName ?? `davka.${stored.value.batchNumber}.txt`
+    const fileName = stored.value.meta?.fileName ?? `davka.${stored.value.batchNumber}`
 
     return [
         {
@@ -125,7 +84,7 @@ const files = computed<FileItem[]>(() => {
                 {
                     url: props.isPublic ? getPublicLink({ download: true, format: 'txt' }) : '/v1/batches/kilometers/download',
                     method: props.isPublic ? 'get' : 'post',
-                    payload: props.isPublic ? undefined : buildDownloadPayloadFromStored(stored.value),
+                    payload: props.isPublic ? undefined : { document_id: stored.value.document_id ?? Number(route.params.documentId) },
                     fileType: 'TXT',
                     contentType: 'text/plain',
                     filename: fileName,
@@ -153,7 +112,7 @@ async function handleActionClick(actionId: string) {
         return
     }
 
-    const fileName = stored.value.meta?.fileName ?? `davka.${stored.value.batchNumber}.txt`
+    const fileName = stored.value.meta?.fileName ?? `davka.${stored.value.batchNumber}`
 
     if (props.isPublic) {
         window.open(getPublicLink({ download: true, format: 'txt' }), '_blank')
@@ -161,7 +120,7 @@ async function handleActionClick(actionId: string) {
     }
 
     try {
-        const res = await api.post('/v1/batches/kilometers/download', buildDownloadPayloadFromStored(stored.value), {
+        const res = await api.post('/v1/batches/kilometers/download', { document_id: stored.value.document_id ?? Number(route.params.documentId) }, {
             responseType: 'blob',
             headers: { Accept: 'text/plain' },
         })
@@ -211,6 +170,11 @@ async function handleActionClick(actionId: string) {
 </script>
 
 <template>
+    <section v-if="!props.isPublic && stored?.correction_review" class="bg-tag3 rounded-md p-4 mb-4">
+        <h2 class="font-semibold mb-2">Odôvodnenie reklamácie</h2>
+        <p class="whitespace-pre-wrap">{{ stored.correction_review.reason }}</p>
+        <p class="text-mini text-darkgrey mt-2">Uložené odôvodnenie nie je súčasťou TXT. Priložte ho k reklamácii spôsobom požadovaným poisťovňou.</p>
+    </section>
     <DocumentShell
         title="Dávka kilometre"
         :previewUrl="previewUrl"

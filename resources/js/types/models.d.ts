@@ -286,7 +286,7 @@ export interface User {
   signature_path: string | null
   deleted_at: string | null
   // overrides
-  branch_roles: Array<{ branch_id: int, role_id: ?int, position: ?string }>
+    branch_roles: Array<{ branch_id: number, role_id: number | null, position: string | null }>
   // relations
   cars: Car[]
   branches: Branch[]
@@ -678,29 +678,30 @@ export interface PatientPoint {
 }
 
 export interface Car {
-  // columns
-  id: number
-  evc: string | null
-  company_id: number | null
-  user_id: number | null
-  created_at: string | null
-  updated_at: string | null
-  model: string | null
-  fuel_consumption_l_per_100km: number | null
-  owner_name: string | null
-  // relations
-  company: Company
-  user: User
-  documents: CarDocument[]
-  services: CarService[]
-  // counts
-  documents_count: number
-  services_count: number
-  // exists
-  company_exists: boolean
-  user_exists: boolean
-  documents_exists: boolean
-  services_exists: boolean
+    // columns
+    id: number
+    evc: string | null
+    vin?: string | null
+    company_id: number | null
+    user_id: number | null
+    created_at: string | null
+    updated_at: string | null
+    model: string | null
+    fuel_consumption_l_per_100km: number | null
+    owner_name: string | null
+    // relations
+    company: Company
+    user: User
+    documents: CarDocument[]
+    services: CarService[]
+    // counts
+    documents_count: number
+    services_count: number
+    // exists
+    company_exists: boolean
+    user_exists: boolean
+    documents_exists: boolean
+    services_exists: boolean
 }
 
 export interface Visit {

@@ -40,9 +40,10 @@ function buildPayload() {
         insurance: { id: Number(route.query.insuranceId ?? 0) },
         period: [period0, period1],
         user: { id: authStore.user?.id },
-        branch: { id: authStore.currentBranch?.id },
+        branch: { id: Number(route.query.branchId ?? authStore.currentBranch?.id) },
         company: { id: authStore.currentBranch?.company_id ?? null },
         patients: patientIds.value.map((id) => ({ id })),
+        previewToken: route.query.previewToken ? String(route.query.previewToken) : undefined,
         meta: {
             fileName: String(route.query.fileName ?? `davka.${batchNumber.value}.txt`),
             amount: Number(route.query.amount ?? 0),
@@ -80,6 +81,7 @@ async function createBatchAndRedirect() {
     loading.value = true
 
     try {
+        await authStore.waitUntilInitialized()
         const res = await api.post('/v1/kilometers-batches', buildPayload())
         const documentId = res.data?.data?.document_id
 

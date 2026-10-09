@@ -8,6 +8,7 @@ use App\Models\Document;
 use App\Models\Patient;
 use App\Services\DZCDocumentService;
 use App\Services\DocumentService;
+use App\Services\Transport\DzcExportService;
 use App\Http\Requests\StoreDZCRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,6 +20,35 @@ class DZCDocumentController extends Controller
 {
     public function __construct(private DZCDocumentService $service)
     {
+    }
+
+    public function exportOptions(Document $document, DzcExportService $export)
+    {
+        $this->authorize('view', $document);
+        return $this->success($export->options($document));
+    }
+
+    public function exportXlsx(Request $request, Document $document, DzcExportService $export)
+    {
+        $this->authorize('update', $document);
+        $data = $request->validate([
+            'end_km' => ['required', 'numeric', 'min:0', 'max:999999999', 'decimal:0,3'],
+            'route_fingerprint' => ['required', 'string', 'size:64'],
+        ]);
+        $path = $export->export($document, $request->user(), (float) $data['end_km'], $data['route_fingerprint']);
+        return response()->download($path, 'kniha_jazd_' . $document->id . '.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'no-store',
+        ])->deleteFileAfterSend(true);
+    }
+
+    public function cars(Request $request)
+    {
+        $data = $request->validate(['branch_id' => ['required', 'integer', 'exists:branches,id']]);
+        $branch = Branch::findOrFail($data['branch_id']);
+        abort_unless($request->user()->isInBranch((int) $branch->id), 403);
+        return $this->success(\App\Models\Car::query()->where('company_id', $branch->company_id)
+            ->where('user_id', $request->user()->id)->orderBy('evc')->get(['id', 'evc', 'model', 'vin']));
     }
 
     /**

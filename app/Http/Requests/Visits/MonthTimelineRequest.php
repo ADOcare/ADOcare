@@ -22,6 +22,7 @@ class MonthTimelineRequest extends FormRequest
             'patients' => 'nullable|array',
             'patients.*' => 'integer',
             'persist' => 'nullable|boolean',
+            'car_id' => 'nullable|integer|min:1',
         ];
     }
 }

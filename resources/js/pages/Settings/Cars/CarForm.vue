@@ -570,6 +570,12 @@ const getDocumentPreviewUrl = (doc: CarDocument) => {
                     <small v-if="submitted && !car.evc" class="text-danger">Povinné pole</small>
                 </div>
 
+                <div class="col-span-12 md:col-span-6">
+                    <label class="block mb-1">VIN</label>
+                    <InputText v-model="car.vin" maxlength="17" class="w-full" />
+                    <small>17 znakov, ak je vozidlu VIN pridelené.</small>
+                </div>
+
                 <div class="w-full">
                     <label class="block text-sm mb-1">Majiteľ vozidla</label>
                     <AutoComplete

@@ -217,7 +217,11 @@ class DocumentController extends Controller
                 return app(DZCDocumentController::class)->exportCsv($document);
             }
 
-            if (in_array($document->type, ['kilometers_batch', 'points_batch'], true)) {
+            if ($document->type === 'kilometers_batch') {
+                return app(\App\Services\KilometersBatchDocumentService::class)->downloadStored($document);
+            }
+
+            if ($document->type === 'points_batch') {
                 $payload = $this->service->buildBatchDownloadPayload($document);
                 if (!$payload) {
                     abort(404, 'TXT súbor pre dávku nebol nájdený');
@@ -226,9 +230,7 @@ class DocumentController extends Controller
                 $downloadRequest = Request::create('/', 'POST', $payload);
                 $downloadRequest->setUserResolver(fn () => $document->user);
 
-                return $document->type === 'kilometers_batch'
-                    ? app(KilometersExportController::class)->download($downloadRequest)
-                    : app(PointsExportController::class)->download($downloadRequest);
+                return app(PointsExportController::class)->download($downloadRequest);
             }
 
             $pdfPath = $this->service->getTravelDocumentPdfPath($document);

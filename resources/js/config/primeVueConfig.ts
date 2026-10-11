@@ -345,6 +345,12 @@ export default {
 
         },
 
+        popover: {
+            root: {
+                class: 'rounded-md! bg-white! text-darkgrey! p-2!'
+            },
+        },
+
 
     },
 

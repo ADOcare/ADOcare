@@ -31,7 +31,6 @@ import PatientRecord from '@/pages/Patients/Record/PatientRecordPage.vue'
 import PatientDekurz from '@/pages/Patients/Dekurz/PatientDekurzPage.vue'
 import PatientLeave from '@/pages/Patients/Leave/PatientLeavePage.vue'
 import type { RouteRecordRaw } from 'vue-router'
-import DashboardPage from '@/pages/DashboardPage.vue'
 import ScanCapturePage from '@/pages/Patients/Scan/ScanCapturePage.vue'
 import { defineAsyncComponent } from 'vue'
 import useAuthStore from '@/stores/auth'
@@ -44,9 +43,9 @@ function showOnSidebar() {
 }
 
 const generalRoutes: Readonly<RouteRecordRaw[]> = [
-    { path: '', redirect: { name: 'dashboard' } },
-    { path: '/', redirect: { name: 'dashboard' } },
-    { path: '/dashboard', name: 'dashboard', component: DashboardPage },
+    { path: '', redirect: { name: 'patients' } },
+    { path: '/', redirect: { name: 'patients' } },
+    { path: '/dashboard', redirect: { name: 'patients' } },
     {
         path: '/login',
         name: 'login',
@@ -476,7 +475,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
     },
     {
         path: '/:pathMatch(.*)*',
-        redirect: { name: 'dashboard' }
+        redirect: { name: 'patients' }
     }
 ];
 

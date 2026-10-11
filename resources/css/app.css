@@ -174,3 +174,8 @@ body {
     --p-checkbox-checked-hover-background: var(--c-dark-grey);
     --p-checkbox-icon-color: white;
 }
+
+.p-popover::before,
+.p-popover::after {
+    display: none !important;
+}

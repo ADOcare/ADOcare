@@ -3,6 +3,7 @@ import { onMounted, ref, watch, computed } from 'vue'
 import AddressFields from '@/components/Address/AddressFields.vue'
 import EmailInput from '@/components/Contact/EmailInput.vue'
 import PhoneNumberInput from '@/components/Contact/PhoneNumberInput.vue'
+import FormField from '@/components/FormField.vue'
 import useAuthStore from '@/stores/auth'
 import {
     usePatientStore,
@@ -609,64 +610,47 @@ watch(
                 <label class="block text-normal text-accent">Osobné údaje</label>
             </div>
 
-            <div class="col-span-4">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Meno
-                </label>
-                <InputText
-                    :disabled="disabled"
-                    v-model.trim="localPatient.first_name"
-                    fluid
-                    :invalid="submitted && !localPatient.first_name"
-                    :class="{ 'bg-transparent!': disabled, 'opacity-50!': disabled }"
-                    @blur="prefillInsurance()"
-                />
-                <small v-if="submitted && errors.first_name" class="text-danger">{{ errors.first_name }}</small>
-            </div>
+            <FormField
+                v-model.trim="localPatient.first_name"
+                label="Meno"
+                required
+                :disabled="disabled"
+                :error="submitted ? errors.first_name : null"
+                class="col-span-4"
+                :control-class="{ 'bg-transparent!': disabled }"
+                @blur="prefillInsurance()"
+            />
 
-            <div class="col-span-4">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Priezvisko
-                </label>
-                <InputText
-                    :disabled="disabled"
-                    v-model.trim="localPatient.last_name"
-                    fluid
-                    :invalid="submitted && !localPatient.last_name"
-                    :class="{ 'bg-transparent!': disabled, 'opacity-50!': disabled }"
-                    @blur="prefillInsurance()"
-                />
-                <small v-if="submitted && errors.last_name" class="text-danger">{{ errors.last_name }}</small>
-            </div>
+            <FormField
+                v-model.trim="localPatient.last_name"
+                label="Priezvisko"
+                required
+                :disabled="disabled"
+                :error="submitted ? errors.last_name : null"
+                class="col-span-4"
+                :control-class="{ 'bg-transparent!': disabled }"
+                @blur="prefillInsurance()"
+            />
 
-            <div class="col-span-2">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Titul
-                </label>
-                <InputText
-                    :disabled="disabled"
-                    v-model.trim="localPatient.title"
-                    fluid
-                    :class="{ 'opacity-50!': disabled }"
-                />
-            </div>
+            <FormField
+                v-model.trim="localPatient.title"
+                label="Titul"
+                :disabled="disabled"
+                class="col-span-2"
+            />
 
-            <div class="col-span-2">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Pohlavie
-                </label>
-                <Select
-                    :disabled="disabled"
-                    v-model="localPatient.sex"
-                    :options="sexOptions"
-                    optionLabel="label"
-                    optionValue="value"
-                    fluid
-                    :invalid="submitted && !localPatient.sex"
-                    :class="{ 'opacity-50!': disabled }"
-                />
-                <small v-if="submitted && errors.sex" class="text-danger">{{ errors.sex }}</small>
-            </div>
+            <FormField
+                v-model="localPatient.sex"
+                control="select"
+                label="Pohlavie"
+                required
+                :disabled="disabled"
+                :options="sexOptions"
+                option-label="label"
+                option-value="value"
+                :error="submitted ? errors.sex : null"
+                class="col-span-2"
+            />
         </div>
 
         <div class="grid grid-cols-12 gap-4">
@@ -674,13 +658,17 @@ watch(
                 <label class="block text-normal text-accent">Zdravotné detaily</label>
             </div>
 
-            <div class="col-span-12">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Lekár
-                </label>
-
+            <FormField
+                label="Lekár"
+                required
+                :disabled="disabled"
+                :error="submitted ? errors.doctor_id : null"
+                class="col-span-12"
+                v-slot="{ id, invalid }"
+            >
                 <Select
                     ref="doctorSelectRef"
+                    :input-id="id"
                     :disabled="disabled"
                     v-model="localPatient.doctor_id"
                     :options="doctorOptions"
@@ -688,7 +676,7 @@ watch(
                     optionValue="id"
                     fluid
                     filter
-                    :invalid="submitted && !localPatient.doctor_id"
+                    :invalid="invalid"
                     :class="{ 'opacity-50!': disabled }"
                     @show="onDoctorSelectShow"
                 >
@@ -704,11 +692,7 @@ watch(
                         </div>
                     </template>
                 </Select>
-
-                <small v-if="submitted && errors.doctor_id" class="text-danger">
-                    {{ errors.doctor_id }}
-                </small>
-            </div>
+            </FormField>
 
         </div>
 
@@ -746,43 +730,49 @@ watch(
                 <label class="block text-normal text-accent">Kontakt</label>
             </div>
 
-            <div class="col-span-6">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Email
-                </label>
-
+            <FormField
+                label="Email"
+                :disabled="disabled"
+                class="col-span-6"
+            >
                 <EmailInput
                     v-model="localPatient.contact"
                     :disabled="disabled"
                     :error="submitted ? errors.contact : null"
                 />
-            </div>
+            </FormField>
 
-            <div class="col-span-6">
-                <label :class="['block text-normal mb-1', disabled && 'opacity-50!']">
-                    Telefón
-                </label>
-
+            <FormField
+                label="Telefón"
+                :disabled="disabled"
+                :error="submitted ? errors.phone : null"
+                class="col-span-6"
+            >
                 <PhoneNumberInput
                     v-model="localPatient.phone"
                     v-model:country-code="localPatient.country_code_phone"
                     :disabled="disabled"
                     :invalid="Boolean(errors.phone)"
                 />
-                <small v-if="submitted && errors.phone" class="text-danger">{{ errors.phone }}</small>
-            </div>
+            </FormField>
         </div>
 
         <div v-if="canEditAssignments" class="grid grid-cols-12 gap-4">
-            <div class="col-span-6">
-                <label class="block text-normal mb-1">Prevádzka</label>
+            <FormField
+                label="Prevádzka"
+                required
+                :error="submitted ? errors.branch_id : null"
+                class="col-span-6"
+                v-slot="{ id, invalid }"
+            >
                 <Select
+                    :input-id="id"
                     v-model="localPatient.branch_id"
                     :options="branchOptions"
                     optionLabel="address"
                     optionValue="id"
                     fluid
-                    :invalid="submitted && !localPatient.branch_id"
+                    :invalid="invalid"
                 >
                     <template #value="slotProps">
                         <span v-if="slotProps.value">
@@ -796,18 +786,23 @@ watch(
                         </span>
                     </template>
                 </Select>
-                <small v-if="submitted && errors.branch_id" class="text-danger">{{ errors.branch_id }}</small>
-            </div>
+            </FormField>
 
-            <div class="col-span-6">
-                <label class="block text-normal mb-1">Zdravotná Sestra</label>
+            <FormField
+                label="Zdravotná sestra"
+                required
+                :error="submitted ? errors.nurse_id : null"
+                class="col-span-6"
+                v-slot="{ id, invalid }"
+            >
                 <Select
+                    :input-id="id"
                     v-model="localPatient.nurse_id"
                     :options="nurseOptions"
                     optionLabel="first_name"
                     optionValue="id"
                     fluid
-                    :invalid="submitted && !localPatient.nurse_id"
+                    :invalid="invalid"
                 >
                     <template #value="slotProps">
                         <span v-if="slotProps.value">
@@ -821,8 +816,7 @@ watch(
                         </span>
                     </template>
                 </Select>
-                <small v-if="submitted && errors.nurse_id" class="text-danger">{{ errors.nurse_id }}</small>
-            </div>
+            </FormField>
         </div>
     </div>
 </template>

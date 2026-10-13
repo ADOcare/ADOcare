@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, markRaw, ref } from 'vue'
+import { computed, markRaw, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import router from '@/router'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import type { Car, User } from '@/types/models'
@@ -14,7 +15,9 @@ import { formatUserFullName } from '@/utils/formatUtils'
 
 const toast = useToast()
 const auth = useAuthStore()
+const route = useRoute()
 const actionRemote = ref<RemoteTableReturn>({} as RemoteTableReturn)
+const openingCarId = ref<number | null>(null)
 
 const tableKey = computed(() => `cars-${auth.currentBranch?.id ?? 'global'}`)
 
@@ -35,6 +38,33 @@ async function openCreateCar() {
         actionRemote.value?.reload()
     }
 }
+
+watch(
+    () => route.query.car,
+    async (value) => {
+        const carId = Number(value)
+
+        if (!Number.isInteger(carId) || carId <= 0 || openingCarId.value === carId) {
+            return
+        }
+
+        openingCarId.value = carId
+
+        await router.replace({
+            query: {
+                ...route.query,
+                car: undefined,
+            },
+        })
+
+        try {
+            await openEditCar(carId)
+        } finally {
+            openingCarId.value = null
+        }
+    },
+    { immediate: true },
+)
 
 const options = computed<DataTableOptions<Car>>(() => ({
     rowKey: 'id',

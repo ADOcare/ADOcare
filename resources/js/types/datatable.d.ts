@@ -31,11 +31,10 @@ interface ColumnDef<T = any> {
 interface ActionDef<T = any> {
     key: string;
     label?: string;
-    key: string;
-    label?: string;
     position?: 'start' | 'end';
     bordered?: boolean;
     adonis?: boolean;
+    variant?: 'accent' | 'dark' | 'text' | 'secondary' | 'danger';
     class?: string | Ref<string> | ((params: { rows: T[]; selectedRows: T[]; remote: RemoteTableReturn }) => string);
     tooltip?: string | Ref<string> | ((params: { rows: T[]; selectedRows: T[]; remote: RemoteTableReturn }) => string);
     disabled?: boolean | ((params: { rows: T[]; selectedRows: T[]; remote: RemoteTableReturn }) => boolean);

@@ -1,16 +1,25 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useToast } from 'primevue/usetoast'
+
 import { usePatientStore } from '@/stores/patientStore'
 import api from '@/services/api'
 import { toApiDate, parseDateInput } from '@/utils/dateUtils'
+
+import FormField from '@/components/FormField.vue'
+import AppButton from '@/components/AppButton.vue'
 import PresetMultiDatePicker from '@/components/Date/PresetMultiDatePicker.vue'
 
-type Option = { id: number; code: string; description: string }
+type Option = {
+    id: number
+    code: string
+    description: string
+}
 
 const patientStore = usePatientStore()
 patientStore.loadFromStorage()
+
 const { current: currentPatient } = storeToRefs(patientStore)
 
 const toast = useToast()
@@ -25,35 +34,121 @@ const procedure = ref<Option | null>(null)
 const filteredProcedures = ref<Option[]>([])
 
 const quantity = ref<number | null>(1)
-const submitted = ref(false)
 
-const emitted = defineEmits<{ (e: 'created'): void }>()
+const submitted = ref(false)
+const saving = ref(false)
+
+const emitted = defineEmits<{
+    (e: 'created'): void
+}>()
 
 const patientDeathDate = computed<Date | null>(() => {
     const raw = (currentPatient.value as any)?.death_date
-    if (!raw || typeof raw !== 'string') return null
+
+    if (!raw || typeof raw !== 'string') {
+        return null
+    }
+
     const d = new Date(`${raw.slice(0, 10)}T00:00:00`)
-    if (isNaN(d.getTime())) return null
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+
+    if (isNaN(d.getTime())) {
+        return null
+    }
+
+    return new Date(
+        d.getFullYear(),
+        d.getMonth(),
+        d.getDate(),
+    )
 })
 
-const maxSelectableDate = computed<Date | undefined>(() => patientDeathDate.value ?? undefined)
+const maxSelectableDate = computed<Date | undefined>(() => {
+    return patientDeathDate.value ?? undefined
+})
 
-// `parseDateInput` imported from `@/utils/dateUtils`
+function datesError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!dates.value?.length) {
+        return 'Dátum je povinný.'
+    }
+
+    return null
+}
+
+function diagnosisError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!diagnosis.value) {
+        return 'Diagnóza je povinná.'
+    }
+
+    return null
+}
+
+function procedureError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!procedure.value) {
+        return 'Výkon je povinný.'
+    }
+
+    return null
+}
+
+function quantityError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!quantity.value || quantity.value <= 0) {
+        return 'Počet je povinný.'
+    }
+
+    return null
+}
+
+function referralDateError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!referralDate.value) {
+        return 'Dátum je povinný.'
+    }
+
+    return null
+}
 
 function normalizeSelectedDates(input: unknown): Date[] {
-    const arr = Array.isArray(input) ? input : []
+    const arr = Array.isArray(input)
+        ? input
+        : []
 
     const normalized = arr
         .map((d) => parseDateInput(d as any))
         .filter((d): d is Date => !!d)
-        .map((d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()))
+        .map((d) => new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate(),
+        ))
         .filter((d) => !isAfterPatientDeath(d))
 
     const map = new Map<string, Date>()
+
     for (const d of normalized) {
         const dateStr = toApiDate(d)
-        if (dateStr) map.set(dateStr, d)
+
+        if (dateStr) {
+            map.set(dateStr, d)
+        }
     }
 
     return Array.from(map.entries())
@@ -61,14 +156,48 @@ function normalizeSelectedDates(input: unknown): Date[] {
         .map(([, d]) => d)
 }
 
-function truncate(text: string, max = 60) { if (!text) return ''; return text.length > max ? text.slice(0, max) + '…' : text }
+function truncate(text: string, max = 60) {
+    if (!text) {
+        return ''
+    }
 
-function isAfterPatientDeath(date: Date | null): boolean { if (!date || !patientDeathDate.value) return false; const left = toApiDate(date); const right = toApiDate(patientDeathDate.value); return !!left && !!right && left > right }
+    return text.length > max
+        ? text.slice(0, max) + '…'
+        : text
+}
+
+function isAfterPatientDeath(date: Date | null): boolean {
+    if (!date || !patientDeathDate.value) {
+        return false
+    }
+
+    const left = toApiDate(date)
+    const right = toApiDate(patientDeathDate.value)
+
+    return !!left && !!right && left > right
+}
 
 function extractArray(raw: any): any[] {
-    if (Array.isArray(raw)) return raw
-    const candidates = [raw?.data, raw?.data?.items, raw?.data?.data, raw?.data?.data?.items, raw?.data?.data?.data, raw?.items, raw?.items?.data]
-    for (const c of candidates) if (Array.isArray(c)) return c
+    if (Array.isArray(raw)) {
+        return raw
+    }
+
+    const candidates = [
+        raw?.data,
+        raw?.data?.items,
+        raw?.data?.data,
+        raw?.data?.data?.items,
+        raw?.data?.data?.data,
+        raw?.items,
+        raw?.items?.data,
+    ]
+
+    for (const candidate of candidates) {
+        if (Array.isArray(candidate)) {
+            return candidate
+        }
+    }
+
     return []
 }
 
@@ -78,11 +207,22 @@ function getNewestReferenceDate(rows: any[]): Date | null {
 
     for (const row of rows) {
         const parsed = parseDateInput(row?.reference_date as any)
-        if (!parsed) continue
 
-        const normalized = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+        if (!parsed) {
+            continue
+        }
+
+        const normalized = new Date(
+            parsed.getFullYear(),
+            parsed.getMonth(),
+            parsed.getDate(),
+        )
+
         const normalizedStr = toApiDate(normalized)
-        if (!normalizedStr) continue
+
+        if (!normalizedStr) {
+            continue
+        }
 
         if (!newestDateStr || normalizedStr > newestDateStr) {
             newestDate = normalized
@@ -95,7 +235,9 @@ function getNewestReferenceDate(rows: any[]): Date | null {
 
 let referralDateLoadSeq = 0
 
-async function loadLatestReferralDateForPatient(patientId: number | null | undefined) {
+async function loadLatestReferralDateForPatient(
+    patientId: number | null | undefined,
+) {
     const seq = ++referralDateLoadSeq
 
     if (!patientId) {
@@ -104,20 +246,37 @@ async function loadLatestReferralDateForPatient(patientId: number | null | undef
     }
 
     try {
-        const res = await api.get('v1/patient-points', {
-            params: {
-                filter: { patient_id: patientId },
-                per_page: 25,
-                page: 1,
-                sort: '-reference_date',
+        const res = await api.get(
+            'v1/patient-points',
+            {
+                params: {
+                    filter: {
+                        patient_id: patientId,
+                    },
+                    per_page: 25,
+                    page: 1,
+                    sort: '-reference_date',
+                },
             },
-        })
+        )
 
-        if (seq !== referralDateLoadSeq) return
-        referralDate.value = getNewestReferenceDate(extractArray(res.data))
+        if (seq !== referralDateLoadSeq) {
+            return
+        }
+
+        referralDate.value = getNewestReferenceDate(
+            extractArray(res.data),
+        )
     } catch (e) {
-        if (seq !== referralDateLoadSeq) return
-        console.error('Failed to load latest patient point reference date', e)
+        if (seq !== referralDateLoadSeq) {
+            return
+        }
+
+        console.error(
+            'Failed to load latest patient point reference date',
+            e,
+        )
+
         referralDate.value = null
     }
 }
@@ -127,14 +286,31 @@ watch(
     (patientId) => {
         void loadLatestReferralDateForPatient(patientId)
     },
-    { immediate: true }
+    {
+        immediate: true,
+    },
 )
 
-async function searchOptions(endpoint: string, event: { query: string }) {
+async function searchOptions(
+    endpoint: string,
+    event: { query: string },
+    params: Record<string, string | number | null> = {},
+) {
     try {
         const q = (event.query ?? '').trim()
-        const res = await api.get(endpoint, { params: { q, per_page: 25, page: 1, sort: 'code' } })
-        return extractArray(res.data) as any[]
+
+        const res = await api.get(
+            endpoint,
+            {
+                params: {
+                    q,
+                    limit: 25,
+                    ...params,
+                },
+            },
+        )
+
+        return extractArray(res.data)
     } catch (e) {
         console.error('Failed to load', endpoint, e)
         return []
@@ -142,148 +318,341 @@ async function searchOptions(endpoint: string, event: { query: string }) {
 }
 
 async function searchDiagnoses(event: { query: string }) {
-    const arr = await searchOptions('v1/diagnoses', event)
-    filteredDiagnoses.value = arr.map((d) => ({ id: d.id, code: d.code ?? '', description: d.description ?? '' }))
+    const branchId = Number((currentPatient.value as any)?.branch_id) || null
+
+    if (!branchId) {
+        filteredDiagnoses.value = []
+        return
+    }
+
+    const arr = await searchOptions(
+        'v1/clinical-suggestions/diagnoses',
+        event,
+        { branch_id: branchId },
+    )
+
+    filteredDiagnoses.value = arr.map((d) => ({
+        id: d.id,
+        code: d.code ?? '',
+        description: d.description ?? '',
+    }))
 }
 
 async function searchProcedures(event: { query: string }) {
-    const arr = await searchOptions('v1/procedures', event)
-    filteredProcedures.value = arr.map((p) => ({ id: p.id, code: p.code ?? '', description: p.description ?? '' }))
+    const branchId = Number((currentPatient.value as any)?.branch_id) || null
+
+    if (!branchId || !diagnosis.value?.id) {
+        filteredProcedures.value = []
+        return
+    }
+
+    const arr = await searchOptions(
+        'v1/clinical-suggestions/procedures',
+        event,
+        {
+            branch_id: branchId,
+            diagnosis_id: diagnosis.value.id,
+        },
+    )
+
+    filteredProcedures.value = arr.map((p) => ({
+        id: p.id,
+        code: p.code ?? '',
+        description: p.description ?? '',
+    }))
 }
 
-function buildPatientPointPayloadForDate(dateOverride: Date) {
-    if (!currentPatient.value) throw new Error('No patient selected')
+watch(
+    () => diagnosis.value?.id ?? null,
+    () => {
+        procedure.value = null
+        filteredProcedures.value = []
+    },
+)
+
+function buildPatientPointPayloadForDate(
+    dateOverride: Date,
+) {
+    if (!currentPatient.value) {
+        throw new Error('No patient selected')
+    }
+
     const patient: any = currentPatient.value
+
     return {
         patient_id: patient.id,
-        patient_personal_number: patient.personal_number ?? null,
-        patient_name: `${patient.first_name ?? ''} ${patient.last_name ?? ''}`.trim(),
+        patient_personal_number:
+            patient.personal_number ?? null,
+        patient_name:
+            `${patient.first_name ?? ''} ${patient.last_name ?? ''}`.trim(),
         date: toApiDate(dateOverride),
-        reference_date: toApiDate(parseDateInput(referralDate.value) ?? new Date()),
-        diagnosis_code: diagnosis.value?.code ?? null,
-        procedure_code: procedure.value?.code ?? null,
-        quantity: quantity.value ?? 1,
-        branch_id: patient.branch_id,
+        reference_date: toApiDate(
+            parseDateInput(referralDate.value) ?? new Date(),
+        ),
+        diagnosis_code:
+            diagnosis.value?.code ?? null,
+        procedure_code:
+            procedure.value?.code ?? null,
+        quantity:
+            quantity.value ?? 1,
+        branch_id:
+            patient.branch_id,
     }
 }
 
 async function onSubmit() {
     submitted.value = true
-    const normalizedDates = normalizeSelectedDates(dates.value as any)
+
+    const normalizedDates = normalizeSelectedDates(
+        dates.value,
+    )
+
     dates.value = normalizedDates
-    const parsedReferral = parseDateInput(referralDate.value as any)
-    if (!parsedReferral) return toast.add({ severity: 'warn', summary: 'Neplatné dátum', detail: 'Referenčný dátum je neplatný', life: 3000 })
-    if (!procedure.value || !diagnosis.value) return toast.add({ severity: 'warn', summary: 'Chýba kód', detail: 'Zadajte diagnózu a procedúru', life: 3000 })
+
+    const parsedReferral = parseDateInput(
+        referralDate.value,
+    )
+
+    if (
+        !normalizedDates.length ||
+        !parsedReferral ||
+        !procedure.value ||
+        !diagnosis.value ||
+        !quantity.value ||
+        quantity.value <= 0
+    ) {
+        return
+    }
 
     const referralDateStr = toApiDate(parsedReferral)
+
     const hasDateBeforeReferral = normalizedDates.some((d) => {
         const selectedDateStr = toApiDate(d)
-        return !!selectedDateStr && !!referralDateStr && selectedDateStr < referralDateStr
+
+        return (
+            !!selectedDateStr &&
+            !!referralDateStr &&
+            selectedDateStr < referralDateStr
+        )
     })
 
     if (hasDateBeforeReferral) {
-        return toast.add({
+        toast.add({
             severity: 'warn',
             summary: 'Neplatné dátumy',
-            detail: 'Dátum odporučenia musí byť rovnaký alebo starší ako všetky vybrané dátumy.',
+            detail:
+                'Dátum odporučenia musí byť rovnaký alebo starší ako všetky vybrané dátumy.',
             life: 3500,
         })
+
+        return
     }
 
+    saving.value = true
+
     try {
-        const payloads = normalizedDates.map((d) => buildPatientPointPayloadForDate(d))
+        const payloads = normalizedDates.map((d) =>
+            buildPatientPointPayloadForDate(d),
+        )
 
-        // Backend has only single-create endpoint for patient points.
-        for (const p of payloads) await api.post('v1/patient-points', p)
+        for (const payload of payloads) {
+            await api.post(
+                'v1/patient-points',
+                payload,
+            )
+        }
 
-        toast.add({ severity: 'success', summary: 'Vytvorené', detail: 'Body boli pridané', life: 3000 })
+        toast.add({
+            severity: 'success',
+            summary: 'Vytvorené',
+            detail: 'Body boli pridané',
+            life: 3000,
+        })
+
         emitted('created')
     } catch (e: any) {
         const status = e?.response?.status
+
         const detail =
             status === 403
                 ? 'Nemáte oprávnenie vytvoriť body pre tohto pacienta. Skontrolujte priradenie sestry k pacientovi.'
-                : e?.response?.data?.message || e?.message || 'Chyba servera'
-        toast.add({ severity: 'error', summary: 'Chyba', detail, life: 4000 })
+                : e?.response?.data?.message ||
+                  e?.message ||
+                  'Chyba servera'
+
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail,
+            life: 4000,
+        })
+    } finally {
+        saving.value = false
     }
 }
 </script>
 
 <template>
-    <div class="flex flex-col gap-6 overflow-y-auto">
-        <form @submit.prevent="onSubmit" class="flex flex-col gap-4">
-            <section class="bg-tag3 p-6 rounded-md flex flex-col gap-4">
-                <div class="grid grid-cols-15 gap-4">
-                    <!-- MULTI DATE -->
-                    <div class="col-span-12 md:col-span-3">
-                        <label class="block text-normal mb-1">Dátum</label>
-
-                        <PresetMultiDatePicker v-model="dates" class="w-full" :maxDate="maxSelectableDate" />
-
-                        <small v-if="submitted && (!dates || !dates.length)" class="text-danger">Dátum je
-                            povinný.</small>
-                    </div>
-
-                    <!-- Diagnóza -->
-                    <div class="col-span-12 md:col-span-4">
-                        <label class="block text-normal mb-1">Diagnóza</label>
-                        <AutoComplete v-model="diagnosis" :suggestions="filteredDiagnoses" @complete="searchDiagnoses"
-                            :virtualScrollerOptions="{ itemSize: 38 }" optionLabel="code" dropdown dropdownMode="blank"
-                            :minLength="0" completeOnFocus class="w-full"
-                            inputClass="!w-full !border-none !shadow-none !bg-white focus:!ring-0 focus:!shadow-none">
-                            <template #option="slotProps">
-                                <div class="flex flex-col">
-                                    <span class="shrink-0 font-medium">{{ slotProps.option.code }}</span>
-                                    <span>{{ truncate(slotProps.option.description, 40) }}</span>
-                                </div>
-                            </template>
-                        </AutoComplete>
-                        <small v-if="submitted && !diagnosis" class="text-danger">Diagnóza je povinná.</small>
-                    </div>
-
-                    <!-- Výkon -->
-                    <div class="col-span-12 md:col-span-4">
-                        <label class="block text-normal mb-1">Výkon</label>
-                        <AutoComplete v-model="procedure" :suggestions="filteredProcedures" @complete="searchProcedures"
-                            :virtualScrollerOptions="{ itemSize: 38 }" optionLabel="code" dropdown dropdownMode="blank"
-                            :minLength="0" completeOnFocus class="w-full"
-                            inputClass="!w-full !border-none !shadow-none !bg-white focus:!ring-0 focus:!shadow-none">
-                            <template #option="slotProps">
-                                <div class="flex flex-col">
-                                    <span class="shrink-0 font-medium">{{ slotProps.option.code }}</span>
-                                    <span>{{ truncate(slotProps.option.description, 60) }}</span>
-                                </div>
-                            </template>
-                        </AutoComplete>
-                        <small v-if="submitted && !procedure" class="text-danger">Výkon je povinný.</small>
-                    </div>
-
-                    <!-- Počet -->
-                    <div class="col-span-12 md:col-span-1">
-                        <label class="block text-normal mb-1">Počet</label>
-                        <InputNumber v-model.number="quantity" class="w-full" :min="0" :max="100"
-                            inputClass="!w-full !border-none !shadow-none !bg-white focus:!ring-0 focus:!shadow-none" />
-                        <small v-if="submitted && (!quantity || quantity <= 0)" class="text-danger">Počet je
-                            povinný.</small>
-                    </div>
-
-                    <!-- Dátum odporučenia -->
-                    <div class="col-span-12 md:col-span-3">
-                        <label class="block text-normal mb-1">Dátum odporučenia</label>
-                        <DatePicker v-model="referralDate" dateFormat="dd.mm.yy" :showIcon="false" class="w-full"
-                            :manualInput="false" :maxDate="maxSelectableDate"
-                            inputClass="!w-full !border-none !shadow-none !bg-white focus:!ring-0 focus:!shadow-none" />
-                        <small v-if="submitted && !referralDate" class="text-danger">Dátum je povinný.</small>
-                    </div>
+    <form
+        class="flex flex-col gap-6"
+        @submit.prevent="onSubmit"
+    >
+        <section class="bg-tag3 p-6 rounded-md">
+            <div class="grid grid-cols-12 gap-4 items-end">
+                <!-- Dátumy -->
+                <div class="col-span-12 md:col-span-3">
+                    <FormField
+                        label="Dátum"
+                        required
+                        :error="datesError()"
+                        v-slot="{ describedBy, invalid }"
+                    >
+                        <PresetMultiDatePicker
+                            v-model="dates"
+                            class="w-full"
+                            :maxDate="maxSelectableDate"
+                            :aria-invalid="invalid || undefined"
+                            :aria-describedby="describedBy"
+                        />
+                    </FormField>
                 </div>
-            </section>
 
-            <div class="flex justify-end">
-                <Button type="submit"
-                    class="bg-accent! border-0! hover:bg-darkgrey! px-4! rounded-md! text-white! text-normal! h-7!">
-                    Pridať výkony
-                </Button>
+                <!-- Diagnóza -->
+                <div class="col-span-12 md:col-span-3">
+                    <FormField
+                        label="Diagnóza"
+                        required
+                        :error="diagnosisError()"
+                        v-slot="{ id, describedBy, invalid }"
+                    >
+                        <AutoComplete
+                            :id="id"
+                            v-model="diagnosis"
+                            :suggestions="filteredDiagnoses"
+                            :virtualScrollerOptions="{ itemSize: 38 }"
+                            optionLabel="code"
+                            dropdown
+                            dropdownMode="blank"
+                            :minLength="0"
+                            completeOnFocus
+                            class="w-full"
+                            inputClass="w-full! border-none!"
+                            :invalid="invalid"
+                            :aria-invalid="invalid || undefined"
+                            :aria-describedby="describedBy"
+                            @complete="searchDiagnoses"
+                        >
+                            <template #option="{ option }">
+                                <div class="flex flex-col">
+                                    <span class="font-medium">
+                                        {{ option.code }}
+                                    </span>
+
+                                    <span class="text-mini text-accent">
+                                        {{ truncate(option.description, 40) }}
+                                    </span>
+                                </div>
+                            </template>
+                        </AutoComplete>
+                    </FormField>
+                </div>
+
+                <!-- Výkon -->
+                <div class="col-span-12 md:col-span-3">
+                    <FormField
+                        label="Výkon"
+                        required
+                        :error="procedureError()"
+                        v-slot="{ id, describedBy, invalid }"
+                    >
+                        <AutoComplete
+                            :id="id"
+                            v-model="procedure"
+                            :suggestions="filteredProcedures"
+                            :virtualScrollerOptions="{ itemSize: 38 }"
+                            optionLabel="code"
+                            dropdown
+                            dropdownMode="blank"
+                            :minLength="0"
+                            completeOnFocus
+                            :disabled="!diagnosis"
+                            class="w-full"
+                            inputClass="w-full! border-none!"
+                            :invalid="invalid"
+                            :aria-invalid="invalid || undefined"
+                            :aria-describedby="describedBy"
+                            @complete="searchProcedures"
+                        >
+                            <template #option="{ option }">
+                                <div class="flex flex-col">
+                                    <span class="font-medium">
+                                        {{ option.code }}
+                                    </span>
+
+                                    <span class="text-mini text-accent">
+                                        {{ truncate(option.description, 60) }}
+                                    </span>
+                                </div>
+                            </template>
+                        </AutoComplete>
+                    </FormField>
+                </div>
+
+                <!-- Počet -->
+                <div class="col-span-12 md:col-span-1">
+                    <FormField
+                        label="Počet"
+                        required
+                        :error="quantityError()"
+                        v-slot="{ id, describedBy, invalid }"
+                    >
+                        <InputNumber
+                            :id="id"
+                            v-model="quantity"
+                            :min="1"
+                            :max="100"
+                            class="w-full"
+                            inputClass="w-full! border-none!"
+                            :invalid="invalid"
+                            :aria-invalid="invalid || undefined"
+                            :aria-describedby="describedBy"
+                        />
+                    </FormField>
+                </div>
+
+                <!-- Dátum odporučenia -->
+                <div class="col-span-12 md:col-span-2">
+                    <FormField
+                        label="Dátum odporučenia"
+                        required
+                        :error="referralDateError()"
+                        v-slot="{ id, describedBy, invalid }"
+                    >
+                        <DatePicker
+                            :id="id"
+                            v-model="referralDate"
+                            dateFormat="dd.mm.yy"
+                            :showIcon="false"
+                            :manualInput="false"
+                            :maxDate="maxSelectableDate"
+                            class="w-full"
+                            inputClass="w-full! border-none!"
+                            :invalid="invalid"
+                            :aria-invalid="invalid || undefined"
+                            :aria-describedby="describedBy"
+                        />
+                    </FormField>
+                </div>
+
+                <!-- Add button -->
+                <div class="col-span-12 md:col-span-12 flex justify-end">
+                    <AppButton
+                        type="submit"
+                        label="Pridať výkony"
+                        :loading="saving"
+                    />
+                </div>
             </div>
-        </form>
-    </div>
+        </section>
+    </form>
 </template>

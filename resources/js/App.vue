@@ -54,6 +54,7 @@ useInsuranceCheck({
 const isLoggedIn = computed(() => auth.isAuthenticated)
 const showNavbar = computed(() => route.meta.shownavbar !== false)
 const showFooter = computed(() => route.meta.showfooter !== false)
+const usePagePadding = computed(() => route.meta.pagePadding !== false)
 const pageContextKey = computed(() => {
     return `${route.fullPath}:${auth.currentRole ?? 'guest'}:${auth.currentBranch?.id ?? 'none'}`
 })
@@ -102,21 +103,39 @@ onBeforeUnmount(() => {
         <Navbar v-if="showNavbar" class="flex-none" :isSidebarOpen="isSidebarOpen"
             @toggle-sidebar="handleToggleSidebar" />
 
-        <TercialNavbar v-if="isLoggedIn && showNavbar" class="flex-none" />
-
         <div class="flex flex-1 overflow-hidden">
-            <div class="flex-1 bg-white p-8 relative" :class="contentLoading ? 'overflow-hidden' : 'overflow-auto'">
-                <LoadingOverlay :show="contentLoading" text="" />
+            <div class="flex min-w-0 flex-1 flex-col">
+                <TercialNavbar v-if="isLoggedIn && showNavbar" class="flex-none" />
 
-                <AccessReadOnlyBanner v-if="isLoggedIn" class="mb-5" />
-                <AccessPaymentWarningBanner v-if="isLoggedIn" class="mb-5" />
+                <div
+                    class="relative min-h-0 flex-1 bg-white"
+                    :class="[
+                        usePagePadding ? 'p-8' : 'p-0',
+                        contentLoading ? 'overflow-hidden' : 'overflow-auto',
+                    ]"
+                >
+                    <LoadingOverlay :show="contentLoading" text="" />
 
-                <AccessError v-if="navigationAccessError" />
-                <router-view v-else :key="pageContextKey" />
+                    <AccessReadOnlyBanner v-if="isLoggedIn" class="mb-5" />
+                    <AccessPaymentWarningBanner v-if="isLoggedIn" class="mb-5" />
+
+                    <AccessError v-if="navigationAccessError" />
+                    <router-view v-else :key="pageContextKey" />
+                </div>
             </div>
 
-            <Sidebar v-if="isSidebarOpen && isLoggedIn"
-                class="flex-none bg-darkgrey text-white border-l border-lightgrey" />
+            <div
+                v-if="isLoggedIn"
+                class="flex-none overflow-hidden transition-[width] duration-300 ease-in-out motion-reduce:transition-none"
+                :class="isSidebarOpen ? 'w-64' : 'w-0'"
+                :aria-hidden="!isSidebarOpen"
+                :inert="!isSidebarOpen"
+            >
+                <Sidebar
+                    class="w-64 border-l border-lightgrey text-white transition-transform duration-300 ease-in-out motion-reduce:transition-none"
+                    :class="isSidebarOpen ? 'translate-x-0' : 'translate-x-full'"
+                />
+            </div>
         </div>
 
         <Footer v-if="showFooter" class="flex-none" />

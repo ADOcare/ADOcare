@@ -4,6 +4,7 @@ import SubscriptionExpired from '@/pages/SubscriptionExpired.vue'
 import BillingSuccessPage from '@/pages/Billing/BillingSuccessPage.vue'
 import BillingCancelPage from '@/pages/Billing/BillingCancelPage.vue'
 import SubscriptionsPage from '@/pages/Settings/Subscriptions/SubscriptionsPage.vue'
+import PatientsPrintPreview from '@/pages/Documents/PatientsPrintPreview.vue'
 
 const generalRoutes: Readonly<RouteRecordRaw[]> = [
     { path: '/access-error', name: 'access-error', component: AccessError, meta: { title: 'Prístup zamietnutý', sidebar: false } },
@@ -49,6 +50,18 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
             title: 'Fakturácia',
             sidebar: false,
             roles: ['manager'],
+        },
+    },
+    {
+        path: '/patients/print-preview',
+        alias: '/manager/overview/patients/print-preview',
+        name: 'patients-print',
+        component: PatientsPrintPreview,
+        meta: {
+            title: 'Náhľad tlače pacientov',
+            sidebar: false,
+            navbar: false,
+            roles: ['manager', 'nurse'],
         },
     },
 ];

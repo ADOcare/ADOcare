@@ -1,103 +1,238 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { IModalContentProps } from '@/types/ui'
-import api from '@/services/api'
 import { useToast } from 'primevue/usetoast'
 
-const props = defineProps<IModalContentProps & { userId: number }>()
+import type { IModalContentProps } from '@/types/ui'
+import api from '@/services/api'
+
+import FormField from '@/components/FormField.vue'
+import AppButton from '@/components/AppButton.vue'
+
+const props = defineProps<IModalContentProps & {
+    userId: number
+}>()
 
 const toast = useToast()
 
 const password = ref('')
 const confirmPassword = ref('')
+
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+
 const submitted = ref(false)
 const saving = ref(false)
 
-const passwordsMatch = () => password.value === confirmPassword.value
-
-const save = async () => {
-  submitted.value = true
-
-  if (!password.value || !confirmPassword.value) {
-    toast.add({ severity: 'error', summary: 'Chyba', detail: 'Vyplňte obe polia', life: 5000 })
-    return
-  }
-
-  if (!passwordsMatch()) {
-    toast.add({ severity: 'error', summary: 'Chyba', detail: 'Heslá sa nezhodujú', life: 5000 })
-    return
-  }
-
-  saving.value = true
-  try {
-    await api.patch(`v1/users/${props.userId}`, { pin: password.value })
-    toast.add({ severity: 'success', summary: 'Uložené', detail: 'Heslo bolo zmenené', life: 3000 })
-    if (props.modalResolve) props.modalResolve(true)
-  } catch (err: unknown) {
-    console.error('Nepodarilo sa zmeniť heslo', err)
-    let detail = 'Nepodarilo sa zmeniť heslo'
-
-    // Check for validation errors from API
-    const error = err as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } }
-    if (error?.response?.data?.errors) {
-      const errors = error.response.data.errors
-      detail = Object.values(errors).flat().join(', ')
-    } else if (error?.response?.data?.message) {
-      detail = error.response.data.message
-    }
-
-    toast.add({ severity: 'error', summary: 'Chyba', detail, life: 5000 })
-  } finally {
-    saving.value = false
-  }
+const passwordsMatch = () => {
+    return password.value === confirmPassword.value
 }
 
-const close = () => {
-  if (props.modalResolve) props.modalResolve(null)
+function togglePasswordVisibility() {
+    showPassword.value = !showPassword.value
+}
+
+function toggleConfirmPasswordVisibility() {
+    showConfirmPassword.value = !showConfirmPassword.value
+}
+
+function passwordError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!password.value) {
+        return 'Heslo je povinné.'
+    }
+
+    return null
+}
+
+function confirmPasswordError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!confirmPassword.value) {
+        return 'Potvrdenie hesla je povinné.'
+    }
+
+    if (
+        password.value &&
+        confirmPassword.value &&
+        !passwordsMatch()
+    ) {
+        return 'Heslá sa nezhodujú.'
+    }
+
+    return null
+}
+
+async function save() {
+    submitted.value = true
+
+    if (
+        !password.value ||
+        !confirmPassword.value ||
+        !passwordsMatch()
+    ) {
+        return
+    }
+
+    saving.value = true
+
+    try {
+        await api.patch(
+            `v1/users/${props.userId}`,
+            {
+                pin: password.value,
+            },
+        )
+
+        toast.add({
+            severity: 'success',
+            summary: 'Uložené',
+            detail: 'Heslo bolo zmenené',
+            life: 3000,
+        })
+
+        props.modalResolve?.(true)
+    } catch (err: unknown) {
+        console.error('Nepodarilo sa zmeniť heslo', err)
+
+        let detail = 'Nepodarilo sa zmeniť heslo'
+
+        const error = err as {
+            response?: {
+                data?: {
+                    errors?: Record<string, string[]>
+                    message?: string
+                }
+            }
+        }
+
+        if (error.response?.data?.errors) {
+            detail = Object
+                .values(error.response.data.errors)
+                .flat()
+                .join(', ')
+        } else if (error.response?.data?.message) {
+            detail = error.response.data.message
+        }
+
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail,
+            life: 5000,
+        })
+    } finally {
+        saving.value = false
+    }
+}
+
+function close() {
+    props.modalResolve?.(null)
 }
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
-    <div>
-      <label class="block text-sm mb-1">Nové heslo</label>
-      <IconField class="flex items-center w-full">
-        <InputText v-model="password" :type="showPassword ? 'text' : 'password'" class="w-full" />
-        <InputIcon>
-          <i :class="showPassword ? 'bi bi-eye' : 'bi bi-eye-slash'" class="cursor-pointer"
-            @click="showPassword = !showPassword" />
-        </InputIcon>
-      </IconField>
-      <small v-if="submitted && !password" class="text-danger">Heslo je povinné.</small>
-    </div>
+    <div class="flex flex-col gap-6">
+        <FormField
+            label="Nové heslo"
+            required
+            :error="passwordError()"
+            v-slot="{ id, describedBy, invalid }"
+        >
+            <IconField class="flex items-center w-full">
+                <InputText
+                    :id="id"
+                    v-model="password"
+                    :type="showPassword ? 'text' : 'password'"
+                    autocomplete="new-password"
+                    class="w-full"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                />
 
-    <div>
-      <label class="block text-sm mb-1">Potvrďte heslo</label>
-      <IconField class="flex items-center w-full">
-        <InputText v-model="confirmPassword" :type="showConfirmPassword ? 'text' : 'password'" class="w-full" />
-        <InputIcon>
-          <i :class="showConfirmPassword ? 'bi bi-eye' : 'bi bi-eye-slash'" class="cursor-pointer"
-            @click="showConfirmPassword = !showConfirmPassword" />
-        </InputIcon>
-      </IconField>
-      <small v-if="submitted && !confirmPassword" class="text-danger">Potvrdenie hesla je povinné.</small>
-      <small v-else-if="submitted && password && confirmPassword && !passwordsMatch()" class="text-danger">
-        Heslá sa nezhodujú.
-      </small>
-    </div>
+                <InputIcon>
+                    <button
+                        type="button"
+                        class="cursor-pointer"
+                        :aria-label="
+                            showPassword
+                                ? 'Skryť heslo'
+                                : 'Zobraziť heslo'
+                        "
+                        @click="togglePasswordVisibility"
+                    >
+                        <i
+                            :class="
+                                showPassword
+                                    ? 'bi bi-eye'
+                                    : 'bi bi-eye-slash'
+                            "
+                        />
+                    </button>
+                </InputIcon>
+            </IconField>
+        </FormField>
 
-    <div class="flex justify-end gap-2 mt-4">
-      <Button label="Zrušiť" text @click="close" class="text-accent! px-2!" />
-      <Button label="Zmeniť heslo" :loading="saving"
-        class="bg-accent! border-accent! px-2! hover:bg-darkgrey! hover:border-darkgrey! text-white!" @click="save" />
+        <FormField
+            label="Potvrďte heslo"
+            required
+            :error="confirmPasswordError()"
+            v-slot="{ id, describedBy, invalid }"
+        >
+            <IconField class="flex items-center w-full">
+                <InputText
+                    :id="id"
+                    v-model="confirmPassword"
+                    :type="showConfirmPassword ? 'text' : 'password'"
+                    autocomplete="new-password"
+                    class="w-full"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                    @keydown.enter="save"
+                />
+
+                <InputIcon>
+                    <button
+                        type="button"
+                        class="cursor-pointer"
+                        :aria-label="
+                            showConfirmPassword
+                                ? 'Skryť heslo'
+                                : 'Zobraziť heslo'
+                        "
+                        @click="toggleConfirmPasswordVisibility"
+                    >
+                        <i
+                            :class="
+                                showConfirmPassword
+                                    ? 'bi bi-eye'
+                                    : 'bi bi-eye-slash'
+                            "
+                        />
+                    </button>
+                </InputIcon>
+            </IconField>
+        </FormField>
+
+        <div class="flex justify-end gap-2 pt-4">
+            <AppButton
+                label="Zrušiť"
+                variant="text"
+                :disabled="saving"
+                @click="close"
+            />
+
+            <AppButton
+                label="Zmeniť heslo"
+                :loading="saving"
+                @click="save"
+            />
+        </div>
     </div>
-  </div>
 </template>
-
-<style scoped>
-.p-field {
-  margin-bottom: 0.5rem;
-}
-</style>

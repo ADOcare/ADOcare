@@ -1,8 +1,6 @@
 import Login from '@/pages/LoginPage.vue'
 import Patients from '@/pages/Patients/PatientListPage.vue'
 import Settings from '@/pages/Settings.vue'
-import Procedures from '@/pages/Settings/Procedures/ProceduresPage.vue'
-import Diagnoses from '@/pages/Settings/Diagnoses/DiagnosesPage.vue'
 import Doctors from '@/pages/Settings/Doctors/DoctorsPage.vue'
 import Macros from '@/pages/Settings/Macros/MacrosPage.vue'
 import Data from '@/pages/Data/DataPage.vue'
@@ -51,7 +49,9 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         name: 'login',
         component: Login,
         meta: {
-            requiresAuth: false
+            requiresAuth: false,
+            shownavbar: false,
+            pagePadding: false,
         }
     },
     {
@@ -69,7 +69,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         name: 'data',
         component: Data,
         meta: {
-            title: 'Dávka',
+            title: 'Export',
             sectionRoot: 'data',
             sidebar: showOnSidebar
         },
@@ -79,8 +79,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 name: 'pointsdata',
                 component: Points,
                 meta: {
-                    title: 'Výkonová',
-                    link: 'výkonová',
+                    title: 'Výkonová dávka',
+                    link: 'výkonová dávka',
                     sidebar: showOnSidebar,
                     navbar: true,
                 },
@@ -91,10 +91,21 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 name: 'kilometersdata',
                 component: Kilometers,
                 meta: {
-                    title: 'Dopravná',
-                    link: 'dopravná',
+                    title: 'Dopravná dávka',
+                    link: 'dopravná dávka',
                     sidebar: showOnSidebar,
                     navbar: true,
+                },
+            },
+            {
+                path: 'routes',
+                name: 'routes',
+                component: Routes,
+                meta: {
+                    title: 'Cestovné dokumenty',
+                    link: 'cestovné dokumenty',
+                    sidebar: showOnSidebar,
+                    navbar: false,
                 },
             },
             {
@@ -345,30 +356,6 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         ]
     },
     {
-        path: '/accounting',
-        name: 'accounting',
-        component: Data,
-        redirect: { name: 'routes' },
-        meta: {
-            title: 'Účtovníctvo',
-            sectionRoot: 'accounting',
-            sidebar: showOnSidebar,
-        },
-        children: [
-            {
-                path: 'routes',
-                name: 'routes',
-                component: Routes,
-                meta: {
-                    title: 'Cestovné',
-                    link: 'cestovné',
-                    sidebar: showOnSidebar,
-                    navbar: false,
-                },
-            },
-        ]
-    },
-    {
         path: '/settings',
         name: 'settings',
         redirect: { name: 'doctors' },
@@ -404,51 +391,15 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         ],
     },
     {
-        path: '/overview',
-        name: 'overview',
-        component: Settings,
-        redirect: { name: 'doctors' },
+        path: '/patients',
+        alias: '/overview/patients',
+        name: 'patients',
+        component: Patients,
         meta: {
-            title: 'Prehľady',
-            sectionRoot: 'overview',
-            sidebar: showOnSidebar
-
+            sectionTitle: 'Prehľad',
+            title: 'Pacienti',
+            sidebar: false,
         },
-        children: [
-            {
-                path: 'patients',
-                name: 'patients',
-                component: Patients,
-                meta: {
-                    title: 'Pacienti',
-                    link: 'pacienti',
-                    sidebar: showOnSidebar,
-                    navbar: true,
-                },
-            },
-            {
-                path: 'procedures',
-                name: 'procedures',
-                component: Procedures,
-                meta: {
-                    title: 'Výkony',
-                    link: 'výkony',
-                    sidebar: showOnSidebar,
-                    navbar: true,
-                },
-            },
-            {
-                path: 'diagnoses',
-                name: 'diagnoses',
-                component: Diagnoses,
-                meta: {
-                    title: 'Diagnózy',
-                    link: 'diagnózy',
-                    sidebar: showOnSidebar,
-                    navbar: true,
-                },
-            },
-        ],
     },
     {
         path: '/scan',

@@ -14,7 +14,6 @@ import DataDocuments from "@/pages/Manager/DataDocuments.vue";
 import Invoices from "@/pages/Manager/Invoices.vue";
 import PlansPage from "@/pages/Settings/Plans/PlansPage.vue";
 import useAuthStore from "@/stores/auth";
-import PatientsPrintPreview from "@/pages/Documents/PatientsPrintPreview.vue";
 import PatientStats from "@/pages/Manager/PatientStats.vue";
 import FinancialStats from "@/pages/Manager/FinancialStats.vue";
 import Wizard from "@/pages/Manager/EndOfMonth.vue";
@@ -144,16 +143,6 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: { title: 'Faktúry', sidebar: showOnSidebar, navbar: true, link: 'faktúry' },
             },
         ],
-    },
-    {
-        path: '/manager/overview/patients/print-preview',
-        name: 'manager-overview-patients-print',
-        component: PatientsPrintPreview,
-        meta: {
-            title: 'Náhľad tlače pacientov',
-            sidebar: false,
-            navbar: false,
-        },
     },
     {
         path: '/manager/settings',

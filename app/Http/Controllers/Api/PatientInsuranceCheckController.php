@@ -5,14 +5,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Patient;
 use App\Services\EoverenieInsuranceService;
+use App\Services\PatientNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 class PatientInsuranceCheckController extends Controller
 {
-    public function __construct(private EoverenieInsuranceService $service)
-    {
+    public function __construct(
+        private EoverenieInsuranceService $service,
+        private PatientNotificationService $notificationService,
+    ) {
     }
 
     public function store(Patient $patient): JsonResponse
@@ -33,6 +36,13 @@ class PatientInsuranceCheckController extends Controller
             $coverage->update([
                 'is_verified' => $result['status'] === 'verified',
             ]);
+        }
+
+        if ($result['status'] === 'verified') {
+            $this->notificationService->resolveIssue(
+                $patient,
+                "patient:{$patient->id}:insurance",
+            );
         }
 
         $result['is_verified'] = $coverage?->fresh()->is_verified ?? false;

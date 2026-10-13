@@ -1,4 +1,3 @@
-import router from '@/router';
 import api from '@/services/api';
 import { useAccessStore } from '@/stores/access';
 import type { Branch, User } from '@/types/models';
@@ -34,7 +33,7 @@ export const useAuthStore = defineStore('auth', {
             });
         },
 
-        async init() {
+        async init(throwOnError = false) {
             this.storeStatus = 'initializing';
 
             try {
@@ -57,12 +56,15 @@ export const useAuthStore = defineStore('auth', {
                 // authoritative on every request regardless of what is cached here.
                 await useAccessStore().load();
 
-            } catch {
+            } catch (error) {
                 this.clearAuth();
                 this.user = null;
                 this.currentRole = null;
                 this.currentBranch = null;
-                router.push({ name: 'login' });
+
+                if (throwOnError) {
+                    throw error;
+                }
             } finally {
                 this.storeStatus = 'ready';
             }
@@ -84,7 +86,7 @@ export const useAuthStore = defineStore('auth', {
 
             initialBranch = this.user.branches[0] ?? null;
             initialRole = initialBranch ?
-                this.user.branch_roles?.find(br => br.branch_id === this.currentBranch?.id)?.position ?? 'nurse' :
+                this.user.branch_roles?.find(br => br.branch_id === initialBranch.id)?.position ?? 'nurse' :
                 (this.user?.role?.position ?? null)
 
             if (savedRole === 'manager' && this.user?.role?.position === 'manager') {
@@ -114,7 +116,7 @@ export const useAuthStore = defineStore('auth', {
             if (!token) return;
             this.token = token;
             localStorage.setItem('api_token', token);
-            this.init();
+            await this.init(true);
         },
 
         setCurrentRole(role: string) {

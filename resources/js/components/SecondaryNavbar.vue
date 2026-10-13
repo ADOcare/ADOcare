@@ -12,11 +12,17 @@ const sectionRootName = computed(() => {
 
 // parent <h1>
 const h1Title = computed(() => {
-  return route.matched[0]?.meta?.title ?? ''
+  return route.matched[0]?.meta?.sectionTitle ?? route.matched[0]?.meta?.title ?? ''
 })
 
 // child <h2>
 const h2Title = computed(() => {
+  if (route.matched.length < 2) {
+    return route.matched[0]?.meta?.sectionTitle
+      ? route.matched[0]?.meta?.title ?? ''
+      : ''
+  }
+
   const last = route.matched[route.matched.length - 1]
   return last?.meta?.title ?? ''
 })
@@ -66,7 +72,7 @@ function linkClass(key: string) {
         <h1 class="text-heading-accent! border-r-2! border-accent! pr-sm!">
           {{ h1Title }}
         </h1>
-        <h1 class="text-heading-accent! text-darkgrey! px-sm! font-light!">
+        <h1 v-if="h2Title" class="text-heading-accent! text-darkgrey! px-sm! font-light!">
           {{ h2Title }}
         </h1>
       </div>

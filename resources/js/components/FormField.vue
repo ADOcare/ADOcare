@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T = unknown">
 import { computed, useAttrs, useId } from 'vue'
-import type { Component } from 'vue'
+import type { Component, StyleValue } from 'vue'
 import AutoComplete from 'primevue/autocomplete'
 import Checkbox from 'primevue/checkbox'
 import DatePicker from 'primevue/datepicker'
@@ -44,6 +44,7 @@ const props = withDefaults(defineProps<{
         trim?: boolean
     }
     modelValue?: T
+    outlined?: boolean
     readonly?: boolean
     required?: boolean
     type?: string
@@ -58,6 +59,7 @@ const props = withDefaults(defineProps<{
     label: undefined,
     modelModifiers: () => ({}),
     modelValue: undefined,
+    outlined: true,
     readonly: false,
     required: false,
     type: 'text',
@@ -69,16 +71,19 @@ const emit = defineEmits<{
 
 defineSlots<{
     default?: (props: {
+        describedBy: string | undefined
         disabled: boolean
         error: string | null | false
         id: string
         invalid: boolean
+        outlined: boolean
         readonly: boolean
     }) => unknown
     label?: () => unknown
 }>()
 
 const attrs = useAttrs()
+const rootStyle = computed(() => attrs.style as StyleValue)
 const controlAttrs = computed(() => Object.fromEntries(
     Object.entries(attrs).filter(([name]) => name !== 'class' && name !== 'style'),
 ))
@@ -133,7 +138,7 @@ function updateModelValue(value: T) {
 <template>
     <div
         :class="['flex w-full flex-col gap-1', $attrs.class]"
-        :style="$attrs.style"
+        :style="rootStyle"
     >
         <label
             v-if="label || $slots.label"
@@ -150,9 +155,11 @@ function updateModelValue(value: T) {
         <slot
             v-if="$slots.default"
             :id="fieldId"
+            :described-by="describedBy"
             :disabled="disabled"
             :readonly="readonly"
             :invalid="invalid"
+            :outlined="outlined"
             :error="error"
         />
 
@@ -172,6 +179,7 @@ function updateModelValue(value: T) {
             :aria-describedby="describedBy"
             :class="[
                 controlClass,
+                outlined ? '' : 'border-none! shadow-none! ring-0! outline-none!',
                 disabled ? 'opacity-50!' : '',
             ]"
             @update:model-value="updateModelValue"

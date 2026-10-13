@@ -5,6 +5,7 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\LoginRequest;
 use App\Http\Requests\Api\RegisterRequest;
+use App\Http\Requests\Api\UpdateProfileRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use DateTimeInterface;
@@ -61,7 +62,7 @@ class AuthController extends Controller
         $user = $this->findUserByLoginOrCode($data['login']);
 
         if (!$user || !Hash::check($data['pin'], $user->pin)) {
-            return $this->error('Nespravne prihlasovacie meno/kod alebo PIN.', 401);
+            return $this->error('Nesprávne prihlasovacie meno alebo heslo.', 401);
         }
 
         $user->loadMissing(['branches', 'company', 'role']);
@@ -84,6 +85,18 @@ class AuthController extends Controller
         $user?->loadMissing(['branches', 'company', 'role']);
 
         return $this->success(new UserResource($user), 'Profil bol uspesne nacitany.');
+    }
+
+    /**
+     * Update the authenticated user's personal profile details.
+     */
+    public function updateProfile(UpdateProfileRequest $request)
+    {
+        $user = $request->user();
+        $user->update($request->validated());
+        $user = $user->fresh()->load(['branches', 'company', 'role']);
+
+        return $this->success(new UserResource($user), 'Profil bol uspesne aktualizovany.');
     }
 
 

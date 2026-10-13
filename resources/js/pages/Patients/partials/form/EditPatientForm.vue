@@ -56,6 +56,15 @@ const savePatient = async () => {
     try {
         const fresh = await patientStore.persistPatientData(patient.value)
         patient.value = normalizePatientCoverage(fresh);
+
+        if (patient.value.coverage.category === 'domestic') {
+            try {
+                await patientStore.checkPatientInsurance(patient.value.id)
+            } catch (error) {
+                console.error('Failed to re-check saved patient insurance', error)
+            }
+        }
+
         toast.add({ severity: 'success', summary: 'Pacient uložený', detail: `Pacient ${patient.value.first_name} bol úspešne uložený.`, life: 3000 });
         if (props.modalResolve) {
             props.modalResolve(patient.value);

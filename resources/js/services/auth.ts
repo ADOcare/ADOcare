@@ -12,7 +12,7 @@ export async function login(payload: LoginPayload) {
 
     const store = useAuthStore();
     if (!token) throw new Error('No token received');
-    store.setAuth(token);
+    await store.setAuth(token);
 
     return res;
 }

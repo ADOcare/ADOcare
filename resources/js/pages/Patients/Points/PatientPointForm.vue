@@ -1,18 +1,34 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useToast } from 'primevue/usetoast'
-import api from '@/services/api'
-import { toApiDate, parseDateInput } from '@/utils/dateUtils'
 
-const props = defineProps<{ point?: any; modalResolve?: (value?: any) => void }>()
+import FormField from '@/components/FormField.vue'
+import AppButton from '@/components/AppButton.vue'
+
+import api from '@/services/api'
+import {
+    parseDateInput,
+    toApiDate,
+} from '@/utils/dateUtils'
+
+type Option = {
+    id: number
+    code: string
+    description: string
+}
+
+const props = defineProps<{
+    point?: any
+    modalResolve?: (value?: any) => void
+}>()
 
 const toast = useToast()
 
-const editPoint = ref<any>(props.point ? { ...props.point } : null)
-
-// Normalize incoming date strings to Date objects so DatePicker isn't given raw ISO strings
-// Also initialize local select models for diagnosis/procedure
-type Option = { id: number; code: string; description: string }
+const editPoint = ref<any>(
+    props.point
+        ? { ...props.point }
+        : null,
+)
 
 const diagnosis = ref<Option | null>(null)
 const filteredDiagnoses = ref<Option[]>([])
@@ -20,138 +36,466 @@ const filteredDiagnoses = ref<Option[]>([])
 const procedure = ref<Option | null>(null)
 const filteredProcedures = ref<Option[]>([])
 
-// Normalize and seed
+const submitted = ref(false)
+const saving = ref(false)
+
 if (editPoint.value) {
-    editPoint.value.date = parseDateInput(editPoint.value.date) ?? null
-    editPoint.value.referralDate = parseDateInput(editPoint.value.referralDate) ?? null
-    diagnosis.value = editPoint.value.diagnosis ? { id: editPoint.value.diagnosis.id ?? 0, code: editPoint.value.diagnosis.code ?? '', description: editPoint.value.diagnosis.description ?? '' } : null
-    procedure.value = editPoint.value.procedure ? { id: editPoint.value.procedure.id ?? 0, code: editPoint.value.procedure.code ?? '', description: editPoint.value.procedure.description ?? '' } : null
-}
-const editSubmitted = ref(false)
+    editPoint.value.date =
+        parseDateInput(editPoint.value.date) ?? null
 
-// helper not needed in this form
+    editPoint.value.referralDate =
+        parseDateInput(editPoint.value.referralDate) ?? null
 
-async function savePoint() {
-    if (!editPoint.value) return
-    editSubmitted.value = true
+    diagnosis.value =
+        editPoint.value.diagnosis
+            ? {
+                id:
+                    editPoint.value.diagnosis.id ?? 0,
+                code:
+                    editPoint.value.diagnosis.code ?? '',
+                description:
+                    editPoint.value.diagnosis.description ?? '',
+            }
+            : null
 
-    if (!editPoint.value.date || !editPoint.value.diagnosis || !editPoint.value.procedure || !editPoint.value.referralDate || !editPoint.value.quantity || editPoint.value.quantity <= 0) {
-        toast.add({ severity: 'warn', summary: 'Neplatné', detail: 'Vyplňte všetky povinné polia', life: 3000 })
-        editSubmitted.value = false
-        return
-    }
-
-    try {
-        const payload = {
-            date: toApiDate(parseDateInput(editPoint.value.date) ?? new Date()),
-            diagnosis_code: diagnosis.value?.code ?? editPoint.value.diagnosis?.code ?? null,
-            procedure_code: procedure.value?.code ?? editPoint.value.procedure?.code ?? null,
-            reference_date: toApiDate(parseDateInput(editPoint.value.referralDate) ?? new Date()),
-            quantity: editPoint.value.quantity,
-        }
-        await api.put(`v1/patient-points/${editPoint.value.id}`, payload)
-        toast.add({ severity: 'success', summary: 'Uložené', detail: 'Záznam bol upravený', life: 3000 })
-        props.modalResolve?.(true)
-    } catch (e: any) {
-        toast.add({ severity: 'error', summary: 'Chyba', detail: e?.message || 'Chyba pri ukladaní', life: 4000 })
-        editSubmitted.value = false
-    }
+    procedure.value =
+        editPoint.value.procedure
+            ? {
+                id:
+                    editPoint.value.procedure.id ?? 0,
+                code:
+                    editPoint.value.procedure.code ?? '',
+                description:
+                    editPoint.value.procedure.description ?? '',
+            }
+            : null
 }
 
-// Helpers to fetch options for selects
+function dateError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!editPoint.value?.date) {
+        return 'Dátum je povinný.'
+    }
+
+    return null
+}
+
+function referralDateError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!editPoint.value?.referralDate) {
+        return 'Dátum odporučenia je povinný.'
+    }
+
+    return null
+}
+
+function diagnosisError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!diagnosis.value) {
+        return 'Diagnóza je povinná.'
+    }
+
+    return null
+}
+
+function procedureError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    if (!procedure.value) {
+        return 'Výkon je povinný.'
+    }
+
+    return null
+}
+
+function quantityError() {
+    if (!submitted.value) {
+        return null
+    }
+
+    const quantity = Number(
+        editPoint.value?.quantity ?? 0,
+    )
+
+    if (quantity <= 0) {
+        return 'Počet je povinný.'
+    }
+
+    return null
+}
+
 function extractArray(raw: any): any[] {
-    if (Array.isArray(raw)) return raw
-    const candidates = [raw?.data, raw?.data?.items, raw?.items, raw?.data?.data]
-    for (const c of candidates) if (Array.isArray(c)) return c
+    if (Array.isArray(raw)) {
+        return raw
+    }
+
+    const candidates = [
+        raw?.data,
+        raw?.data?.items,
+        raw?.items,
+        raw?.data?.data,
+    ]
+
+    for (const candidate of candidates) {
+        if (Array.isArray(candidate)) {
+            return candidate
+        }
+    }
+
     return []
 }
 
-async function searchOptions(endpoint: string, q: string) {
+async function searchOptions(
+    endpoint: string,
+    query: string,
+): Promise<Option[]> {
     try {
-        const qstr = (q ?? '').trim()
-        const res = await api.get(endpoint, { params: { q: qstr, per_page: 25, page: 1, sort: 'code' } })
-        const arr = extractArray(res.data)
-        return arr.map((d: any) => ({ id: d.id, code: d.code ?? '', description: d.description ?? '' }))
-    } catch (e) {
-        console.error('Failed to load', endpoint, e)
+        const q = (query ?? '').trim()
+
+        const response = await api.get(
+            endpoint,
+            {
+                params: {
+                    q,
+                    per_page: 25,
+                    page: 1,
+                    sort: 'code',
+                },
+            },
+        )
+
+        return extractArray(response.data).map(
+            (item: any) => ({
+                id: item.id,
+                code: item.code ?? '',
+                description:
+                    item.description ?? '',
+            }),
+        )
+    } catch (error) {
+        console.error(
+            'Failed to load',
+            endpoint,
+            error,
+        )
+
         return []
     }
 }
 
-async function searchDiagnoses(event: { query: string }) {
-    filteredDiagnoses.value = await searchOptions('v1/diagnoses', event.query)
+async function searchDiagnoses(
+    event: { query: string },
+) {
+    filteredDiagnoses.value =
+        await searchOptions(
+            'v1/diagnoses',
+            event.query,
+        )
 }
 
-async function searchProcedures(event: { query: string }) {
-    filteredProcedures.value = await searchOptions('v1/procedures', event.query)
+async function searchProcedures(
+    event: { query: string },
+) {
+    filteredProcedures.value =
+        await searchOptions(
+            'v1/procedures',
+            event.query,
+        )
+}
+
+async function savePoint() {
+    if (!editPoint.value) {
+        return
+    }
+
+    submitted.value = true
+
+    if (
+        !editPoint.value.date ||
+        !editPoint.value.referralDate ||
+        !diagnosis.value ||
+        !procedure.value ||
+        !editPoint.value.quantity ||
+        Number(editPoint.value.quantity) <= 0
+    ) {
+        return
+    }
+
+    saving.value = true
+
+    try {
+        const payload = {
+            date: toApiDate(
+                parseDateInput(
+                    editPoint.value.date,
+                ) ?? new Date(),
+            ),
+
+            diagnosis_code:
+                diagnosis.value.code,
+
+            procedure_code:
+                procedure.value.code,
+
+            reference_date: toApiDate(
+                parseDateInput(
+                    editPoint.value.referralDate,
+                ) ?? new Date(),
+            ),
+
+            quantity:
+                Number(editPoint.value.quantity),
+        }
+
+        await api.put(
+            `v1/patient-points/${editPoint.value.id}`,
+            payload,
+        )
+
+        toast.add({
+            severity: 'success',
+            summary: 'Uložené',
+            detail: 'Záznam bol upravený',
+            life: 3000,
+        })
+
+        props.modalResolve?.(true)
+    } catch (error: any) {
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail:
+                error?.response?.data?.message ||
+                error?.message ||
+                'Chyba pri ukladaní',
+            life: 4000,
+        })
+    } finally {
+        saving.value = false
+    }
+}
+
+function close() {
+    props.modalResolve?.(false)
 }
 </script>
 
 <template>
-    <div v-if="editPoint" class="flex flex-col gap-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-            <div class="w-full">
-                <label class="block text-normal mb-1">Dátum</label>
-                <DatePicker v-model="editPoint.date" dateFormat="dd.mm.yy" :showIcon="false" class="w-full" fluid />
-                <small v-if="editSubmitted && !editPoint.date" class="text-danger">Dátum je povinný.</small>
-            </div>
+    <form
+        v-if="editPoint"
+        class="flex flex-col gap-6"
+        @submit.prevent="savePoint"
+    >
+        <div
+            class="
+                grid
+                grid-cols-1
+                md:grid-cols-2
+                gap-4
+                items-start
+            "
+        >
+            <FormField
+                label="Dátum"
+                required
+                :error="dateError()"
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <DatePicker
+                    :id="id"
+                    v-model="editPoint.date"
+                    dateFormat="dd.mm.yy"
+                    :showIcon="false"
+                    :manualInput="false"
+                    class="w-full"
+                    inputClass="w-full!"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                />
+            </FormField>
 
-            <div class="w-full">
-                <label class="block text-normal mb-1">Dátum odporučenia</label>
-                <DatePicker v-model="editPoint.referralDate" dateFormat="dd.mm.yy" :showIcon="false" class="w-full" fluid />
-                <small v-if="editSubmitted && !editPoint.referralDate" class="text-danger">Dátum odporučenia je
-                    povinný.</small>
-            </div>
+            <FormField
+                label="Dátum odporučenia"
+                required
+                :error="referralDateError()"
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <DatePicker
+                    :id="id"
+                    v-model="editPoint.referralDate"
+                    dateFormat="dd.mm.yy"
+                    :showIcon="false"
+                    :manualInput="false"
+                    class="w-full"
+                    inputClass="w-full!"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                />
+            </FormField>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-
-            <div class="w-full">
-                <label class="block text-normal mb-1">Diagnóza</label>
-                <AutoComplete v-model="diagnosis" :suggestions="filteredDiagnoses" @complete="searchDiagnoses"
-                    :virtualScrollerOptions="{ itemSize: 38 }" optionLabel="code" dropdown dropdownMode="blank"
-                    :minLength="0" completeOnFocus class="w-full"
-                    inputClass="!w-full !border !shadow-none !bg-white focus:!ring-0 focus:!shadow-none">
-                    <template #option="slotProps">
+        <div
+            class="
+                grid
+                grid-cols-1
+                md:grid-cols-3
+                gap-4
+                items-start
+            "
+        >
+            <FormField
+                label="Diagnóza"
+                required
+                :error="diagnosisError()"
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <AutoComplete
+                    :id="id"
+                    v-model="diagnosis"
+                    :suggestions="filteredDiagnoses"
+                    :virtualScrollerOptions="{
+                        itemSize: 38,
+                    }"
+                    optionLabel="code"
+                    dropdown
+                    dropdownMode="blank"
+                    :minLength="0"
+                    completeOnFocus
+                    class="w-full"
+                    inputClass="w-full!"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                    @complete="searchDiagnoses"
+                >
+                    <template #option="{ option }">
                         <div class="flex flex-col">
-                            <span class="shrink-0 font-medium">{{ slotProps.option.code }}</span>
-                            <span>{{ slotProps.option.description }}</span>
+                            <span class="font-medium">
+                                {{ option.code }}
+                            </span>
+
+                            <span class="text-mini text-accent">
+                                {{ option.description }}
+                            </span>
                         </div>
                     </template>
                 </AutoComplete>
-                <small v-if="editSubmitted && !diagnosis" class="text-danger">Diagnóza je povinná.</small>
-            </div>
+            </FormField>
 
-            <div class="w-full">
-                <label class="block text-normal mb-1">Výkon</label>
-                <AutoComplete v-model="procedure" :suggestions="filteredProcedures" @complete="searchProcedures"
-                    :virtualScrollerOptions="{ itemSize: 38 }" optionLabel="code" dropdown dropdownMode="blank"
-                    :minLength="0" completeOnFocus class="w-full"
-                    inputClass="!w-full !border !shadow-none !bg-white focus:!ring-0 focus:!shadow-none">
-                    <template #option="slotProps">
+            <FormField
+                label="Výkon"
+                required
+                :error="procedureError()"
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <AutoComplete
+                    :id="id"
+                    v-model="procedure"
+                    :suggestions="filteredProcedures"
+                    :virtualScrollerOptions="{
+                        itemSize: 38,
+                    }"
+                    optionLabel="code"
+                    dropdown
+                    dropdownMode="blank"
+                    :minLength="0"
+                    completeOnFocus
+                    class="w-full"
+                    inputClass="w-full!"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                    @complete="searchProcedures"
+                >
+                    <template #option="{ option }">
                         <div class="flex flex-col">
-                            <span class="shrink-0 font-medium">{{ slotProps.option.code }}</span>
-                            <span>{{ slotProps.option.description }}</span>
+                            <span class="font-medium">
+                                {{ option.code }}
+                            </span>
+
+                            <span class="text-mini text-accent">
+                                {{ option.description }}
+                            </span>
                         </div>
                     </template>
                 </AutoComplete>
-                <small v-if="editSubmitted && !procedure" class="text-danger">Výkon je povinný.</small>
-            </div>
+            </FormField>
 
-            <div class="w-full">
-                <label class="block text-normal mb-1">Počet</label>
-                <InputNumber :modelValue="editPoint.quantity"
-                    @update:modelValue="editPoint.quantity = $event ? Number($event) : null" class="w-full" />
-                <small v-if="editSubmitted && (!editPoint.quantity || editPoint.quantity <= 0)" class="text-danger">
-                    Počet je povinný.
-                </small>
-            </div>
+            <FormField
+                label="Počet"
+                required
+                :error="quantityError()"
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <InputNumber
+                    :id="id"
+                    :modelValue="
+                        editPoint.quantity
+                    "
+                    :min="1"
+                    :max="100"
+                    class="w-full"
+                    inputClass="w-full!"
+                    :invalid="invalid"
+                    :aria-invalid="invalid || undefined"
+                    :aria-describedby="describedBy"
+                    @update:modelValue="
+                        editPoint.quantity =
+                            $event
+                                ? Number($event)
+                                : null
+                    "
+                />
+            </FormField>
         </div>
-        <div class="flex justify-end gap-2">
-            <Button label="Zrušiť" class="bg-white! border-0! text-accent!" @click="props.modalResolve?.(false)" />
 
-            <Button label="Uložiť" class="bg-accent! border-0! px-md! text-white! hover:bg-darkgrey!"
-                @click="savePoint" />
+        <div class="flex justify-end gap-2 pt-2">
+            <AppButton
+                type="button"
+                label="Zrušiť"
+                variant="secondary"
+                :disabled="saving"
+                @click="close"
+            />
+
+            <AppButton
+                type="submit"
+                label="Uložiť"
+                :loading="saving"
+            />
         </div>
-    </div>
+    </form>
 </template>

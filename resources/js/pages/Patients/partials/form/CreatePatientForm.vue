@@ -39,7 +39,7 @@ const createPatient = async () => {
         const created = await patientStore.createPatient(patient.value, branchId)
 
         // ✅ update local state + store
-        patient.value = normalizePatientCoverage(created)
+        patient.value = normalizePatientCoverage(created as any) as PatientWithCoverage
         patientStore.setPatient(created)
 
         toast.add({

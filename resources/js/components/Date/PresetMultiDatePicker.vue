@@ -2,32 +2,51 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { parseDateInput, toApiDate } from '@/utils/dateUtils'
 import { buildDaysForMonth } from '@/utils/dateRanges'
+import AppButton from '@/components/AppButton.vue'
 
-type PresetMode = 'all' | 'holidays' | 'mwf' | 'weekends' | 'workdays' | 'workdaysExcludingHolidays'
-type MonthChangeEvent = { year?: number; month?: number }
-type PickerInstance = { currentMonth?: number; currentYear?: number }
+type PresetMode =
+    | 'all'
+    | 'holidays'
+    | 'mwf'
+    | 'weekends'
+    | 'workdays'
+    | 'workdaysExcludingHolidays'
 
-const DEFAULT_INPUT_CLASS = '!w-full !border-none !shadow-none !bg-white focus:!ring-0 focus:!shadow-none'
+type MonthChangeEvent = {
+    year?: number
+    month?: number
+}
 
-const props = withDefaults(defineProps<{
-    modelValue?: Date[] | null
-    viewDate?: Date | null
-    minDate?: Date | null
-    maxDate?: Date | null
-    disabledDates?: Date[]
-    showOtherMonths?: boolean
-    invalid?: boolean
-    inputClass?: string
-}>(), {
-    modelValue: () => [],
-    viewDate: null,
-    minDate: null,
-    maxDate: null,
-    disabledDates: () => [],
-    showOtherMonths: true,
-    invalid: false,
-    inputClass: DEFAULT_INPUT_CLASS,
-})
+type PickerInstance = {
+    currentMonth?: number
+    currentYear?: number
+}
+
+const DEFAULT_INPUT_CLASS =
+    '!w-full !border-none !shadow-none !bg-white focus:!ring-0 focus:!shadow-none'
+
+const props = withDefaults(
+    defineProps<{
+        modelValue?: Date[] | null
+        viewDate?: Date | null
+        minDate?: Date | null
+        maxDate?: Date | null
+        disabledDates?: Date[]
+        showOtherMonths?: boolean
+        invalid?: boolean
+        inputClass?: string
+    }>(),
+    {
+        modelValue: () => [],
+        viewDate: null,
+        minDate: null,
+        maxDate: null,
+        disabledDates: () => [],
+        showOtherMonths: true,
+        invalid: false,
+        inputClass: DEFAULT_INPUT_CLASS,
+    },
+)
 
 const emit = defineEmits<{
     (e: 'update:modelValue', value: Date[]): void
@@ -59,27 +78,48 @@ watch(
         const normalized = normalizeSingleDate(value)
 
         if (normalized) {
-            panelDate.value = new Date(normalized.getFullYear(), normalized.getMonth(), 1)
+            panelDate.value = new Date(
+                normalized.getFullYear(),
+                normalized.getMonth(),
+                1,
+            )
         }
     },
-    { immediate: true },
+    {
+        immediate: true,
+    },
 )
 
 function getInitialPanelDate(): Date {
     const normalizedViewDate = normalizeSingleDate(props.viewDate)
 
     if (normalizedViewDate) {
-        return new Date(normalizedViewDate.getFullYear(), normalizedViewDate.getMonth(), 1)
+        return new Date(
+            normalizedViewDate.getFullYear(),
+            normalizedViewDate.getMonth(),
+            1,
+        )
     }
 
-    const firstSelectedDate = normalizeDates(props.modelValue)[0]
+    const firstSelectedDate = normalizeDates(
+        props.modelValue,
+    )[0]
 
     if (firstSelectedDate) {
-        return new Date(firstSelectedDate.getFullYear(), firstSelectedDate.getMonth(), 1)
+        return new Date(
+            firstSelectedDate.getFullYear(),
+            firstSelectedDate.getMonth(),
+            1,
+        )
     }
 
     const now = new Date()
-    return new Date(now.getFullYear(), now.getMonth(), 1)
+
+    return new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        1,
+    )
 }
 
 function normalizeSingleDate(input: unknown): Date | null {
@@ -89,11 +129,18 @@ function normalizeSingleDate(input: unknown): Date | null {
         return null
     }
 
-    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate())
+    return new Date(
+        parsed.getFullYear(),
+        parsed.getMonth(),
+        parsed.getDate(),
+    )
 }
 
 function normalizeDates(input: unknown): Date[] {
-    const values = Array.isArray(input) ? input : []
+    const values = Array.isArray(input)
+        ? input
+        : []
+
     const uniqueDates = new Map<string, Date>()
 
     for (const value of values) {
@@ -111,12 +158,19 @@ function normalizeDates(input: unknown): Date[] {
     }
 
     return Array.from(uniqueDates.entries())
-        .sort((left, right) => left[0].localeCompare(right[0]))
+        .sort((left, right) =>
+            left[0].localeCompare(right[0]),
+        )
         .map(([, date]) => date)
 }
 
-function normalizeDatesWithoutConstraints(input: unknown): Date[] {
-    const values = Array.isArray(input) ? input : []
+function normalizeDatesWithoutConstraints(
+    input: unknown,
+): Date[] {
+    const values = Array.isArray(input)
+        ? input
+        : []
+
     const uniqueDates = new Map<string, Date>()
 
     for (const value of values) {
@@ -134,7 +188,9 @@ function normalizeDatesWithoutConstraints(input: unknown): Date[] {
     }
 
     return Array.from(uniqueDates.entries())
-        .sort((left, right) => left[0].localeCompare(right[0]))
+        .sort((left, right) =>
+            left[0].localeCompare(right[0]),
+        )
         .map(([, date]) => date)
 }
 
@@ -159,12 +215,26 @@ function isSelectableDate(date: Date): boolean {
     return !disabledDateSet.value.has(dateKey)
 }
 
-function getActivePanelYearMonth(): { year: number; month: number } {
-    const pickerYear = Number(pickerRef.value?.currentYear)
-    const pickerMonth = Number(pickerRef.value?.currentMonth)
+function getActivePanelYearMonth(): {
+    year: number
+    month: number
+} {
+    const pickerYear = Number(
+        pickerRef.value?.currentYear,
+    )
 
-    if (Number.isFinite(pickerYear) && Number.isFinite(pickerMonth)) {
-        return { year: pickerYear, month: pickerMonth }
+    const pickerMonth = Number(
+        pickerRef.value?.currentMonth,
+    )
+
+    if (
+        Number.isFinite(pickerYear) &&
+        Number.isFinite(pickerMonth)
+    ) {
+        return {
+            year: pickerYear,
+            month: pickerMonth,
+        }
     }
 
     return {
@@ -177,26 +247,48 @@ function onMonthChange(event: MonthChangeEvent) {
     const year = Number(event?.year)
     const month = Number(event?.month)
 
-    if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    if (
+        !Number.isFinite(year) ||
+        !Number.isFinite(month)
+    ) {
         return
     }
 
-    panelDate.value = new Date(year, month - 1, 1)
+    panelDate.value = new Date(
+        year,
+        month - 1,
+        1,
+    )
 }
 
-function buildDatesForCurrentView(mode: PresetMode): Date[] {
-    const { year, month } = getActivePanelYearMonth()
-    return buildDaysForMonth(year, month, mode)
+function buildDatesForCurrentView(
+    mode: PresetMode,
+): Date[] {
+    const { year, month } =
+        getActivePanelYearMonth()
+
+    return buildDaysForMonth(
+        year,
+        month,
+        mode,
+    )
 }
 
-async function setDatesAndKeepView(nextDates: Date[]) {
-    const { year, month } = getActivePanelYearMonth()
+async function setDatesAndKeepView(
+    nextDates: Date[],
+) {
+    const { year, month } =
+        getActivePanelYearMonth()
 
     selectedDates.value = nextDates
 
     await nextTick()
 
-    panelDate.value = new Date(year, month, 1)
+    panelDate.value = new Date(
+        year,
+        month,
+        1,
+    )
 
     if (pickerRef.value) {
         pickerRef.value.currentMonth = month
@@ -205,7 +297,9 @@ async function setDatesAndKeepView(nextDates: Date[]) {
 }
 
 async function applyPreset(mode: PresetMode) {
-    await setDatesAndKeepView(buildDatesForCurrentView(mode))
+    await setDatesAndKeepView(
+        buildDatesForCurrentView(mode),
+    )
 }
 </script>
 
@@ -215,8 +309,6 @@ async function applyPreset(mode: PresetMode) {
         v-model="selectedDates"
         :viewDate="panelDate"
         selectionMode="multiple"
-        @month-change="onMonthChange"
-        @year-change="onMonthChange"
         dateFormat="dd.mm.yy"
         :showIcon="false"
         showButtonBar
@@ -227,48 +319,64 @@ async function applyPreset(mode: PresetMode) {
         :showOtherMonths="showOtherMonths"
         :invalid="invalid"
         :inputClass="inputClass"
+        @month-change="onMonthChange"
+        @year-change="onMonthChange"
     >
         <template #buttonbar="{ clearCallback }">
-            <div class="flex flex-wrap justify-start w-full gap-2">
-                <Button
+            <div class="flex flex-wrap w-full gap-2">
+                <AppButton
                     label="Pracovné dni"
-                    class="bg-darkgrey! border-transparent! text-white! text-normal! px-2! hover:!bg-accent"
                     @mousedown.prevent
-                    @click.prevent="applyPreset('workdaysExcludingHolidays')"
+                    @click.prevent="
+                        applyPreset(
+                            'workdaysExcludingHolidays',
+                        )
+                    "
                 />
-                <Button
-                    label="So, Ne, Sviatky"
-                    class="bg-darkgrey! border-transparent! text-white! text-normal! px-2! hover:!bg-accent"
+
+                <AppButton
+                    label="So, Ne, sviatky"
                     @mousedown.prevent
-                    @click.prevent="applyPreset('weekends')"
+                    @click.prevent="
+                        applyPreset('weekends')
+                    "
                 />
-                <Button
-                    label="Po-Ne"
-                    class="bg-darkgrey! border-transparent! text-white! text-normal! px-2! hover:!bg-accent"
+
+                <AppButton
+                    label="Po–Ne"
                     @mousedown.prevent
-                    @click.prevent="applyPreset('all')"
+                    @click.prevent="
+                        applyPreset('all')
+                    "
                 />
-                <Button
-                    label="Po-Pia"
-                    class="bg-darkgrey! border-transparent! text-white! text-normal! px-2! hover:!bg-accent"
+
+                <AppButton
+                    label="Po–Pia"
                     @mousedown.prevent
-                    @click.prevent="applyPreset('workdays')"
+                    @click.prevent="
+                        applyPreset('workdays')
+                    "
                 />
-                <Button
+
+                <AppButton
                     label="Po, St, Pia"
-                    class="bg-darkgrey! border-transparent! text-white! text-normal! px-2! hover:!bg-accent"
                     @mousedown.prevent
-                    @click.prevent="applyPreset('mwf')"
+                    @click.prevent="
+                        applyPreset('mwf')
+                    "
                 />
-                <Button
+
+                <AppButton
                     label="Sviatky"
-                    class="bg-darkgrey! border-transparent! text-white! text-normal! px-2! hover:!bg-accent"
                     @mousedown.prevent
-                    @click.prevent="applyPreset('holidays')"
+                    @click.prevent="
+                        applyPreset('holidays')
+                    "
                 />
-                <Button
-                    label="zrušiť výber"
-                    class="bg-danger! border-transparent! text-white! text-normal! px-2!"
+
+                <AppButton
+                    label="Zrušiť výber"
+                    variant="secondary"
                     @mousedown.prevent
                     @click.prevent="clearCallback"
                 />

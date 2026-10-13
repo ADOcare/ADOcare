@@ -221,6 +221,7 @@ class PointClaimSelectionService
     {
         return DB::table('patient_points as pp')
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
+            ->whereNull('p.deleted_at')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
             ->join('patient_coverages as pc', 'pc.patient_id', '=', 'p.id')
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($context) {

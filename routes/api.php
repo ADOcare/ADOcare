@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AppNotificationController;
 use App\Http\Controllers\Api\BranchDoctorController;
 use App\Http\Controllers\Api\BranchPatientController;
 use App\Http\Controllers\Api\CarController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\Api\PatientInsurancePrefillController;
 use App\Http\Controllers\Api\InsuranceCompanyController;
 use App\Http\Controllers\Api\DiagnosisController;
 use App\Http\Controllers\Api\ProcedureController;
+use App\Http\Controllers\Api\ClinicalSuggestionController;
 use App\Http\Controllers\Api\PatientPointController;
 use App\Http\Controllers\Api\PointsExportController;
 use App\Http\Controllers\Api\PointClaimCandidateController;
@@ -83,6 +85,7 @@ Route::prefix('auth')->group(function () {
         Route::post('register', [AuthController::class, 'register'])->middleware('role:superadmin');
         Route::post('logout', [AuthController::class, 'logout']);
         Route::get('profile', [AuthController::class, 'profile']);
+        Route::patch('profile', [AuthController::class, 'updateProfile']);
     });
 });
 
@@ -184,6 +187,9 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::delete('cars/{car}/services/{service}', [CarServiceController::class, 'destroy']);
     Route::get('cars/services/due-this-month', [CarServiceController::class, 'dueThisMonth']);
     Route::get('my-cars/services/due-this-month', [CarServiceController::class, 'dueThisMonthForUser']);
+
+    Route::get('notifications', [AppNotificationController::class, 'index']);
+    Route::post('notifications/{notification}/dismiss', [AppNotificationController::class, 'dismiss']);
 
     Route::apiResource('patients', PatientController::class)
         ->except(['index', 'store'])
@@ -313,6 +319,10 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:superadmin');
     Route::delete('procedures', [ProcedureController::class, 'destroyMany'])
         ->middleware('role:superadmin');
+    Route::prefix('clinical-suggestions')->middleware('role:any')->group(function () {
+        Route::get('diagnoses', [ClinicalSuggestionController::class, 'diagnoses']);
+        Route::get('procedures', [ClinicalSuggestionController::class, 'procedures']);
+    });
     Route::apiResourceComplete('patient-points', PatientPointController::class, 'role:any');
     Route::apiResourceComplete('report-months', ReportMonthController::class, 'role:any');
     Route::group(['prefix' => 'roles', 'middleware' => 'role:any'], function () {

@@ -1,69 +1,98 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useToast } from 'primevue/usetoast'
+
+import AppButton from '@/components/AppButton.vue'
+
 import type { IModalContentProps } from '@/types/ui'
 import type { Patient } from '@/types/models'
-import api from '@/services/api'
-import { useToast } from 'primevue/usetoast'
 import type { RemoteTableReturn } from '@/types/datatable'
 
-const props = defineProps<IModalContentProps & {
-    selectedRows: Patient[]
-    remote: RemoteTableReturn
-}>()
+import api from '@/services/api'
+
+const props = defineProps<
+    IModalContentProps & {
+        selectedRows: Patient[]
+        remote: RemoteTableReturn
+    }
+>()
 
 const toast = useToast()
-const deletePatientPointsData = ref(false)
-const deletePatientDocumentation = ref(false)
+
 const isLoading = ref(false)
 
-const confirmDelete = async () => {
+async function confirmDelete() {
+    isLoading.value = true
+
     try {
-        isLoading.value = true
-        await api.delete('v1/patients', {
-            data: {
-                ids: props.selectedRows.map((r) => r.id),
-                delete_patient_points: deletePatientPointsData.value,
-                delete_patient_documents: deletePatientDocumentation.value,
+        await api.delete(
+            'v1/patients',
+            {
+                data: {
+                    ids: props.selectedRows.map(
+                        (row) => row.id,
+                    ),
+                },
             },
+        )
+
+        await props.remote.loadPage(
+            props.remote.page.value,
+        )
+
+        toast.add({
+            severity: 'success',
+            summary: 'Vymazané',
+            detail: 'Pacienti boli vymazaní',
+            life: 3000,
         })
-        await props.remote.loadPage(props.remote.page.value)
-        toast.add({ severity: 'success', summary: 'Vymazané', detail: 'Pacienti boli vymazaní', life: 3000 })
-        if (props.modalResolve) props.modalResolve(true)
-    } catch (err) {
-        console.error('Failed to delete patients', err)
-        toast.add({ severity: 'error', summary: 'Chyba', detail: 'Nepodarilo sa vymazať pacientov', life: 3000 })
+
+        props.modalResolve?.(true)
+    } catch (error) {
+        console.error(
+            'Failed to delete patients',
+            error,
+        )
+
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail: 'Nepodarilo sa vymazať pacientov',
+            life: 3000,
+        })
     } finally {
         isLoading.value = false
     }
 }
 
-const cancel = () => {
-    if (props.modalResolve) props.modalResolve(false)
+function cancel() {
+    props.modalResolve?.(false)
 }
 </script>
 
 <template>
     <div class="flex flex-col gap-6">
-        <div class="flex flex-col gap-4">
-            <div class="flex items-center gap-2 bg-tag3 rounded-md p-4">
-                <Checkbox inputId="deletePatientPoints" v-model="deletePatientPointsData" :binary="true" />
-                <label for="deletePatientPoints" class="text-normal cursor-pointer">
-                        Vymazať pacientom aj všetky body. Po zvolení tejto možnosti sa odstráni celá história bodovania a pacienti už nebudú zahrnutí v žiadnych dávkach pre poisťovňu.
-                </label>
-            </div>
-
-            <div class="flex items-center gap-2 bg-tag3 rounded-md p-4">
-                <Checkbox inputId="deletePatientDocumentation" v-model="deletePatientDocumentation" :binary="true" />
-                <label for="deletePatientDocumentation" class="text-normal cursor-pointer">
-                    Vymazať pacientom aj všetky dokumenty. Po zvolení tejto možnosti sa odstráni celá história dokumentov.
-                </label>
-            </div>
+        <div class="text-normal">
+            Pacienti budú deaktivovaní. Ich body a dokumenty zostanú zachované.
         </div>
 
-        <div class="col-span-12 mt-4 flex items-center justify-end gap-2">
-            <Button label="Zrušiť" text @click="cancel" class="text-accent! px-2!" :loading="isLoading" />
-            <Button label="Vymazať" @click="confirmDelete" :loading="isLoading"
-                class="bg-accent! border-accent! px-2! hover:bg-darkgrey! hover:border-darkgrey! text-white! " />
+        <div class="flex items-center justify-end gap-2 pt-2">
+            <AppButton
+                type="button"
+                label="Zrušiť"
+                variant="secondary"
+                :disabled="isLoading"
+                @click="cancel"
+            />
+
+            <AppButton
+                type="button"
+                label="Vymazať"
+                variant="danger"
+                :loading="isLoading"
+                loading-label="Vymazávam"
+                @click="confirmDelete"
+            />
         </div>
     </div>
 </template>

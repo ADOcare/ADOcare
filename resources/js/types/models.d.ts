@@ -123,6 +123,28 @@ export interface CompanySubscriptionPayment {
   company_exists: boolean
 }
 
+export interface AppNotification {
+  // columns
+  id: number
+  user_id: number
+  key: string
+  type: string
+  kind: string
+  title: string
+  description: string | null
+  data: Array<unknown> | null
+  occurred_at: string
+  dismissed_at: string | null
+  resolved_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  user: User
+  // counts
+  // exists
+  user_exists: boolean
+}
+
 export interface Country {
   // columns
   id: number

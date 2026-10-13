@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 
 type CarService = {
     id: number
@@ -20,18 +21,37 @@ type CarService = {
 
 export type AppNotification = {
     id: string
-    type: 'car_service'
+    type: string
     title: string
     description: string
     date: Date
-    raw: CarService
+    raw: CarService | PersistedNotification
+    actionable: boolean
+    action?: {
+        target: 'patient' | 'car'
+        id: number
+    }
+}
+
+type PersistedNotification = {
+    id: number
+    type: string
+    title: string
+    description: string | null
+    occurred_at: string
+    data?: Record<string, unknown>
 }
 
 const carServices = ref<CarService[]>([])
+const persistedNotifications = ref<PersistedNotification[]>([])
+const dismissedNotificationIds = ref<Set<string>>(new Set())
 const loading = ref(false)
 const loaded = ref(false)
+let activeSessionToken: string | null = null
 
 export function useNotifications() {
+    const authStore = useAuthStore()
+
     function getNextDueDate(service: CarService) {
         const lastDate = new Date(service.date)
 
@@ -41,19 +61,115 @@ export function useNotifications() {
     }
 
     const notifications = computed<AppNotification[]>(() => {
-        return carServices.value.map((service) => ({
-            id: `car-service-${service.id}`,
-            type: 'car_service',
-            title: service.name,
-            description: [service.car?.model, service.car?.evc ? `(${service.car.evc})` : null]
-                .filter(Boolean)
-                .join(' '),
-            date: getNextDueDate(service),
-            raw: service,
-        }))
+        const carNotifications = carServices.value
+            .map((service) => ({
+                id: `car-service-${service.id}`,
+                type: 'car_service' as const,
+                title: service.name,
+                description: [service.car?.model, service.car?.evc ? `(${service.car.evc})` : null]
+                    .filter(Boolean)
+                    .join(' '),
+                date: getNextDueDate(service),
+                raw: service,
+                actionable: authStore.currentRole === 'manager' && !!service.car?.id,
+                action: service.car?.id
+                    ? {
+                        target: 'car' as const,
+                        id: service.car.id,
+                    }
+                    : undefined,
+            }))
+            .filter((notification) => !dismissedNotificationIds.value.has(notification.id))
+
+        const patientNotifications = persistedNotifications.value.map((notification) => {
+            const patientId = Number(notification.data?.patient_id)
+            const actionable = [
+                'patient_insurance_issue',
+                'patient_insurance_changed',
+            ].includes(notification.type) && Number.isInteger(patientId)
+
+            return {
+                id: `app-${notification.id}`,
+                type: notification.type,
+                title: notification.title,
+                description: notification.description ?? '',
+                date: new Date(notification.occurred_at),
+                raw: notification,
+                actionable,
+                action: actionable
+                    ? {
+                        target: 'patient' as const,
+                        id: patientId,
+                    }
+                    : undefined,
+            }
+        })
+
+        return [...patientNotifications, ...carNotifications]
+            .sort((left, right) => {
+                if (left.actionable !== right.actionable) {
+                    return left.actionable ? -1 : 1
+                }
+
+                return right.date.getTime() - left.date.getTime()
+            })
     })
 
     const notificationCount = computed(() => notifications.value.length)
+
+    function startNotificationSession(token: string | null) {
+        if (activeSessionToken === token) {
+            return
+        }
+
+        activeSessionToken = token
+        dismissedNotificationIds.value = new Set()
+        carServices.value = []
+        persistedNotifications.value = []
+        loaded.value = false
+    }
+
+    async function dismissNotification(id: string) {
+        if (id.startsWith('app-')) {
+            const notificationId = Number(id.slice(4))
+
+            persistedNotifications.value = persistedNotifications.value.filter(
+                (notification) => notification.id !== notificationId,
+            )
+
+            try {
+                await api.post(`v1/notifications/${notificationId}/dismiss`)
+            } catch (error) {
+                console.error('Failed to dismiss notification', error)
+                loaded.value = false
+                await loadNotifications(true)
+            }
+
+            return
+        }
+
+        dismissedNotificationIds.value = new Set([
+            ...dismissedNotificationIds.value,
+            id,
+        ])
+    }
+
+    async function dismissAllNotifications() {
+        const visibleNotifications = notifications.value
+
+        dismissedNotificationIds.value = new Set([
+            ...dismissedNotificationIds.value,
+            ...visibleNotifications
+                .filter((notification) => notification.id.startsWith('car-service-'))
+                .map((notification) => notification.id),
+        ])
+
+        await Promise.all(
+            visibleNotifications
+                .filter((notification) => notification.id.startsWith('app-'))
+                .map((notification) => dismissNotification(notification.id)),
+        )
+    }
 
     async function loadNotifications(force = false) {
         if (loaded.value && !force) {
@@ -63,8 +179,18 @@ export function useNotifications() {
         loading.value = true
 
         try {
-            const response = await api.get('v1/my-cars/services/due-this-month')
-            carServices.value = response.data?.data?.services ?? []
+            const carServicesEndpoint = authStore.currentRole === 'manager'
+                ? 'v1/cars/services/due-this-month'
+                : 'v1/my-cars/services/due-this-month'
+
+            const [carResponse, notificationResponse] = await Promise.all([
+                api.get(carServicesEndpoint),
+                api.get('v1/notifications'),
+            ])
+
+            carServices.value = carResponse.data?.data?.services ?? []
+            persistedNotifications.value =
+                notificationResponse.data?.data?.notifications ?? []
             loaded.value = true
         } catch (error) {
             console.error('Failed to load notifications', error)
@@ -77,6 +203,9 @@ export function useNotifications() {
         notifications,
         notificationCount,
         loading,
+        dismissAllNotifications,
+        dismissNotification,
         loadNotifications,
+        startNotificationSession,
     }
 }

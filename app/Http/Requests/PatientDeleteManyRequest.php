@@ -16,8 +16,6 @@ class PatientDeleteManyRequest extends FormRequest
         return [
             'ids' => 'required|array',
             'ids.*' => 'integer|exists:patients,id',
-            'delete_patient_points' => 'boolean',
-            'delete_patient_documents' => 'boolean',
         ];
     }
 }

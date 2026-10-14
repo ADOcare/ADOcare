@@ -43,6 +43,9 @@ const pointRemote = ref<RemoteTableReturn>(
     {} as RemoteTableReturn,
 )
 
+const selectedPeriod =
+    ref<Date | null>(null)
+
 const pointsEndpointUrl = computed(() =>
     patientStore.current?.id
         ? 'v1/patient-points'
@@ -71,6 +74,15 @@ const options = computed<DataTableOptions<PatientPointApi>>(() => ({
             patient_id:
                 patientStore.current?.id ?? 0,
         },
+    },
+
+    dateRangeFilter: {
+        mode: 'single',
+        param: 'period',
+        placeholder: 'Obdobie',
+        view: 'month',
+        dateFormat: 'mm/yy',
+        value: selectedPeriod.value,
     },
 
     afterInit: ({ remote }) => {

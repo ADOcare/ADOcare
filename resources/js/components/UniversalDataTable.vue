@@ -956,7 +956,6 @@ watch(
                         class="
                             text-normal
                             px-2
-                            py-1
                             rounded-md
                             bg-tag3
                             text-accent
@@ -1022,13 +1021,13 @@ watch(
                                 "
                                 :dateFormat="
                                     dateRangeFilter.dateFormat
-                                        ?? 'mm/yy'
+                                        ?? 'MM/yy'
                                 "
                                 :manualInput="
                                     dateRangeFilter.manualInput
                                         ?? false
                                 "
-                                inputClass="w-full! pr-10!"
+                                inputClass="w-full! pr-10! cursor-pointer!"
                                 class="w-50"
                             />
 
@@ -1069,7 +1068,7 @@ watch(
                                     dateRangeFilter.manualInput
                                         ?? false
                                 "
-                                inputClass="w-full! pr-10!"
+                                inputClass="w-full! pr-10! cursor-pointer!"
                                 class="w-50"
                             />
 
@@ -1103,7 +1102,7 @@ watch(
                                     dateRangeFilter.manualInput
                                         ?? false
                                 "
-                                inputClass="w-full! pr-10!"
+                                inputClass="w-full! pr-10! cursor-pointer!"
                                 class="w-50"
                             />
 

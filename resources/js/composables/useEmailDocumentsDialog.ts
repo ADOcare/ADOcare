@@ -4,6 +4,11 @@ import useModal from '@/composables/useModal'
 
 export type EmailDialogDocument = {
     id: number
+    name?: string
+    type?: string
+    period?: string
+    created_at?: string
+    updated_at?: string
 }
 
 export type OpenEmailDocumentsDialogOptions = {

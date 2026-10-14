@@ -1,192 +1,398 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import api from '@/services/api';
-import UniversalDataTable from '@/components/UniversalDataTable.vue';
-import ActionButtons from '@/components/table-columns/ActionButtons.vue';
-import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog';
-import type { DataTableOptions, RemoteTableReturn } from '@/types/datatable'
+import {
+    computed,
+    markRaw,
+    ref,
+} from 'vue'
 
+import UniversalDataTable from '@/components/UniversalDataTable.vue'
+import ActionButtons from '@/components/table-columns/ActionButtons.vue'
 
-const props = defineProps<{ patientId: number }>();
+import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
+
+import api from '@/services/api'
+
+import type {
+    DataTableOptions,
+    RemoteTableReturn,
+} from '@/types/datatable'
+
+const props = defineProps<{
+    patientId: number
+}>()
 
 type PatientDocument = {
-    id: number;
-    name: string;
-    type?: string;
-    mime_type?: string;
-    path?: string;
-    url?: string;
-    created_at?: string;
-};
+    id: number
+    name: string
+    type?: string
+    mime_type?: string
+    path?: string
+    url?: string
+    period?: string
+    created_at?: string
+    updated_at?: string
+}
 
-const loading = ref(false);
-const documents = ref<PatientDocument[]>([]);
-const error = ref<string | null>(null);
-const documentRemote = ref<RemoteTableReturn>({} as RemoteTableReturn);
-const { openEmailDocumentsDialog } = useEmailDocumentsDialog();
+const documentRemote = ref<RemoteTableReturn>(
+    {} as RemoteTableReturn,
+)
 
-const loadDocuments = async () => {
-    loading.value = true;
-    error.value = null;
-    try {
-        const { data } = await api.get(`v1/patients/${props.patientId}/documents`);
-        documents.value = data?.data ?? data ?? [];
-    } catch {
-        error.value = 'Nepodarilo sa načítať dokumenty.';
-    } finally {
-        loading.value = false;
-    }
-};
+const {
+    openEmailDocumentsDialog,
+} = useEmailDocumentsDialog()
 
-const openDocument = (doc: PatientDocument) => {
-    if (!doc.id) {
-        console.error('Document ID is missing');
-        return;
+/* -------------------------------------------------------------------------- */
+/* Document helpers                                                           */
+/* -------------------------------------------------------------------------- */
+
+function getDocumentUrl(
+    document: PatientDocument,
+): string | null {
+    if (!document.id) {
+        return null
     }
 
-    if (doc.type === 'proposal') {
-        window.open(`/documents/proposal/${doc.id}`, '_blank');
-    } else if (doc.type === 'agreement') {
-        window.open(`/documents/agreement/${doc.id}`, '_blank');
-    } else if (doc.type === 'dekurz') {
-        window.open(`/documents/dekurz/${doc.id}`, '_blank');
-    } else if (doc.type === 'leave') {
-        window.open(`/documents/leave/${doc.id}`, '_blank');
-    } else if (doc.type === 'record') {
-        window.open(`/documents/record/${doc.id}`, '_blank');
-    } else if (doc.type === 'scan') {
-        window.open(`/documents/scan/${doc.id}`, '_blank');
-    } else {
-        const target = doc.url || doc.path;
-        if (target) window.open(target, '_blank');
+    const routes: Record<string, string> = {
+        proposal: `/documents/proposal/${document.id}`,
+        agreement: `/documents/agreement/${document.id}`,
+        dekurz: `/documents/dekurz/${document.id}`,
+        leave: `/documents/leave/${document.id}`,
+        record: `/documents/record/${document.id}`,
+        scan: `/documents/scan/${document.id}`,
     }
-};
 
-const formatDocumentType = (type?: string) => {
+    if (
+        document.type &&
+        routes[document.type]
+    ) {
+        return routes[document.type]
+    }
+
+    return (
+        document.url ??
+        document.path ??
+        null
+    )
+}
+
+function openDocument(
+    document: PatientDocument,
+) {
+    const target =
+        getDocumentUrl(document)
+
+    if (!target) {
+        console.error(
+            'Document URL could not be resolved.',
+            document,
+        )
+
+        return
+    }
+
+    window.open(
+        target,
+        '_blank',
+        'noopener,noreferrer',
+    )
+}
+
+function formatDocumentType(
+    type?: string,
+) {
     const typeMap: Record<string, string> = {
-        'proposal': 'Návrh',
-        'agreement': 'Dohoda',
-        'dekurz': 'Dekurz',
-        'leave': 'Prepúšťacia správa',
-        'record': 'Ošetrovateľský záznam',
-        'scan': 'Lekársky nález',
-        'other': 'Iné'
-    };
-    return typeMap[type || ''] || type || '';
-};
+        proposal: 'Návrh',
+        agreement: 'Dohoda',
+        dekurz: 'Dekurz',
+        leave: 'Prepúšťacia správa',
+        record: 'Ošetrovateľský záznam',
+        scan: 'Lekársky nález',
+        other: 'Iné',
+    }
 
-const formatDateWithTime = (dateStr?: string) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const datePart = date.toLocaleDateString('sk-SK');
-    const timePart = date.toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    return `${datePart} ${timePart}`;
-};
+    return (
+        typeMap[type ?? ''] ??
+        type ??
+        ''
+    )
+}
 
-const options = computed<DataTableOptions<PatientDocument>>(() => ({
-    rowKey: 'id',
-    endpointUrl: `v1/patients/${props.patientId}/documents`,
-    defaultPageSize: 25,
-    pageSizeOptions: [10, 25, 50],
-    selectable: true,
+function formatDateWithTime(
+    value?: string,
+) {
+    if (!value) {
+        return ''
+    }
 
-    afterInit: ({ remote }) => {
-        documentRemote.value = remote
-        remote.setSort?.('-created_at')
-        remote.loadPage?.(1)
-    },
+    const date = new Date(value)
 
-    columns: [
+    if (
+        Number.isNaN(
+            date.getTime(),
+        )
+    ) {
+        return ''
+    }
+
+    const datePart =
+        date.toLocaleDateString(
+            'sk-SK',
+        )
+
+    const timePart =
+        date.toLocaleTimeString(
+            'sk-SK',
+            {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+            },
+        )
+
+    return `${datePart} ${timePart}`
+}
+
+/* -------------------------------------------------------------------------- */
+/* Actions                                                                    */
+/* -------------------------------------------------------------------------- */
+
+async function emailDocuments(
+    selectedRows: PatientDocument[],
+    remote: RemoteTableReturn,
+) {
+    if (!selectedRows.length) {
+        return
+    }
+
+    await openEmailDocumentsDialog({
+        documents:
+            selectedRows,
+
+        remote,
+    })
+}
+
+async function deleteDocuments(
+    selectedRows: PatientDocument[],
+    remote: RemoteTableReturn,
+) {
+    if (!selectedRows.length) {
+        return
+    }
+
+    await api.delete(
+        'v1/documents',
         {
-            field: 'type',
-            header: 'Typ',
-            sortable: true,
-            render: (v: string | undefined) => formatDocumentType(v)
-        },
-        {
-            field: 'period',
-            header: 'Obdobie',
-            sortable: true,
-            render: (v: string | undefined) => v || ''
-        },
-        {
-            field: 'updated_at',
-            header: 'Naposledy upravené',
-            sortable: true,
-            render: (v: string | undefined) => formatDateWithTime(v)
-        },
-
-        {
-            field: 'preview',
-            header: '',
-            width: '3rem',
-            component: ActionButtons,
-            componentOptions: [
-                {
-                    icon: 'bi bi-eye',
-                    color: 'info',
-                    tooltip: 'Zobraziť dokument',
-                    action: (row: PatientDocument) => {
-                        openDocument(row);
-                    },
-                },
-            ],
-        },
-    ],
-
-    actions: [
-        {
-            key: 'email',
-            disabled: ({ selectedRows }: { selectedRows: PatientDocument[] }) => selectedRows.length === 0,
-            icon: 'bi bi-send',
-            class: 'bg-accent!',
-            tooltip: 'Poslať vybrané dokumenty emailom',
-            handler: async ({ selectedRows, remote }: { selectedRows: PatientDocument[]; remote: any }) => {
-                await openEmailDocumentsDialog({
-                    documents: selectedRows,
-                    remote,
-                });
+            data: {
+                ids: selectedRows.map(
+                    (document) =>
+                        document.id,
+                ),
             },
         },
-        {
-            key: 'delete',
-            disabled: ({ selectedRows }: { selectedRows: PatientDocument[] }) => selectedRows.length === 0,
-            icon: 'bi bi-eraser',
-            class: 'bg-danger!',
-            confirm: 'Vymazať vybrané dokumenty?',
-            handler: async ({ selectedRows, remote }: { selectedRows: PatientDocument[]; remote: any }) => {
-                try {
-                    await api.delete('v1/documents', {
-                        data: {
-                            ids: selectedRows.map((r) => r.id),
+    )
+
+    await remote.loadPage?.(
+        remote.page.value,
+    )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Table                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const options =
+    computed<
+        DataTableOptions<PatientDocument>
+    >(() => ({
+        rowKey: 'id',
+
+        endpointUrl:
+            `v1/patients/${props.patientId}/documents`,
+
+        defaultPageSize: 25,
+
+        pageSizeOptions: [
+            10,
+            25,
+            50,
+        ],
+
+        selectable: true,
+
+        afterInit: ({
+            remote,
+        }) => {
+            documentRemote.value =
+                remote
+
+            remote.setSort?.(
+                '-created_at',
+            )
+        },
+
+        columns: [
+            {
+                field: 'type',
+
+                header: 'Typ',
+
+                sortable: true,
+
+                render: (
+                    value:
+                        string |
+                        undefined,
+                ) =>
+                    formatDocumentType(
+                        value,
+                    ),
+            },
+
+            {
+                field: 'period',
+
+                header: 'Obdobie',
+
+                sortable: true,
+
+                render: (
+                    value:
+                        string |
+                        undefined,
+                ) =>
+                    value ?? '',
+            },
+
+            {
+                field: 'updated_at',
+
+                header:
+                    'Naposledy upravené',
+
+                sortable: true,
+
+                render: (
+                    value:
+                        string |
+                        undefined,
+                ) =>
+                    formatDateWithTime(
+                        value,
+                    ),
+            },
+
+            {
+                field: 'preview',
+
+                header: '',
+
+                width: '3rem',
+
+                component:
+                    markRaw(
+                        ActionButtons,
+                    ),
+
+                componentOptions: [
+                    {
+                        icon:
+                            'bi bi-eye',
+
+                        color:
+                            'darkgrey',
+
+                        tooltip:
+                            'Zobraziť dokument',
+
+                        action: (
+                            row:
+                                PatientDocument,
+                        ) => {
+                            openDocument(row)
                         },
-                    });
-                    await remote.loadPage(remote.page);
-                } catch (err) {
-                    console.error('Error deleting documents:', err);
-                }
+                    },
+                ],
             },
-        },
-    ],
-}));
+        ],
 
-onMounted(loadDocuments);
+        actions: [
+            {
+                key: 'email',
+
+                label:
+                    'Poslať emailom',
+
+                icon:
+                    'bi bi-send',
+
+                variant:
+                    'accent',
+
+                tooltip:
+                    'Poslať vybrané dokumenty emailom',
+
+                disabled: ({
+                    selectedRows,
+                }) =>
+                    selectedRows.length ===
+                    0,
+
+                handler:
+                    async ({
+                        selectedRows,
+                        remote,
+                    }) => {
+                        await emailDocuments(
+                            selectedRows as PatientDocument[],
+                            remote,
+                        )
+                    },
+            },
+
+            {
+                key: 'delete',
+
+                label:
+                    'Vymazať',
+
+                icon:
+                    'bi bi-eraser',
+
+                variant:
+                    'danger',
+
+                tooltip:
+                    'Vymazať vybrané dokumenty',
+
+                disabled: ({
+                    selectedRows,
+                }) =>
+                    selectedRows.length ===
+                    0,
+
+                confirm:
+                    'Naozaj si prajete vymazať vybrané dokumenty?',
+
+                handler:
+                    async ({
+                        selectedRows,
+                        remote,
+                    }) => {
+                        await deleteDocuments(
+                            selectedRows as PatientDocument[],
+                            remote,
+                        )
+                    },
+            },
+        ],
+    }))
 </script>
 
 <template>
-    <div class="p-3">
-        <UniversalDataTable :options="options">
-            <template #actions="{ row }">
-                <button @click.stop="openDocument(row)" class="btn btn-sm btn-link p-0" title="View document">
-                    <i class="bi bi-eye"></i>
-                </button>
-            </template>
-        </UniversalDataTable>
+    <div class="h-full min-h-0">
+        <UniversalDataTable
+            :options="options"
+        />
     </div>
 </template>
-
-<style scoped>
-:deep(tbody tr) {
-    cursor: pointer;
-}
-</style>

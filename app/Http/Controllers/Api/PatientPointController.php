@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use App\Http\Requests\StorePatientPointRequest;
 use App\Http\Requests\UpdatePatientPointRequest;
 use App\Models\PatientPoint;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,22 @@ class PatientPointController extends Controller
     public function index(Request $request)
     {
         $query = PatientPoint::query();
+
+        $request->validate([
+            'period' => ['nullable', 'date_format:Y-m'],
+        ]);
+
+        if ($request->filled('period')) {
+            $period = Carbon::createFromFormat(
+                'Y-m',
+                (string) $request->input('period'),
+            );
+
+            $query->whereBetween('date', [
+                $period->copy()->startOfMonth()->toDateString(),
+                $period->copy()->endOfMonth()->toDateString(),
+            ]);
+        }
 
         $results = ApiQuery::apply(
             $request,

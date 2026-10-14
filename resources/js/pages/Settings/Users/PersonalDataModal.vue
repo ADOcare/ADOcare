@@ -121,7 +121,7 @@ async function save() {
         </div>
 
         <div class="mt-2 flex justify-end gap-2">
-            <AppButton label="Zrušiť" variant="text" @click="close" />
+            <AppButton label="Zrušiť" variant="secondary" @click="close" />
             <AppButton type="submit" label="Uložiť" :loading="saving" />
         </div>
     </form>

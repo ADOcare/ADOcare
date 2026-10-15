@@ -36,6 +36,16 @@ class Patient extends Model
         return $this->hasMany(Visit::class);
     }
 
+    public function dekurzProcedureTemplates()
+    {
+        return $this->hasMany(PatientProcedureDekurzTemplate::class);
+    }
+
+    public function dekurzDrafts()
+    {
+        return $this->hasMany(DekurzDraft::class);
+    }
+
     public function insuranceCompany()
     {
         return $this->belongsTo(InsuranceCompany::class, 'insurance_company_id');

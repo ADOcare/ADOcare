@@ -27,9 +27,11 @@ export type AppNotification = {
     date: Date
     raw: CarService | PersistedNotification
     actionable: boolean
+    dismissible: boolean
     action?: {
-        target: 'patient' | 'car'
+        target: 'patient' | 'patient_document_page' | 'car'
         id: number
+        route?: 'dekurz' | 'agreement' | 'record' | 'proposal' | 'leave'
     }
 }
 
@@ -40,6 +42,7 @@ type PersistedNotification = {
     description: string | null
     occurred_at: string
     data?: Record<string, unknown>
+    kind: 'event' | 'issue'
 }
 
 const carServices = ref<CarService[]>([])
@@ -72,6 +75,7 @@ export function useNotifications() {
                 date: getNextDueDate(service),
                 raw: service,
                 actionable: authStore.currentRole === 'manager' && !!service.car?.id,
+                dismissible: true,
                 action: service.car?.id
                     ? {
                         target: 'car' as const,
@@ -86,7 +90,12 @@ export function useNotifications() {
             const actionable = [
                 'patient_insurance_issue',
                 'patient_insurance_changed',
+                'documentation_audit_issue',
             ].includes(notification.type) && Number.isInteger(patientId)
+            const persistent = notification.data?.persistent === true
+            const targetRoute = notification.data?.target_route
+            const patientDocumentRoutes = ['dekurz', 'agreement', 'record', 'proposal', 'leave'] as const
+            const patientDocumentRoute = patientDocumentRoutes.find((route) => route === targetRoute)
 
             return {
                 id: `app-${notification.id}`,
@@ -96,10 +105,16 @@ export function useNotifications() {
                 date: new Date(notification.occurred_at),
                 raw: notification,
                 actionable,
+                dismissible: !persistent,
                 action: actionable
                     ? {
-                        target: 'patient' as const,
+                        target: notification.type === 'documentation_audit_issue'
+                            ? 'patient_document_page' as const
+                            : 'patient' as const,
                         id: patientId,
+                        route: notification.type === 'documentation_audit_issue'
+                            ? patientDocumentRoute ?? 'dekurz'
+                            : undefined,
                     }
                     : undefined,
             }
@@ -132,6 +147,12 @@ export function useNotifications() {
     async function dismissNotification(id: string) {
         if (id.startsWith('app-')) {
             const notificationId = Number(id.slice(4))
+            const notification = persistedNotifications.value.find(
+                (item) => item.id === notificationId,
+            )
+            if (notification?.data?.persistent === true) {
+                return
+            }
 
             persistedNotifications.value = persistedNotifications.value.filter(
                 (notification) => notification.id !== notificationId,
@@ -166,7 +187,7 @@ export function useNotifications() {
 
         await Promise.all(
             visibleNotifications
-                .filter((notification) => notification.id.startsWith('app-'))
+                .filter((notification) => notification.id.startsWith('app-') && notification.dismissible)
                 .map((notification) => dismissNotification(notification.id)),
         )
     }

@@ -88,6 +88,39 @@ class PatientNotificationServiceTest extends TestCase
         self::assertSame(0, AppNotification::query()->whereNull('resolved_at')->count());
     }
 
+    public function test_persistent_issue_is_sent_only_to_assigned_nurse_and_follows_reassignment(): void
+    {
+        $patient = Patient::query()->findOrFail(1);
+        $service = new PatientNotificationService();
+        $key = 'documentation-audit:patient:1:period:2026-09';
+
+        $service->reportIssueToAssignedNurse(
+            $patient,
+            $key,
+            'documentation_audit_issue',
+            'Documentation',
+            'Missing documentation',
+            ['patient_id' => 1],
+        );
+
+        self::assertSame([1], AppNotification::query()->pluck('user_id')->all());
+        self::assertTrue((bool) AppNotification::query()->firstOrFail()->data['persistent']);
+
+        $patient->update(['nurse_id' => 3]);
+        $service->reportIssueToAssignedNurse(
+            $patient->fresh(),
+            $key,
+            'documentation_audit_issue',
+            'Documentation',
+            'Still missing',
+            ['patient_id' => 1],
+        );
+
+        self::assertNotNull(AppNotification::query()->where('user_id', 1)->value('resolved_at'));
+        self::assertNull(AppNotification::query()->where('user_id', 3)->value('resolved_at'));
+        self::assertSame(2, AppNotification::query()->count());
+    }
+
     private function seedRecipients(): void
     {
         DB::table('roles')->insert([

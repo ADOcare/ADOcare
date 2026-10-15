@@ -19,6 +19,7 @@ class ProcedureUpdateRequest extends FormRequest
         return [
             'code' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('procedures', 'code')->ignore($procedureId)],
             'description' => ['sometimes', 'required', 'string', 'max:255'],
+            'default_dekurz_text' => ['nullable', 'string', 'max:20000'],
 
             'prices' => ['sometimes', 'array', 'min:1'],
             'prices.*.insurance_company_id' => ['required_with:prices', 'integer', 'exists:insurance_companies,id'],

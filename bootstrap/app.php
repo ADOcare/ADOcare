@@ -6,6 +6,7 @@ use App\Console\Commands\SendCarMaintenanceNotifications;
 use App\Console\Commands\SendSubscriptionNotifications;
 use App\Console\Commands\SendTrialNotifications;
 use App\Console\Commands\RunMonthlyVertexRetraining;
+use App\Console\Commands\RunDocumentationAudit;
 use App\Http\Responses\ApiResponseClass;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
@@ -45,6 +46,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command(SendCarMaintenanceNotifications::class)->dailyAt('6:00');
         $schedule->command(SendSubscriptionNotifications::class)->dailyAt('6:15');
         $schedule->command(SendTrialNotifications::class)->dailyAt('6:20');
+
+        if (config('documentation_audit.enabled') && config('documentation_audit.schedule.enabled')) {
+            $schedule->command(RunDocumentationAudit::class)
+                ->dailyAt((string) config('documentation_audit.schedule.time', '03:00'))
+                ->withoutOverlapping()
+                ->onOneServer();
+        }
 
         $schedule->command('backup:run --only-db')->dailyAt('01:00')->withoutOverlapping();
         $schedule->command('backup:clean')->dailyAt('01:30')->withoutOverlapping();

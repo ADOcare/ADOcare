@@ -29,6 +29,10 @@ class AppNotificationController extends Controller
             return $this->notFound('Upozornenie nebolo nájdené.');
         }
 
+        if ((bool) data_get($notification->data, 'persistent', false)) {
+            return $this->error('Akčné upozornenie zostane aktívne, kým sa problém nevyrieši.', 422);
+        }
+
         $notification->update([
             'dismissed_at' => now(),
         ]);

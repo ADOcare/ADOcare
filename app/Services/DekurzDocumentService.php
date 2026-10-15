@@ -51,6 +51,7 @@ class DekurzDocumentService
         $patientAddress = trim(($patient->address ?? '') . ', ' . ($patient->city ?? '') . ', ' . ($patient->postal_code ?? ''));
 
         $dekurzData = [
+            'schema_version' => 1,
             'document_id' => $document->id,
             'created_at' => now(),
             'user_id' => $user->id,

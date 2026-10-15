@@ -54,6 +54,7 @@ use App\Http\Controllers\Api\MonthlyExportController;
 use App\Http\Controllers\Api\TotalsController;
 use App\Http\Controllers\Api\CountryController;
 use App\Http\Controllers\Api\ScanSessionController;
+use App\Http\Controllers\Api\DekurzV2Controller;
 use App\Http\Controllers\Api\ScanUploadController;
 use App\Http\Controllers\Api\ScanFileController;
 use App\Http\Controllers\Api\SubscriptionTierController;
@@ -455,6 +456,22 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware(['role:any', 'can:view,patient']);
     Route::post('/patients/{patient}/dekurz/ai-improve-text', [DekurzDocumentController::class, 'improveText'])
         ->middleware(['role:any', 'can:view,patient']);
+    Route::get('/patients/{patient}/dekurz-builder', [DekurzV2Controller::class, 'builder'])
+        ->middleware(['role:any', 'can:view,patient']);
+    Route::post('/patients/{patient}/dekurz-drafts', [DekurzV2Controller::class, 'initializeDraft'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::post('/patients/{patient}/dekurz-drafts/{draft}/finalize', [DekurzV2Controller::class, 'finalize'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::put('/patients/{patient}/dekurz-templates/{procedure}', [DekurzV2Controller::class, 'upsertTemplate'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::delete('/patients/{patient}/dekurz-templates/{procedure}', [DekurzV2Controller::class, 'deleteTemplate'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::patch('/patients/{patient}/dekurz-drafts/{draft}/days/{day}', [DekurzV2Controller::class, 'updateDay'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::patch('/patients/{patient}/dekurz-drafts/{draft}/entries/{entry}', [DekurzV2Controller::class, 'updateEntry'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::post('/patients/{patient}/dekurz-drafts/{draft}/entries/{entry}/apply-to-unedited', [DekurzV2Controller::class, 'applyEntryToUnedited'])
+        ->middleware(['role:any', 'can:update,patient']);
 
     Route::documentRoutes('leave-documents', LeaveDocumentController::class);
     Route::get('/patients/{patient}/leave/latest', [LeaveDocumentController::class, 'latestByPatient'])

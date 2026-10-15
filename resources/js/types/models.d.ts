@@ -34,12 +34,14 @@ export interface Document {
   user: User
   branch: Branch
   insurance_company: InsuranceCompany
+  dekurz_draft: DekurzDraft
   // counts
   // exists
   patient_exists: boolean
   user_exists: boolean
   branch_exists: boolean
   insurance_company_exists: boolean
+  dekurz_draft_exists: boolean
 }
 
 export interface VisitText {
@@ -450,6 +452,39 @@ export interface PointClaimLineResult {
   updated_at: string | null
 }
 
+export interface DocumentationAuditIssue {
+  // columns
+  id: number
+  company_id: number | null
+  branch_id: number | null
+  patient_id: number
+  user_id: number | null
+  period: string
+  rule_code: string
+  severity: string
+  date: string | null
+  procedure_id: number | null
+  patient_point_id: number | null
+  document_id: number | null
+  fingerprint: string
+  status: string
+  first_detected_at: string
+  last_detected_at: string
+  resolved_at: string | null
+  metadata: Array<unknown> | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  patient: Patient
+  patient_point: PatientPoint
+  document: Document
+  // counts
+  // exists
+  patient_exists: boolean
+  patient_point_exists: boolean
+  document_exists: boolean
+}
+
 export interface SubscriptionTier {
   // columns
   id: number
@@ -484,6 +519,24 @@ export interface MonthlyExportRun {
   completed_at: string | null
   created_at: string | null
   updated_at: string | null
+}
+
+export interface DekurzDay {
+  // columns
+  id: number
+  dekurz_draft_id: number
+  date: string
+  general_note: string | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  draft: DekurzDraft
+  entries: DekurzEntry[]
+  // counts
+  entries_count: number
+  // exists
+  draft_exists: boolean
+  entries_exists: boolean
 }
 
 export interface Company {
@@ -638,13 +691,20 @@ export interface Procedure {
   description: string | null
   created_at: string | null
   updated_at: string | null
+  default_dekurz_text: string | null
   // relations
+  patient_dekurz_templates: PatientProcedureDekurzTemplate[]
+  dekurz_entries: DekurzEntry[]
   insurance_companies_prices: InsuranceCompany[]
   insurance_companies_prices_minimal: InsuranceCompany[]
   // counts
+  patient_dekurz_templates_count: number
+  dekurz_entries_count: number
   insurance_companies_prices_count: number
   insurance_companies_prices_minimal_count: number
   // exists
+  patient_dekurz_templates_exists: boolean
+  dekurz_entries_exists: boolean
   insurance_companies_prices_exists: boolean
   insurance_companies_prices_minimal_exists: boolean
 }
@@ -701,9 +761,39 @@ export interface PatientPoint {
   quantity: number | null
   // relations
   patient: Patient
+  procedure: Procedure
+  branch: Branch
+  dekurz_entry: DekurzEntry
   // counts
   // exists
   patient_exists: boolean
+  procedure_exists: boolean
+  branch_exists: boolean
+  dekurz_entry_exists: boolean
+}
+
+export interface DekurzEntry {
+  // columns
+  id: number
+  dekurz_day_id: number
+  procedure_id: number
+  patient_point_id: number | null
+  quantity: number | null
+  text: string
+  source: string
+  edited_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  patient_point_snapshot_id: number | null
+  // relations
+  day: DekurzDay
+  procedure: Procedure
+  patient_point: PatientPoint
+  // counts
+  // exists
+  day_exists: boolean
+  procedure_exists: boolean
+  patient_point_exists: boolean
 }
 
 export interface Car {
@@ -817,20 +907,57 @@ export interface Patient {
   branch: Branch
   doctor: Doctor
   visits: Visit[]
+  dekurz_procedure_templates: PatientProcedureDekurzTemplate[]
+  dekurz_drafts: DekurzDraft[]
   insurance_company: InsuranceCompany
   coverages: PatientCoverage[]
   latest_coverage: PatientCoverage
   // counts
   visits_count: number
+  dekurz_procedure_templates_count: number
+  dekurz_drafts_count: number
   coverages_count: number
   // exists
   nurse_exists: boolean
   branch_exists: boolean
   doctor_exists: boolean
   visits_exists: boolean
+  dekurz_procedure_templates_exists: boolean
+  dekurz_drafts_exists: boolean
   insurance_company_exists: boolean
   coverages_exists: boolean
   latest_coverage_exists: boolean
+}
+
+export interface DekurzDraft {
+  // columns
+  id: number
+  patient_id: number
+  branch_id: number | null
+  period: string
+  status: string
+  created_by: number | null
+  updated_by: number | null
+  final_document_id: number | null
+  completed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  patient: Patient
+  branch: Branch
+  creator: User
+  updater: User
+  final_document: Document
+  days: DekurzDay[]
+  // counts
+  days_count: number
+  // exists
+  patient_exists: boolean
+  branch_exists: boolean
+  creator_exists: boolean
+  updater_exists: boolean
+  final_document_exists: boolean
+  days_exists: boolean
 }
 
 export interface PointClaimBatch {
@@ -862,6 +989,29 @@ export interface PointClaimBatch {
   // exists
   lines_exists: boolean
   document_exists: boolean
+}
+
+export interface PatientProcedureDekurzTemplate {
+  // columns
+  id: number
+  patient_id: number
+  procedure_id: number
+  text: string
+  created_by: number | null
+  updated_by: number | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  patient: Patient
+  procedure: Procedure
+  creator: User
+  updater: User
+  // counts
+  // exists
+  patient_exists: boolean
+  procedure_exists: boolean
+  creator_exists: boolean
+  updater_exists: boolean
 }
 
 export interface Plan {

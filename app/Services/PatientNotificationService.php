@@ -73,6 +73,44 @@ class PatientNotificationService
             ]);
     }
 
+    public function reportIssueToAssignedNurse(
+        Patient $patient,
+        string $key,
+        string $type,
+        string $title,
+        string $description,
+        array $data = [],
+    ): void {
+        $nurseId = $patient->nurse_id ? (int) $patient->nurse_id : null;
+
+        AppNotification::query()
+            ->where('key', $key)
+            ->when($nurseId, fn ($query) => $query->where('user_id', '!=', $nurseId))
+            ->whereNull('resolved_at')
+            ->update(['resolved_at' => now()]);
+
+        if (! $nurseId || ! User::query()->whereKey($nurseId)->exists()) {
+            return;
+        }
+
+        AppNotification::query()->updateOrCreate(
+            [
+                'user_id' => $nurseId,
+                'key' => $key,
+            ],
+            [
+                'type' => $type,
+                'kind' => 'issue',
+                'title' => $title,
+                'description' => $description,
+                'data' => $data + ['persistent' => true],
+                'occurred_at' => now(),
+                'dismissed_at' => null,
+                'resolved_at' => null,
+            ],
+        );
+    }
+
     private function recipients(Patient $patient): Collection
     {
         $patient->loadMissing('branch');

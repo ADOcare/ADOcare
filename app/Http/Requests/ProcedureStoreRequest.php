@@ -16,6 +16,7 @@ class ProcedureStoreRequest extends FormRequest
         return [
             'code' => ['required', 'string', 'max:50', 'unique:procedures,code'],
             'description' => ['required', 'string', 'max:255'],
+            'default_dekurz_text' => ['nullable', 'string', 'max:20000'],
 
             'prices' => ['required', 'array', 'min:1'],
             'prices.*.insurance_company_id' => ['required', 'integer', 'exists:insurance_companies,id'],

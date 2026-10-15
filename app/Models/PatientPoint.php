@@ -43,4 +43,19 @@ class PatientPoint extends Model
     {
         return $this->belongsTo(Patient::class, 'patient_id');
     }
+
+    public function procedure()
+    {
+        return $this->belongsTo(Procedure::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
+    public function dekurzEntry()
+    {
+        return $this->hasOne(DekurzEntry::class);
+    }
 }

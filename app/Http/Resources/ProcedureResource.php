@@ -12,6 +12,7 @@ class ProcedureResource extends JsonResource
             'id' => $this->id,
             'code' => $this->code,
             'description' => $this->description,
+            'default_dekurz_text' => $this->default_dekurz_text,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

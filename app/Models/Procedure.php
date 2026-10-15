@@ -12,7 +12,18 @@ class Procedure extends Model
     protected $fillable = [
         'code',
         'description',
+        'default_dekurz_text',
     ];
+
+    public function patientDekurzTemplates()
+    {
+        return $this->hasMany(PatientProcedureDekurzTemplate::class);
+    }
+
+    public function dekurzEntries()
+    {
+        return $this->hasMany(DekurzEntry::class);
+    }
 
 
     // Procedure prices based on insurance companies

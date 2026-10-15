@@ -52,4 +52,9 @@ class Document extends Model
     {
         return $this->belongsTo(\App\Models\InsuranceCompany::class, 'insurance_company_id');
     }
+
+    public function dekurzDraft()
+    {
+        return $this->hasOne(DekurzDraft::class, 'final_document_id');
+    }
 }

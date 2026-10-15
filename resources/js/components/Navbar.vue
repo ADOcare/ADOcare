@@ -60,6 +60,28 @@ async function openNotification(notification: AppNotification) {
         return
     }
 
+    if (notification.action.target === 'patient_document_page') {
+        try {
+            const patient = await patientStore.fetchPatient(notification.action.id)
+            const branchId = Number(patient.branch_id)
+
+            if (!Number.isInteger(branchId) || !branchOptions.value.some((branch) => branch.id === branchId)) {
+                throw new Error('Patient branch is not available to the current user.')
+            }
+
+            if (authStore.currentBranch?.id !== branchId || authStore.isManager) {
+                await applyBranchSelection(branchId)
+            }
+
+            patientStore.setPatient(patient)
+            await router.push({ name: notification.action.route ?? 'dekurz' })
+        } catch (error) {
+            console.error('Failed to open documentation audit action', error)
+        }
+        await loadNotifications(true)
+        return
+    }
+
     await router.push({
         name: 'manager-settings-cars',
         query: {
@@ -419,12 +441,13 @@ watch(branchOptions, async (newOpts) => {
                     <div class="min-w-0 flex-1">
                         <div class="flex items-start justify-between gap-3">
                             <div
-                                class="text-normal font-medium truncate"
+                                class="text-normal font-medium break-words"
                             >
                                 {{ notification.title }}
                             </div>
 
                             <button
+                                v-if="notification.dismissible"
                                 type="button"
                                 class="shrink-0 w-6 h-6 flex items-center justify-center cursor-pointer hover:text-darkgrey transition-colors"
                                 aria-label="Skryť upozornenie"
@@ -437,7 +460,7 @@ watch(branchOptions, async (newOpts) => {
 
                         <div
                             v-if="notification.description"
-                            class="text-mini mt-0.5 truncate"
+                            class="text-mini mt-0.5 whitespace-normal break-words"
                         >
                             {{ notification.description }}
                         </div>

@@ -13,6 +13,7 @@ class ProcedureFactory extends Factory
         return [
             'code' => strtoupper($this->faker->bothify('??#')), // e.g. AB1
             'description' => $this->faker->sentence(6),
+            'default_dekurz_text' => null,
         ];
     }
 }

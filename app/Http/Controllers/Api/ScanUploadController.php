@@ -23,6 +23,7 @@ class ScanUploadController extends Controller
      *
      * @group Scan Upload
      * @bodyParam session_token string required Session token. Example: abc123
+    * @bodyParam reference_date date required Recommendation date in YYYY-MM-DD format. Example: 2026-10-16
      * @bodyParam images[] file required One or more image files.
      * @response 200 {"data":{"success":true,"image_paths":["scans/1.jpg"],"image_count":1},"message":"Obrazky boli uspesne nahrate."}
      */
@@ -97,7 +98,11 @@ class ScanUploadController extends Controller
             return $this->error($e->getMessage(), 422);
         }
 
-        $document = $this->service->createDocumentFromScans($session, $filePaths);
+        $document = $this->service->createDocumentFromScans(
+            $session,
+            $filePaths,
+            $validated['reference_date'],
+        );
 
         return $this->success([
             'document_id' => $document->id,
@@ -146,6 +151,7 @@ class ScanUploadController extends Controller
             'patient_id' => $session->patient_id,
             'patient_name' => trim(($session->patient->first_name ?? '') . ' ' . ($session->patient->last_name ?? '')),
             'expires_in' => max(1, $expiresInSeconds),
+            'lifetime_seconds' => max(1, (int) ceil($session->created_at->diffInSeconds($session->expires_at))),
             'is_expired' => !$session->isActive(),
             'debug' => [
                 'expires_at' => $session->expires_at->toIso8601String(),

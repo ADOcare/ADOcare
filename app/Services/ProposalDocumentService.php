@@ -4,13 +4,17 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\Patient;
-use App\Models\Procedure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use App\Models\Branch;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 
 class ProposalDocumentService
 {
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
+    {
+    }
+
     /**
      * Create proposal document and persist JSON payload.
      * @return array [Document, array(payload)]
@@ -18,6 +22,7 @@ class ProposalDocumentService
     public function createProposal(array $data, $actor): array
     {
         $patient = Patient::findOrFail($data['patient_id']);
+        $branch = Branch::findOrFail($data['branch_id']);
 
         $document = Document::create([
             'patient_id' => $patient->id,
@@ -30,9 +35,29 @@ class ProposalDocumentService
             'branch_id' => $data['branch_id'],
             ]);
 
+        $payload = $this->buildProposalData($data, $actor, $patient, $branch, $document->id);
+
+        Storage::disk('local')->put($document->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        $this->immediateAudit->documentsChanged([$document]);
+
+        return [$document, $payload];
+    }
+
+    public function previewProposal(array $data, $actor): array
+    {
+        return $this->buildProposalData(
+            $data,
+            $actor,
+            Patient::findOrFail($data['patient_id']),
+            Branch::findOrFail($data['branch_id']),
+        );
+    }
+
+    private function buildProposalData(array $data, $actor, Patient $patient, Branch $branch, ?int $documentId = null): array
+    {
         $company = $actor->company;
         $doctor = $patient->doctor;
-        $branch = Branch::findOrFail($data['branch_id']);
 
         $diagnosis = [];
         if (!empty($data['medical_diagnosis_ids']) && is_array($data['medical_diagnosis_ids'])) {
@@ -67,7 +92,7 @@ class ProposalDocumentService
             }
         }
 
-        $payload = [
+        return [
             'company_id' => $company?->id,
             'representative_id' => $branch->representative?->id ?? null,
             'representative_name' => trim(($branch->representative?->title ?? '') . ' ' . ($branch->representative?->first_name ?? '') . ' ' . ($branch->representative?->last_name ?? '')),
@@ -87,13 +112,9 @@ class ProposalDocumentService
             'expected_duration' => $data['expected_duration'] ?? '',
             'date' => $data['date'] ?? null,
             'procedures' => $procedures,
-            'document_id' => $document->id,
+            'document_id' => $documentId,
             'created_at' => now(),
         ];
-
-        Storage::disk('local')->put($document->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return [$document, $payload];
     }
 
     public function getProposalPayload(Document $document): ?array

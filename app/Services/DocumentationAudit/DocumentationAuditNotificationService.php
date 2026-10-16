@@ -114,6 +114,7 @@ class DocumentationAuditNotificationService
             'DOC-003' => 'doplniť vstupný záznam',
             'DOC-004' => 'doplniť Návrh',
             'DOC-005' => 'doplniť prepúšťaciu správu',
+            'DOC-006' => 'doplniť lekársky nález',
             default => 'doplniť dokumentáciu',
         };
     }
@@ -126,6 +127,7 @@ class DocumentationAuditNotificationService
             'DOC-003' => 'record',
             'DOC-004' => 'proposal',
             'DOC-005' => 'leave',
+            'DOC-006' => 'points',
             default => 'dekurz',
         };
     }
@@ -144,6 +146,7 @@ class DocumentationAuditNotificationService
             'DOC-003' => "Chýba vstupný ošetrovateľský záznam pre {$datedProcedure}.",
             'DOC-004' => "Chýba Návrh pre {$datedProcedure}.",
             'DOC-005' => "Chýba prepúšťacia správa pre {$datedProcedure}.",
+            'DOC-006' => $date ? "Chýba lekársky nález z {$date}." : 'Chýba lekársky nález.',
             default => "Dokumentácia vyžaduje kontrolu ({$issue->rule_code}).",
         };
     }

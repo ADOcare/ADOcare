@@ -6,6 +6,7 @@ use App\Jobs\ProcessScanOcr;
 use App\Models\Document;
 use App\Models\ScanSession;
 use App\Models\Patient;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -18,8 +19,10 @@ use RuntimeException;
  */
 class ScanDocumentService
 {
-    public function __construct(private ScanImageNormalizerService $imageNormalizer)
-    {
+    public function __construct(
+        private ScanImageNormalizerService $imageNormalizer,
+        private ImmediateDocumentationAuditService $immediateAudit,
+    ) {
     }
 
     /**
@@ -113,9 +116,14 @@ class ScanDocumentService
      *
      * @param ScanSession $session
      * @param array $imagePaths Array of storage paths to images
+     * @param string $referenceDate Recommendation date in YYYY-MM-DD format
      * @return Document
      */
-    public function createDocumentFromScans(ScanSession $session, array $imagePaths): Document
+    public function createDocumentFromScans(
+        ScanSession $session,
+        array $imagePaths,
+        string $referenceDate,
+    ): Document
     {
         $patient = Patient::findOrFail($session->patient_id);
         
@@ -127,7 +135,8 @@ class ScanDocumentService
             'name' => 'nalez_' . now()->format('d.m.Y'),
             'path' => 'scans/documents/' . $session->id . '_' . now()->timestamp . '.json',
             'branch_id' => $session->branch_id,
-            'period' => date('Y-m'),
+            'period' => substr($referenceDate, 0, 7),
+            'reference_date' => $referenceDate,
         ]);
 
         // Store metadata about the scan document
@@ -136,6 +145,7 @@ class ScanDocumentService
             'scan_session_id' => $session->id,
             'image_paths' => $imagePaths,
             'image_count' => count($imagePaths),
+            'reference_date' => $referenceDate,
             'scanned_at' => now(),
             'uploaded_by' => $session->user_id,
             'patient_name' => trim(($patient->first_name ?? '') . ' ' . ($patient->last_name ?? '')),
@@ -152,6 +162,8 @@ class ScanDocumentService
 
         // Dispatch OCR job (async processing)
         ProcessScanOcr::dispatch($document)->delay(now()->addSeconds(2));
+
+        $this->immediateAudit->documentsChanged([$document]);
 
         return $document;
     }

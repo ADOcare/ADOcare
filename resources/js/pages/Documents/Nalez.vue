@@ -1,156 +1,625 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import {
+    computed,
+    onBeforeUnmount,
+    ref,
+    watch,
+} from 'vue'
+
 import { useRoute } from 'vue-router'
 import Dialog from 'primevue/dialog'
-import Button from 'primevue/button'
+import Textarea from 'primevue/textarea'
 import { useToast } from 'primevue/usetoast'
-import api from '@/services/api'
-import { usePublicDocument, type PublicDocumentProps } from '@/composables/usePublicDocument'
+
+import AppButton from '@/components/AppButton.vue'
 import DocumentShell from '@/components/DocumentShell.vue'
 
-const props = defineProps<PublicDocumentProps>()
-const route = useRoute()
-const toast = useToast()
+import api from '@/services/api'
+import { fetchBlobUrl } from '@/utils/blobUrl'
 
-const { data, loading, previewUrl, downloadOptions, documentId } = usePublicDocument(props, {
-    privateDataUrl: `/v1/scan/${route.params.documentId}`,
-    privatePreviewUrl: `/v1/scan/${route.params.documentId}/preview`,
-    privateDownloadUrl: `/api/v1/scan/${route.params.documentId}/download`
-})
+import {
+    usePublicDocument,
+    type PublicDocumentProps,
+} from '@/composables/usePublicDocument'
 
-const extractedText = computed(() => data.value?.extracted_text ?? '')
-const extractedPages = computed(() => Array.isArray(data.value?.extracted_pages) ? data.value.extracted_pages : [])
+const props =
+    defineProps<PublicDocumentProps>()
 
-const dialogVisible = ref(false)
-const editedText = ref('')
-const selectedPageIndex = ref<number | null>(null)
-const isSaving = ref(false)
+const route =
+    useRoute()
 
-const actions = computed(() => {
-    if (props.isPublic) return []
-    return [
-        {
-            id: 'extract-text',
-            label: 'Extrahovať text',
-            icon: '/adonis.svg',
-            tooltip: 'Extrahovať text',
-            adonis: true,
-        },
-    ]
-})
+const toast =
+    useToast()
 
-const pageOptions = computed(() => {
-    if (extractedPages.value.length === 0) {
-        return [{ label: 'Celý text', value: null }]
-    }
+const {
+    data,
+    loading,
+    documentId,
+} = usePublicDocument(
+    props,
+    {
+        privateDataUrl:
+            `/v1/scan/${route.params.documentId}`,
 
-    return extractedPages.value.map((_, index) => ({
-        label: `Strana ${index + 1}`,
-        value: index,
-    }))
-})
+        privatePreviewUrl:
+            `/v1/scan/${route.params.documentId}/preview`,
 
-function openTextDialog() {
-    if (extractedPages.value.length > 0) {
-        selectedPageIndex.value = 0
-        editedText.value = extractedPages.value[0]?.text ?? ''
-    } else {
-        selectedPageIndex.value = null
-        editedText.value = extractedText.value
-    }
+        privateDownloadUrl:
+            `/api/v1/scan/${route.params.documentId}/download`,
+    },
+)
 
-    dialogVisible.value = true
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
+
+type ScanPage = {
+    text?: string
+    image_url: string
 }
 
-function onPageSelect() {
-    if (selectedPageIndex.value === null) {
-        editedText.value = extractedText.value
+type ScanImage = {
+    url: string
+}
+
+/* -------------------------------------------------------------------------- */
+/* Pages                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const sourcePages =
+    computed<ScanPage[]>(() => {
+        const extractedPages =
+            Array.isArray(
+                data.value
+                    ?.extracted_pages,
+            )
+                ? data.value
+                    .extracted_pages
+                : []
+
+        const images: ScanImage[] =
+            Array.isArray(
+                data.value?.images,
+            )
+                ? data.value.images
+                : []
+
+        if (images.length) {
+            return images.map(
+                (
+                    image,
+                    index,
+                ) => ({
+                    image_url:
+                        extractedPages[
+                            index
+                        ]?.image_url ??
+                        image.url,
+
+                    text:
+                        extractedPages[
+                            index
+                        ]?.text,
+                }),
+            )
+        }
+
+        return extractedPages
+    })
+
+const pages =
+    ref<ScanPage[]>([])
+
+const imagesLoading =
+    ref(false)
+
+let imageLoadGeneration = 0
+
+let imageBlobUrls:
+    string[] = []
+
+/* -------------------------------------------------------------------------- */
+/* Image loading                                                              */
+/* -------------------------------------------------------------------------- */
+
+function revokeImageBlobUrls() {
+    imageBlobUrls.forEach(
+        (url) =>
+            URL.revokeObjectURL(
+                url,
+            ),
+    )
+
+    imageBlobUrls = []
+}
+
+function authenticatedImageEndpoint(
+    url: string,
+) {
+    return url.startsWith(
+        '/api/',
+    )
+        ? url.slice(4)
+        : url
+}
+
+watch(
+    sourcePages,
+
+    async (newPages) => {
+        const generation =
+            ++imageLoadGeneration
+
+        imagesLoading.value =
+            newPages.length > 0
+
+        if (!newPages.length) {
+            revokeImageBlobUrls()
+
+            pages.value = []
+
+            imagesLoading.value =
+                false
+
+            return
+        }
+
+        try {
+            const blobUrls =
+                await Promise.all(
+                    newPages.map(
+                        (page) =>
+                            fetchBlobUrl(
+                                authenticatedImageEndpoint(
+                                    page.image_url,
+                                ),
+                            ),
+                    ),
+                )
+
+            if (
+                generation !==
+                imageLoadGeneration
+            ) {
+                blobUrls.forEach(
+                    (url) =>
+                        URL.revokeObjectURL(
+                            url,
+                        ),
+                )
+
+                return
+            }
+
+            revokeImageBlobUrls()
+
+            imageBlobUrls =
+                blobUrls
+
+            pages.value =
+                newPages.map(
+                    (
+                        page,
+                        index,
+                    ) => ({
+                        ...page,
+
+                        image_url:
+                            blobUrls[
+                                index
+                            ] ?? '',
+                    }),
+                )
+        } catch (error) {
+            console.error(
+                'Failed to load scan images:',
+                error,
+            )
+
+            pages.value = []
+        } finally {
+            if (
+                generation ===
+                imageLoadGeneration
+            ) {
+                imagesLoading.value =
+                    false
+            }
+        }
+    },
+
+    {
+        immediate: true,
+    },
+)
+
+onBeforeUnmount(() => {
+    imageLoadGeneration++
+
+    revokeImageBlobUrls()
+})
+
+/* -------------------------------------------------------------------------- */
+/* OCR                                                                        */
+/* -------------------------------------------------------------------------- */
+
+const selectedPageIndex =
+    ref<number | null>(null)
+
+const textVisible =
+    ref(false)
+
+const editedText =
+    ref('')
+
+const isSaving =
+    ref(false)
+
+function openTextForPage(
+    index: number,
+) {
+    const page =
+        pages.value[index]
+
+    if (!page) {
         return
     }
 
-    editedText.value = extractedPages.value[selectedPageIndex.value]?.text ?? ''
+    selectedPageIndex.value =
+        index
+
+    editedText.value =
+        page.text ?? ''
+
+    textVisible.value =
+        true
 }
 
-async function saveExtractedText() {
-    if (!documentId.value) return
+/* -------------------------------------------------------------------------- */
+/* Copy                                                                       */
+/* -------------------------------------------------------------------------- */
+
+async function copyText() {
+    const text =
+        editedText.value.trim()
+
+    if (!text) {
+        return
+    }
+
+    try {
+        await navigator.clipboard
+            .writeText(text)
+
+        toast.add({
+            severity:
+                'success',
+
+            summary:
+                'Skopírované',
+
+            detail:
+                'Text bol skopírovaný.',
+
+            life:
+                2000,
+        })
+    } catch (error) {
+        console.error(
+            'Failed to copy text:',
+            error,
+        )
+
+        toast.add({
+            severity:
+                'error',
+
+            summary:
+                'Chyba',
+
+            detail:
+                'Text sa nepodarilo skopírovať.',
+
+            life:
+                3000,
+        })
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Save                                                                       */
+/* -------------------------------------------------------------------------- */
+
+async function saveText() {
+    if (
+        !documentId.value ||
+        selectedPageIndex.value ===
+        null ||
+        isSaving.value
+    ) {
+        return
+    }
 
     isSaving.value = true
 
     try {
-        await api.patch(`/v1/scan/${documentId.value}/text`, {
-            page_index: selectedPageIndex.value ?? undefined,
-            text: editedText.value,
-        })
+        await api.patch(
+            `/v1/scan/${documentId.value}/text`,
+            {
+                page_index:
+                    selectedPageIndex.value,
 
-        if (data.value) {
-            if (selectedPageIndex.value === null) {
-                data.value.extracted_text = editedText.value
-            } else {
-                const target = data.value.extracted_pages[selectedPageIndex.value]
-                if (target) {
-                    target.text = editedText.value
-                }
-            }
+                text:
+                    editedText.value,
+            },
+        )
+
+        const page =
+            pages.value[
+                selectedPageIndex.value
+            ]
+
+        if (page) {
+            page.text =
+                editedText.value
+        }
+
+        const sourcePage =
+            data.value
+                ?.extracted_pages
+                ?.[
+                    selectedPageIndex.value
+                ]
+
+        if (sourcePage) {
+            sourcePage.text =
+                editedText.value
         }
 
         toast.add({
-            severity: 'success',
-            summary: 'Úspech',
-            detail: 'Text bol úspešne uložený.',
-            life: 3000,
+            severity:
+                'success',
+
+            summary:
+                'Uložené',
+
+            detail:
+                'Text bol uložený.',
+
+            life:
+                2500,
         })
 
-        dialogVisible.value = false
+        textVisible.value =
+            false
     } catch (error) {
-        console.error('Failed to save text:', error)
+        console.error(
+            'Failed to save OCR text:',
+            error,
+        )
+
         toast.add({
-            severity: 'error',
-            summary: 'Chyba',
-            detail: 'Nepodarilo sa uložiť text.',
-            life: 3000,
+            severity:
+                'error',
+
+            summary:
+                'Chyba',
+
+            detail:
+                'Text sa nepodarilo uložiť.',
+
+            life:
+                3000,
         })
     } finally {
-        isSaving.value = false
-    }
-}
-
-function handleActionClick(actionId: string) {
-    if (actionId === 'extract-text') {
-        openTextDialog()
+        isSaving.value =
+            false
     }
 }
 </script>
 
 <template>
-    <div class="flex flex-col gap-4">
-        <DocumentShell title="Lekársky nález" :previewUrl="previewUrl" :downloadOptions="downloadOptions"
-            :actions="actions" :showPrintButton="true" @actionClick="handleActionClick" />
+    <DocumentShell
+        title="Lekársky nález"
+        previewUrl=""
+        :downloadOptions="[]"
+        :actions="[]"
+        :showPrintButton="false"
+    >
 
-        <Dialog v-model:visible="dialogVisible" header="Extrahovaný text" :modal="true" class="w-full max-w-3xl"
-            @hide="selectedPageIndex = null">
-            <div class="space-y-4">
-                <div v-if="extractedPages.length > 0" class="flex flex-col gap-2">
-                    <label class="text-sm font-semibold">Strana</label>
-                    <select v-model="selectedPageIndex" class="w-full border border-slate-300 rounded px-3 py-2"
-                        @change="onPageSelect">
-                        <option v-for="option in pageOptions" :key="String(option.value)" :value="option.value">
-                            {{ option.label }}
-                        </option>
-                    </select>
-                </div>
+        <!-- Loading -->
+        <div
+            v-if="
+                loading ||
+                imagesLoading
+            "
+            class="
+                flex
+                min-h-40
+                items-center
+                justify-center
+            "
+        >
+            <i
+                class="
+                    bi
+                    bi-arrow-repeat
+                    animate-spin
+                    text-xl
+                    text-accent
+                "
+            />
+        </div>
 
-                <textarea v-model="editedText"
-                    class="w-full h-96 p-3 border border-slate-300 rounded text-sm resize-none focus:outline-none"
-                    placeholder="Text z OCR..." />
+        <!-- Vertical image gallery -->
+        <section
+            v-else-if="
+                pages.length
+            "
+            class="
+                mx-auto
+                flex
+                w-full
+                max-w-2xl
+                flex-col
+                gap-4
+            "
+        >
+            <article
+                v-for="(
+                    page,
+                    index
+                ) in pages"
+                :key="index"
+                class="
+                    relative
+                    w-full
+                    overflow-hidden
+                    rounded-md
+                    bg-tag3
+                    border border-tag3
+                "
+            >
+                <img
+                    :src="
+                        page.image_url
+                    "
+                    :alt="
+                        `Strana ${index + 1}`
+                    "
+                    class="
+                        mx-auto
+                        block
+                        h-auto
+                        max-w-full
+                        rounded-md
+                    "
+                />
 
-                <div class="flex justify-end gap-2">
-                    <Button label="Zrušiť" class="text-accent! px-2! bg-transparent! border-0!" :disabled="isSaving"
-                        @click="dialogVisible = false" />
-                    <Button label="Uložiť zmeny"
-                        class="bg-accent! border-accent! px-2! hover:bg-darkgrey! hover:border-darkgrey! text-white!"
-                        :loading="isSaving" :disabled="isSaving" @click="saveExtractedText" />
+                <!-- Per-page OCR -->
+                <AppButton
+                    v-if="
+                        !props.isPublic
+                    "
+                    type="button"
+                    icon="bi bi-text-paragraph"
+                    :label="
+                        page.text
+                            ? 'Text'
+                            : 'Extrahovať text'
+                    "
+                    expand-on-hover
+                    class="
+                        absolute!
+                        bottom-3!
+                        right-3!
+                    "
+                    @click="
+                        openTextForPage(
+                            index,
+                        )
+                    "
+                />
+            </article>
+        </section>
+
+        <!-- Empty -->
+        <div
+            v-else
+            class="
+                rounded-md
+                bg-tag3
+                p-6
+                text-center
+                text-normal
+                text-darkgrey
+            "
+        >
+            Dokument neobsahuje obrázky.
+        </div>
+
+        <!-- OCR text -->
+        <Dialog
+            v-model:visible="
+                textVisible
+            "
+            modal
+            header="Text z obrázka"
+            class="
+                w-full
+                max-w-3xl
+            "
+        >
+            <div
+                class="
+                    flex
+                    flex-col
+                    gap-4
+                "
+            >
+                <Textarea
+                    v-model="
+                        editedText
+                    "
+                    class="
+                        h-96!
+                        w-full!
+                        resize-none!
+                    "
+                    placeholder="
+                        Text z OCR...
+                    "
+                />
+
+                <div
+                    class="
+                        flex
+                        justify-end
+                        gap-2
+                    "
+                >
+                    <AppButton
+                        type="button"
+                        variant="secondary"
+                        icon="bi bi-copy"
+                        label="Kopírovať"
+                        :disabled="
+                            !editedText.trim()
+                        "
+                        @click="
+                            copyText
+                        "
+                    />
+
+                    <AppButton
+                        type="button"
+                        variant="secondary"
+                        label="Zrušiť"
+                        :disabled="
+                            isSaving
+                        "
+                        @click="
+                            textVisible =
+                                false
+                        "
+                    />
+
+                    <AppButton
+                        type="button"
+                        variant="accent"
+                        label="Uložiť"
+                        :loading="
+                            isSaving
+                        "
+                        loading-label="
+                            Ukladám
+                        "
+                        @click="
+                            saveText
+                        "
+                    />
                 </div>
             </div>
         </Dialog>
-    </div>
+    </DocumentShell>
 </template>

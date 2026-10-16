@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Models\Branch;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -12,6 +13,10 @@ use Illuminate\Support\Facades\Storage;
  */
 class AgreementDocumentService
 {
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
+    {
+    }
+
     /**
      * Create document DB record and persist agreement JSON to storage.
      * Returns the created Document and the stored agreement payload.
@@ -35,9 +40,30 @@ class AgreementDocumentService
             'period' => date('Y-m', strtotime($data['date'])),
         ]);
 
+        $agreementData = $this->buildAgreementData($data, $patient, $branch, $document->id);
+
+        Storage::disk('local')->put($document->path, json_encode($agreementData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        $this->immediateAudit->documentsChanged([$document]);
+
+        return [$document, $agreementData];
+    }
+
+    /** Build an agreement payload without persisting a document. */
+    public function previewAgreement(array $data): array
+    {
+        return $this->buildAgreementData(
+            $data,
+            Patient::findOrFail($data['patient_id']),
+            Branch::findOrFail($data['branch_id']),
+        );
+    }
+
+    private function buildAgreementData(array $data, Patient $patient, Branch $branch, ?int $documentId = null): array
+    {
         $representative = $branch->representative;
 
-        $agreementData = [
+        return [
             'company_id' => $branch->company?->id,
             'branch_id' => $branch->id,
             'branch_representative_id' => $representative?->id,
@@ -53,13 +79,9 @@ class AgreementDocumentService
             'patient_birth_number' => $patient->personal_number ?? '',
             'patient_address' => trim(($patient->address ?? '') . ', ' . ($patient->city ?? '') . ', ' . ($patient->postal_code ?? '')),
             'date' => $data['date'],
-            'document_id' => $document->id,
+            'document_id' => $documentId,
             'created_at' => now(),
         ];
-
-        Storage::disk('local')->put($document->path, json_encode($agreementData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return [$document, $agreementData];
     }
 
     /**

@@ -82,7 +82,8 @@ class ScanSessionController extends Controller
         return $this->success([
             'status' => $session->status,
             'document_id' => $session->document_id,
-            'expires_in' => max(0, $session->expires_at->diffInSeconds(now())),
+            'expires_in' => max(0, (int) ceil(now()->diffInSeconds($session->expires_at))),
+            'lifetime_seconds' => max(1, (int) ceil($session->created_at->diffInSeconds($session->expires_at))),
         ]);
     }
 }

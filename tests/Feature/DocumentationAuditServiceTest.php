@@ -8,7 +8,9 @@ use App\Services\DocumentationAudit\DocumentationAuditIssueRepository;
 use App\Services\DocumentationAudit\DocumentationAuditNotificationService;
 use App\Services\DocumentationAudit\DocumentationAuditPeriodSelector;
 use App\Services\DocumentationAudit\DocumentationAuditService;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use App\Services\DocumentationAudit\Rules\CheckFinalizedDekurzCoverageRule;
+use App\Services\DocumentationAudit\Rules\CheckMedicalFindingReferenceDateRule;
 use App\Services\PatientNotificationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Config\Repository;
@@ -45,6 +47,11 @@ class DocumentationAuditServiceTest extends TestCase
                     'DOC-005' => [
                         'enabled' => false,
                         'severity' => 'error',
+                    ],
+                    'DOC-006' => [
+                        'enabled' => false,
+                        'severity' => 'error',
+                        'class' => CheckMedicalFindingReferenceDateRule::class,
                     ],
                 ],
             ],
@@ -224,6 +231,118 @@ class DocumentationAuditServiceTest extends TestCase
         self::assertSame(0, DocumentationAuditIssue::query()->count());
     }
 
+    public function test_doc_006_is_grouped_resolved_by_matching_finding_and_reopened_after_soft_delete(): void
+    {
+        config()->set('documentation_audit.rules.DOC-001.enabled', false);
+        config()->set('documentation_audit.rules.DOC-006.enabled', true);
+        DB::table('patient_points')->where('id', 10)->update(['reference_date' => '2026-08-28']);
+        DB::table('patient_points')->insert([
+            'id' => 11,
+            'patient_id' => 1,
+            'branch_id' => 3,
+            'user_id' => 8,
+            'procedure_id' => 20,
+            'procedure_code' => '3423B',
+            'date' => '2026-09-13',
+            'reference_date' => '2026-08-28',
+            'quantity' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $opened = $this->service()->run(month: '2026-09', today: CarbonImmutable::parse('2026-10-15'));
+        $issue = DocumentationAuditIssue::query()->firstOrFail();
+
+        self::assertSame(1, $opened['opened']);
+        self::assertSame(1, $opened['detected']['DOC-006']);
+        self::assertSame('DOC-006', $issue->rule_code);
+        self::assertSame('2026-08-28', CarbonImmutable::parse($issue->getRawOriginal('date'))->toDateString());
+        self::assertNull($issue->patient_point_id);
+        self::assertNull($issue->procedure_id);
+        self::assertSame(2, $issue->metadata['affected_points_count']);
+        self::assertSame([10, 11], $issue->metadata['patient_point_ids']);
+        self::assertSame(hash('sha256', 'DOC-006|1|2026-09|reference_date:2026-08-28'), $issue->fingerprint);
+
+        $notification = AppNotification::query()->firstOrFail();
+        self::assertSame('Anna Audit – doplniť lekársky nález', $notification->title);
+        self::assertStringContainsString('Chýba lekársky nález z 28.08.2026.', $notification->description);
+        self::assertSame('points', $notification->data['target_route']);
+
+        DB::table('documents')->insert([
+            'id' => 60,
+            'patient_id' => 1,
+            'user_id' => 8,
+            'type' => 'scan',
+            'path' => 'scans/finding.json',
+            'period' => '2026-08',
+            'reference_date' => '2026-08-28',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $resolved = $this->service()->run(month: '2026-09', today: CarbonImmutable::parse('2026-10-15'));
+        self::assertSame(1, $resolved['resolved']);
+        self::assertSame(DocumentationAuditIssue::STATUS_RESOLVED, $issue->fresh()->status);
+
+        DB::table('documents')->where('id', 60)->update(['deleted_at' => now()]);
+        $reopened = $this->service()->run(month: '2026-09', today: CarbonImmutable::parse('2026-10-15'));
+        self::assertSame(1, $reopened['reopened']);
+        self::assertSame(DocumentationAuditIssue::STATUS_OPEN, $issue->fresh()->status);
+        self::assertSame(1, DocumentationAuditIssue::query()->count());
+    }
+
+    public function test_immediate_run_checks_open_period_without_running_doc_001(): void
+    {
+        config()->set('documentation_audit.rules.DOC-006.enabled', true);
+        DB::table('patient_points')->where('id', 10)->update([
+            'date' => '2026-10-12',
+            'reference_date' => '2026-09-28',
+        ]);
+
+        $stats = $this->service()->runImmediate('2026-10', 1, ['DOC-001', 'DOC-006']);
+
+        self::assertSame(1, $stats['periods_checked']);
+        self::assertSame(['DOC-006' => 1], $stats['detected']);
+        self::assertSame(['DOC-006'], DocumentationAuditIssue::query()->pluck('rule_code')->all());
+    }
+
+    public function test_immediate_coordinator_opens_resolves_and_reopens_current_period_issue(): void
+    {
+        config()->set('documentation_audit.rules.DOC-001.enabled', false);
+        config()->set('documentation_audit.rules.DOC-006.enabled', true);
+        DB::table('patient_points')->where('id', 10)->update([
+            'date' => '2026-10-12',
+            'reference_date' => '2026-09-28',
+        ]);
+        $point = \App\Models\PatientPoint::query()->findOrFail(10);
+        $coordinator = new ImmediateDocumentationAuditService($this->service());
+
+        $coordinator->patientPointChanged($point);
+        $issue = DocumentationAuditIssue::query()->firstOrFail();
+        self::assertSame(DocumentationAuditIssue::STATUS_OPEN, $issue->status);
+
+        DB::table('documents')->insert([
+            'id' => 60,
+            'patient_id' => 1,
+            'user_id' => 8,
+            'type' => 'scan',
+            'path' => 'scans/finding.json',
+            'period' => '2026-09',
+            'reference_date' => '2026-09-28',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $document = \App\Models\Document::query()->findOrFail(60);
+
+        $coordinator->documentsChanged([$document]);
+        self::assertSame(DocumentationAuditIssue::STATUS_RESOLVED, $issue->fresh()->status);
+
+        $document->delete();
+        $coordinator->documentsChanged([$document]);
+        self::assertSame(DocumentationAuditIssue::STATUS_OPEN, $issue->fresh()->status);
+        self::assertSame(1, DocumentationAuditIssue::query()->count());
+    }
+
     private function service(): DocumentationAuditService
     {
         return new DocumentationAuditService(
@@ -313,6 +432,7 @@ class DocumentationAuditServiceTest extends TestCase
         Schema::create('patient_points', function ($table) {
             $table->increments('id');
             $table->date('date');
+            $table->date('reference_date')->nullable();
             $table->unsignedInteger('patient_id');
             $table->unsignedInteger('procedure_id')->nullable();
             $table->string('procedure_code');
@@ -328,6 +448,7 @@ class DocumentationAuditServiceTest extends TestCase
             $table->string('type');
             $table->string('path')->nullable();
             $table->string('period', 7)->nullable();
+            $table->date('reference_date')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });

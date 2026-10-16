@@ -20,6 +20,7 @@ readonly class DocumentationAuditFinding
         public ?int $patientPointId,
         public ?int $documentId,
         public array $metadata,
+        public ?string $fingerprintDiscriminator = null,
     ) {
     }
 
@@ -53,11 +54,15 @@ readonly class DocumentationAuditFinding
 
     public function fingerprint(): string
     {
+        $subject = $this->patientPointId !== null
+            ? (string) $this->patientPointId
+            : ($this->fingerprintDiscriminator ?? 'none');
+
         return hash('sha256', implode('|', [
             $this->ruleCode,
             $this->patientId,
             $this->period,
-            $this->patientPointId ?? 'none',
+            $subject,
         ]));
     }
 }

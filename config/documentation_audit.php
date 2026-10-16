@@ -3,6 +3,7 @@
 use App\Services\DocumentationAudit\Rules\CheckAgreementForAdmissionRule;
 use App\Services\DocumentationAudit\Rules\CheckFinalizedDekurzCoverageRule;
 use App\Services\DocumentationAudit\Rules\CheckFinalReportForKosEndRule;
+use App\Services\DocumentationAudit\Rules\CheckMedicalFindingReferenceDateRule;
 use App\Services\DocumentationAudit\Rules\CheckNursingAssessmentForAdmissionRule;
 use App\Services\DocumentationAudit\Rules\CheckProposalForKosPlanRule;
 
@@ -56,6 +57,11 @@ return [
 			'procedure_codes' => ['3395'],
 			'document_type' => 'leave',
 			'match_period' => true,
+		],
+		'DOC-006' => [
+			'enabled' => env('DOCUMENTATION_AUDIT_DOC_006_ENABLED', true),
+			'severity' => env('DOCUMENTATION_AUDIT_DOC_006_SEVERITY', 'error'),
+			'class' => CheckMedicalFindingReferenceDateRule::class,
 		],
 	],
 ];

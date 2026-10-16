@@ -44,6 +44,19 @@ class AgreementDocumentController extends Controller
         ], 'Dohoda o poskytovaní zdravotnej starostlivosti bola úspešne vytvorená', 201);
     }
 
+    /** Preview an agreement from unsaved form data. */
+    public function previewDraft(StoreAgreementRequest $request)
+    {
+        $payload = $this->service->previewAgreement($request->validated());
+        $documentService = app(DocumentService::class);
+
+        return response()->view('pdf.agreement', [
+            'agreementData' => $payload,
+            'stampDataUri' => $documentService->getCompanyStampDataUri((int) ($payload['company_id'] ?? 0)),
+            'signatureDataUri' => $documentService->getUserSignatureDataUri((int) ($payload['branch_representative_id'] ?? 0)),
+        ])->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
     /**
      * Return agreement payload for a document.
      * Uses route-model binding (accepts `Document $document` instead of an id).

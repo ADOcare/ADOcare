@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import {
+    computed,
+    nextTick,
+    ref,
+    watch,
+} from 'vue'
+
 import axios from 'axios'
-import Button from 'primevue/button'
 import SplitButton from 'primevue/splitbutton'
+
+import AppButton from '@/components/AppButton.vue'
 import AdonisButton from '@/components/AdonisButton.vue'
+
 import api from '@/services/api'
 
 export interface DownloadOption {
@@ -31,341 +39,988 @@ export interface ActionButton {
     loading?: boolean
     adonis?: boolean
     compact?: boolean
+
+    variant?:
+        | 'accent'
+        | 'dark'
+        | 'text'
+        | 'secondary'
+        | 'danger'
 }
 
 export interface Props {
     title: string
     subtitle?: string
+
     previewUrl?: string
     previewWidth?: string
+
     downloadUrl?: string
     downloadMethod?: 'get' | 'post'
     downloadPayload?: Record<string, any>
     downloadFilename?: string
     downloadContentType?: string
     downloadLabel?: string
+
     downloadOptions?: DownloadOption[]
+
     files?: FileItem[]
+
     actions?: ActionButton[]
+
     showPrintButton?: boolean
     showTitle?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
-    previewWidth: '210mm',
-    downloadMethod: 'get',
-    downloadContentType: 'application/pdf',
-    downloadLabel: 'Download',
-    downloadOptions: () => [],
-    files: () => [],
-    actions: () => [],
-    showPrintButton: true,
-    showTitle: true,
-})
+const props =
+    withDefaults(
+        defineProps<Props>(),
+        {
+            previewWidth:
+                '210mm',
 
-const isDownloading = ref(false)
-const downloadError = ref<string | null>(null)
-const iframeRef = ref<HTMLIFrameElement | null>(null)
-const iframeHeight = ref('850px')
+            downloadMethod:
+                'get',
 
-const topLevelOptions = computed<DownloadOption[]>(() => {
-    if (props.downloadOptions && props.downloadOptions.length > 0) {
-        return props.downloadOptions
-    }
+            downloadContentType:
+                'application/pdf',
 
-    if (props.downloadUrl) {
-        return [
-            {
-                url: props.downloadUrl,
-                method: props.downloadMethod,
-                payload: props.downloadPayload,
-                filename: props.downloadFilename,
-                contentType: props.downloadContentType,
-                label: props.downloadLabel,
-                fileType: props.downloadFilename
-                    ? props.downloadFilename.split('.').pop()?.toUpperCase() ?? props.downloadLabel
-                    : props.downloadLabel,
-            },
+            downloadLabel:
+                'Download',
+
+            downloadOptions:
+                () => [],
+
+            files:
+                () => [],
+
+            actions:
+                () => [],
+
+            showPrintButton:
+                true,
+
+            showTitle:
+                true,
+        },
+    )
+
+const emit =
+    defineEmits<{
+        actionClick: [
+            buttonId: string,
         ]
+    }>()
+
+/* -------------------------------------------------------------------------- */
+/* State                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const isDownloading =
+    ref(false)
+
+const downloadError =
+    ref<string | null>(
+        null,
+    )
+
+const iframeRef =
+    ref<HTMLIFrameElement | null>(
+        null,
+    )
+
+const iframeHeight =
+    ref('850px')
+
+/* -------------------------------------------------------------------------- */
+/* Download options                                                           */
+/* -------------------------------------------------------------------------- */
+
+const topLevelOptions =
+    computed<DownloadOption[]>(
+        () => {
+            if (
+                props
+                    .downloadOptions
+                    ?.length
+            ) {
+                return props
+                    .downloadOptions
+            }
+
+            if (
+                props.downloadUrl
+            ) {
+                return [
+                    {
+                        url:
+                            props.downloadUrl,
+
+                        method:
+                            props.downloadMethod,
+
+                        payload:
+                            props.downloadPayload,
+
+                        filename:
+                            props.downloadFilename,
+
+                        contentType:
+                            props.downloadContentType,
+
+                        label:
+                            props.downloadLabel,
+
+                        fileType:
+                            props
+                                .downloadFilename
+                                ? props
+                                    .downloadFilename
+                                    .split('.')
+                                    .pop()
+                                    ?.toUpperCase() ??
+                                  props
+                                      .downloadLabel
+                                : props
+                                    .downloadLabel,
+                    },
+                ]
+            }
+
+            return []
+        },
+    )
+
+const firstTopLevelOption =
+    computed(
+        () =>
+            topLevelOptions
+                .value[0],
+    )
+
+function getOptionLabel(
+    option: DownloadOption,
+): string {
+    if (option.label) {
+        return option.label
     }
 
-    return []
-})
+    if (option.fileType) {
+        return option.fileType
+    }
 
-function getOptionLabel(option: DownloadOption): string {
-    if (option.label) return option.label
-    if (option.fileType) return option.fileType
-    const path = option.url.split('?')[0] ?? ''
-    return path.split('/').pop() ?? 'Download'
+    const path =
+        option.url
+            .split('?')[0] ??
+        ''
+
+    return (
+        path
+            .split('/')
+            .pop() ??
+        'Download'
+    )
 }
 
-function splitMenuItems(options: DownloadOption[]) {
-    if (options.length <= 1) return []
+function splitMenuItems(
+    options: DownloadOption[],
+) {
+    if (
+        options.length <= 1
+    ) {
+        return []
+    }
 
-    return options.slice(1).map((option) => ({
-        label: getOptionLabel(option!),
-        command: () => download(option!),
-    }))
+    return options
+        .slice(1)
+        .map(
+            (option) => ({
+                label:
+                    getOptionLabel(
+                        option,
+                    ),
+
+                command: () =>
+                    download(
+                        option,
+                    ),
+            }),
+        )
 }
 
-function makeFilename(option: DownloadOption): string {
-    if (option.filename) return option.filename
-    const extension = option.fileType
-        ? option.fileType.replace(/\./g, '').toLowerCase()
-        : (option.url.split('?')[0]?.split('.').pop() ?? 'bin')
+/* -------------------------------------------------------------------------- */
+/* Download helpers                                                           */
+/* -------------------------------------------------------------------------- */
+
+function makeFilename(
+    option: DownloadOption,
+): string {
+    if (option.filename) {
+        return option.filename
+    }
+
+    const extension =
+        option.fileType
+            ? option.fileType
+                .replace(
+                    /\./g,
+                    '',
+                )
+                .toLowerCase()
+            : (
+                option.url
+                    .split('?')[0]
+                    ?.split('.')
+                    .pop() ??
+                'bin'
+            )
 
     return `download.${extension}`
 }
 
-function normalizeDownloadUrl(url: string): string {
-    let normalized = url.trim()
+function normalizeDownloadUrl(
+    url: string,
+): string {
+    let normalized =
+        url.trim()
 
+    normalized =
+        normalized.replace(
+            /\/api(\/|$)/g,
+            '/api/',
+        )
 
-    // Remove duplicate /api segments in the path
-    normalized = normalized.replace(/\/api(\/|$)/g, '/api/')
+    const baseUrl =
+        api.defaults
+            .baseURL
+            ?.toString()
+            .replace(
+                /\/$/,
+                '',
+            )
 
-    const baseUrl = api.defaults.baseURL?.toString().replace(/\/$/, '')
-    if (baseUrl && normalized.startsWith(baseUrl + '/')) {
-        normalized = normalized.slice(baseUrl.length)
-        if (!normalized.startsWith('/')) {
-            normalized = '/' + normalized
+    if (
+        baseUrl &&
+        normalized.startsWith(
+            baseUrl + '/',
+        )
+    ) {
+        normalized =
+            normalized.slice(
+                baseUrl.length,
+            )
+
+        if (
+            !normalized.startsWith(
+                '/',
+            )
+        ) {
+            normalized =
+                '/' +
+                normalized
         }
     }
 
-    console.log('Normalizing download URL:', url, '->', normalized)
     return normalized
 }
 
-function isApiUrl(url: string): boolean {
-    return url.startsWith('/api/') || url === '/api'
+function isApiUrl(
+    url: string,
+): boolean {
+    return (
+        url.startsWith(
+            '/api/',
+        ) ||
+        url === '/api'
+    )
 }
 
-function triggerDownload(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    setTimeout(() => {
-        URL.revokeObjectURL(url)
-    }, 100)
+function triggerDownload(
+    blob: Blob,
+    filename: string,
+) {
+    const url =
+        URL.createObjectURL(
+            blob,
+        )
+
+    const anchor =
+        document.createElement(
+            'a',
+        )
+
+    anchor.href =
+        url
+
+    anchor.download =
+        filename
+
+    anchor.click()
+
+    setTimeout(
+        () => {
+            URL.revokeObjectURL(
+                url,
+            )
+        },
+        100,
+    )
 }
 
-function getFilenameFromResponse(response: any): string | null {
-    const contentDisposition = response.headers?.['content-disposition']
-    if (!contentDisposition) return null
+function getFilenameFromResponse(
+    response: any,
+): string | null {
+    const contentDisposition =
+        response.headers?.[
+            'content-disposition'
+        ]
 
-    const match = /filename\*?=([^;]+)/i.exec(contentDisposition)
-    if (!match) return null
+    if (!contentDisposition) {
+        return null
+    }
 
-    let filename = match[1]!.trim()
-    filename = filename.replace(/^(UTF-8'')/, '')
-    filename = filename.replace(/['"]+/g, '')
-    return decodeURIComponent(filename)
+    const match =
+        /filename\*?=([^;]+)/i.exec(
+            contentDisposition,
+        )
+
+    if (!match) {
+        return null
+    }
+
+    let filename =
+        match[1]!.trim()
+
+    filename =
+        filename.replace(
+            /^(UTF-8'')/,
+            '',
+        )
+
+    filename =
+        filename.replace(
+            /['"]+/g,
+            '',
+        )
+
+    return decodeURIComponent(
+        filename,
+    )
 }
 
-async function download(option: DownloadOption) {
-    if (!option.url) return
+/* -------------------------------------------------------------------------- */
+/* Download                                                                   */
+/* -------------------------------------------------------------------------- */
 
-    const shouldFetch =
-        option.method === 'post' ||
-        (option.payload && Object.keys(option.payload).length > 0) ||
-        option.filename ||
-        option.contentType
-
-    if (!shouldFetch) {
-        window.open(option.url, '_blank')
+async function download(
+    option: DownloadOption,
+) {
+    if (!option.url) {
         return
     }
 
-    isDownloading.value = true
-    downloadError.value = null
+    const shouldFetch =
+        option.method ===
+            'post' ||
+        (
+            option.payload &&
+            Object.keys(
+                option.payload,
+            ).length > 0
+        ) ||
+        !!option.filename ||
+        !!option.contentType
+
+    if (!shouldFetch) {
+        window.open(
+            option.url,
+            '_blank',
+        )
+
+        return
+    }
+
+    isDownloading.value =
+        true
+
+    downloadError.value =
+        null
 
     try {
-        const isApiEndpoint = isApiUrl(option.url)
-        const requestUrl = isApiEndpoint ? normalizeDownloadUrl(option.url) : option.url
+        const isApiEndpoint =
+            isApiUrl(
+                option.url,
+            )
 
-        console.log(`Initiating download: ${option.method?.toUpperCase() || 'GET'} ${requestUrl}`, {
-            payload: option.payload,
-            isApiEndpoint,
-        })
+        const requestUrl =
+            isApiEndpoint
+                ? normalizeDownloadUrl(
+                    option.url,
+                )
+                : option.url
 
+        const response =
+            option.method ===
+            'post'
+                ? isApiEndpoint
+                    ? await api.post(
+                        requestUrl,
+                        option.payload ??
+                            {},
+                        {
+                            responseType:
+                                'blob',
 
-        const response = option.method === 'post'
+                            headers: {
+                                Accept:
+                                    option.contentType ??
+                                    '*/*',
+                            },
+                        },
+                    )
+                    : await axios.post(
+                        requestUrl,
+                        option.payload ??
+                            {},
+                        {
+                            responseType:
+                                'blob',
 
-            ? isApiEndpoint
-                ? await api.post(requestUrl, option.payload ?? {}, {
-                    responseType: 'blob',
-                    headers: { Accept: option.contentType ?? '*/*' },
-                })
-                : await axios.post(requestUrl, option.payload ?? {}, {
-                    responseType: 'blob',
-                    headers: { Accept: option.contentType ?? '*/*' },
-                })
-            : await api.get(requestUrl, {
-                params: option.payload ?? {},
-                responseType: 'blob',
-                headers: { Accept: option.contentType ?? '*/*' },
-            })
+                            headers: {
+                                Accept:
+                                    option.contentType ??
+                                    '*/*',
+                            },
+                        },
+                    )
+                : await api.get(
+                    requestUrl,
+                    {
+                        params:
+                            option.payload ??
+                            {},
 
-        const filename = option.filename || getFilenameFromResponse(response) || makeFilename(option)
-        triggerDownload(response.data, filename)
-    } catch (error: any) {
-        downloadError.value = 'Download failed.'
-        console.error('DocumentShell download failed', error)
+                        responseType:
+                            'blob',
+
+                        headers: {
+                            Accept:
+                                option.contentType ??
+                                '*/*',
+                        },
+                    },
+                )
+
+        const filename =
+            option.filename ||
+            getFilenameFromResponse(
+                response,
+            ) ||
+            makeFilename(
+                option,
+            )
+
+        triggerDownload(
+            response.data,
+            filename,
+        )
+    } catch (error) {
+        downloadError.value =
+            'Download failed.'
+
+        console.error(
+            'DocumentShell download failed',
+            error,
+        )
     } finally {
-        isDownloading.value = false
+        isDownloading.value =
+            false
     }
 }
 
-const previewWidthStyle = computed(() => props.previewWidth || '210mm')
-const firstTopLevelOption = computed(() => topLevelOptions.value[0])
+/* -------------------------------------------------------------------------- */
+/* Preview                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const previewWidthStyle =
+    computed(
+        () =>
+            props.previewWidth ||
+            '210mm',
+    )
 
 watch(
-    () => props.previewUrl,
+    () =>
+        props.previewUrl,
+
     () => {
-        iframeHeight.value = '850px'
-    }
+        iframeHeight.value =
+            '850px'
+    },
 )
 
 function updateIframeHeight() {
-    const iframe = iframeRef.value
-    if (!iframe) return
+    const iframe =
+        iframeRef.value
+
+    if (!iframe) {
+        return
+    }
 
     try {
-        const doc = iframe.contentDocument || iframe.contentWindow?.document
-        if (!doc) return
+        const doc =
+            iframe
+                .contentDocument ||
+            iframe
+                .contentWindow
+                ?.document
 
-        const height = Math.max(
-            doc.body.scrollHeight,
-            doc.documentElement.scrollHeight,
-            doc.body.offsetHeight,
-            doc.documentElement.offsetHeight
-        )
+        if (!doc) {
+            return
+        }
 
-        iframeHeight.value = `${height}px`
+        const height =
+            Math.max(
+                doc.body
+                    .scrollHeight,
+
+                doc.documentElement
+                    .scrollHeight,
+
+                doc.body
+                    .offsetHeight,
+
+                doc.documentElement
+                    .offsetHeight,
+            )
+
+        iframeHeight.value =
+            `${height}px`
     } catch (error) {
-        console.warn('DocumentShell iframe resize failed', error)
+        console.warn(
+            'DocumentShell iframe resize failed',
+            error,
+        )
     }
 }
 
 function onIframeLoad() {
-    nextTick(updateIframeHeight)
+    nextTick(
+        updateIframeHeight,
+    )
 }
 
-function injectIframePrintStyles(doc: Document) {
-    if (!doc || !doc.head) return
+/* -------------------------------------------------------------------------- */
+/* Print                                                                      */
+/* -------------------------------------------------------------------------- */
 
-    const styleId = 'document-shell-iframe-print-styles'
-    let style = doc.getElementById(styleId) as HTMLStyleElement | null
+function injectIframePrintStyles(
+    doc: Document,
+) {
+    if (
+        !doc ||
+        !doc.head
+    ) {
+        return
+    }
+
+    const styleId =
+        'document-shell-iframe-print-styles'
+
+    let style =
+        doc.getElementById(
+            styleId,
+        ) as
+            | HTMLStyleElement
+            | null
 
     if (!style) {
-        style = doc.createElement('style')
-        style.id = styleId
-        doc.head.appendChild(style)
+        style =
+            doc.createElement(
+                'style',
+            )
+
+        style.id =
+            styleId
+
+        doc.head.appendChild(
+            style,
+        )
     }
 
     style.textContent = `
-    @media print {
-      * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-    }
-  `
+        @media print {
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+        }
+    `
 }
 
 function printPage() {
-    const iframe = iframeRef.value
-    if (iframe?.contentWindow) {
+    const iframe =
+        iframeRef.value
+
+    if (
+        iframe?.contentWindow
+    ) {
         try {
-            const doc = iframe.contentDocument || iframe.contentWindow.document
+            const doc =
+                iframe
+                    .contentDocument ||
+                iframe
+                    .contentWindow
+                    .document
+
             if (doc) {
-                injectIframePrintStyles(doc)
+                injectIframePrintStyles(
+                    doc,
+                )
             }
 
-            iframe.contentWindow.focus()
-            iframe.contentWindow.print()
+            iframe
+                .contentWindow
+                .focus()
+
+            iframe
+                .contentWindow
+                .print()
+
             return
         } catch (error) {
-            console.warn('DocumentShell iframe print failed', error)
+            console.warn(
+                'DocumentShell iframe print failed',
+                error,
+            )
         }
     }
 
-    requestAnimationFrame(() => window.print())
+    requestAnimationFrame(
+        () =>
+            window.print(),
+    )
 }
 
-const emit = defineEmits<{
-    actionClick: [buttonId: string]
-}>()
+/* -------------------------------------------------------------------------- */
+/* Actions                                                                    */
+/* -------------------------------------------------------------------------- */
 
-function onActionClick(actionId: string) {
-    emit('actionClick', actionId)
+function onActionClick(
+    actionId: string,
+) {
+    emit(
+        'actionClick',
+        actionId,
+    )
 }
 </script>
 
 <template>
-    <div class="flex flex-col gap-4">
-        <div class="bg-tag2 border-t border-darkgrey py-2 px-3 -mt-8 -mx-8 sticky -top-8 z-10 flex flex-wrap justify-between gap-3 items-center no-print">
-            <div v-if="props.showTitle" class="flex flex-col gap-1">
-                <div class="text-normal text-white">{{ props.title }}</div>
-                <div v-if="props.subtitle" class="text-slate-500 text-sm">{{ props.subtitle }}</div>
+    <div
+        class="
+            relative
+            flex
+            flex-col
+            gap-4
+        "
+    >
+        <!-- Quartal navigation inside the document scroll container. -->
+        <div
+            class="
+                sticky
+                top-0
+                z-40
+                -mx-8
+                flex
+                min-h-11
+                flex-wrap
+                items-center
+                justify-between
+                gap-3
+                border-t
+                border-darkgrey
+                bg-tag2
+                px-3
+                py-2
+                no-print
+            "
+        >
+            <!-- Title -->
+            <div
+                v-if="
+                    props.showTitle
+                "
+                class="
+                    flex
+                    flex-col
+                    gap-1
+                "
+            >
+                <div
+                    class="
+                        text-normal
+                        text-white
+                    "
+                >
+                    {{ props.title }}
+                </div>
+
+                <div
+                    v-if="
+                        props.subtitle
+                    "
+                    class="
+                        text-mini
+                        text-white/70
+                    "
+                >
+                    {{ props.subtitle }}
+                </div>
             </div>
 
-            <div class="flex gap-2 items-center relative">
-                <div v-for="action in props.actions" :key="action.id" class="relative">
+            <!-- Toolbar buttons -->
+            <div
+                class="
+                    relative
+                    flex
+                    items-center
+                    gap-2
+                "
+            >
+                <!-- Custom actions -->
+                <template
+                    v-for="
+                        action
+                        in props.actions
+                    "
+                    :key="
+                        action.id
+                    "
+                >
                     <AdonisButton
-                        v-if="action.adonis"
-                        :icon="action.icon"
-                        :label="action.label"
-                        :disabled="action.disabled || action.loading"
-                        :loading="action.loading"
-                        :title="action.tooltip || action.label"
-                        @click="onActionClick(action.id)"
+                        v-if="
+                            action.adonis
+                        "
+                        :icon="
+                            action.icon
+                        "
+                        :label="
+                            action.label
+                        "
+                        :disabled="
+                            action.disabled ||
+                            action.loading
+                        "
+                        :loading="
+                            action.loading
+                        "
+                        :title="
+                            action.tooltip ||
+                            action.label
+                        "
+                        @click="
+                            onActionClick(
+                                action.id,
+                            )
+                        "
                     />
 
-                    <Button
+                    <AppButton
                         v-else
-                        :icon="action.icon"
-                        :title="action.tooltip || action.label"
-                        :disabled="action.disabled || action.loading"
-                        :loading="action.loading"
-                        class="bg-darkgrey! border-darkgrey! hover:bg-white! hover:border-white! hover:text-darkgrey! h-7!"
-                        @click="onActionClick(action.id)"
+                        type="button"
+                        :variant="
+                            action.variant ??
+                            'dark'
+                        "
+                        :icon="
+                            action.icon
+                        "
+                        :label="
+                            action.label
+                        "
+                        :aria-label="
+                            action.tooltip ||
+                            action.label
+                        "
+                        :disabled="
+                            action.disabled ||
+                            action.loading
+                        "
+                        :loading="
+                            action.loading
+                        "
+                        :expand-on-hover="
+                            action.compact ??
+                            true
+                        "
+                        @click="
+                            onActionClick(
+                                action.id,
+                            )
+                        "
+                    />
+                </template>
+
+                <!-- Download -->
+                <div
+                    v-if="
+                        topLevelOptions.length
+                    "
+                    class="
+                        relative
+                    "
+                >
+                    <!-- One download option -->
+                    <AppButton
+                        v-if="
+                            topLevelOptions.length ===
+                            1
+                        "
+                        type="button"
+                        variant="dark"
+                        icon="
+                            bi
+                            bi-download
+                        "
+                        label="Stiahnuť"
+                        expand-on-hover
+                        :loading="
+                            isDownloading
+                        "
+                        :disabled="
+                            isDownloading
+                        "
+                        @click="
+                            firstTopLevelOption &&
+                            download(
+                                firstTopLevelOption,
+                            )
+                        "
+                    />
+
+                    <!-- Multiple download options -->
+                    <SplitButton
+                        v-else
+                        icon="
+                            bi
+                            bi-download
+                        "
+                        :model="
+                            splitMenuItems(
+                                topLevelOptions,
+                            )
+                        "
+                        :loading="
+                            isDownloading
+                        "
+                        :disabled="
+                            isDownloading
+                        "
+                        class="
+                            document-shell-split-button
+                            h-7!
+                        "
+                        @click="
+                            firstTopLevelOption &&
+                            download(
+                                firstTopLevelOption,
+                            )
+                        "
                     />
                 </div>
 
-                <div v-if="topLevelOptions.length" class="relative">
-                    <template v-if="topLevelOptions.length === 1">
-                        <Button icon="bi bi-file-earmark-pdf" title="Download" 
-                            class="download-button bg-darkgrey! border-darkgrey! hover:bg-white! hover:border-white! hover:text-darkgrey! h-7!"
-                            :loading="isDownloading" :disabled="isDownloading || !topLevelOptions.length"
-                            @click="firstTopLevelOption && download(firstTopLevelOption)" />
-                    </template>
-                    <template v-else>
-                        <SplitButton icon="bi bi-download" :model="splitMenuItems(topLevelOptions)" 
-                            class="download-button bg-darkgrey! border-darkgrey! hover:bg-white! hover:border-white! hover:text-darkgrey! h-7!"
-                            :loading="isDownloading" :disabled="isDownloading || !topLevelOptions.length"
-                            @click="firstTopLevelOption && download(firstTopLevelOption)" />
-                    </template>
-                </div>
-
-                <Button v-if="props.showPrintButton" icon="bi bi-printer" title="Print"
-                    class="bg-darkgrey! border-darkgrey! hover:bg-white! hover:border-white! hover:text-darkgrey! h-7!"
-                    @click="printPage" />
+                <!-- Print -->
+                <AppButton
+                    v-if="
+                        props.showPrintButton
+                    "
+                    type="button"
+                    variant="dark"
+                    icon="
+                        bi
+                        bi-printer
+                    "
+                    label="Tlačiť"
+                    expand-on-hover
+                    @click="
+                        printPage
+                    "
+                />
             </div>
         </div>
 
-        <section class="flex flex-col gap-4">
+        <!-- Document content -->
+        <section
+            class="
+                flex
+                flex-col
+                gap-4
+            "
+        >
+            <!-- Existing document preview -->
+            <div
+                v-if="
+                    props.previewUrl
+                "
+                id="
+                    document-shell-print
+                "
+                class="
+                    flex
+                    w-full
+                    justify-center
+                "
+            >
+                <iframe
+                    ref="iframeRef"
+                    :src="
+                        props.previewUrl
+                    "
+                    title="
+                        Document preview
+                    "
+                    frameborder="0"
+                    scrolling="no"
+                    class="
+                        w-full
+                        overflow-hidden
+                        shadow-lg
+                    "
+                    :style="{
+                        maxWidth:
+                            previewWidthStyle,
 
-            <div v-if="props.previewUrl" id="document-shell-print" class="w-full flex justify-center">
-                <iframe ref="iframeRef" :src="props.previewUrl" title="Document preview" frameborder="0" scrolling="no"
-                    class="w-full overflow-hidden shadow-lg"
-                    :style="{ maxWidth: previewWidthStyle, height: iframeHeight }" @load="onIframeLoad"></iframe>
+                        height:
+                            iframeHeight,
+                    }"
+                    @load="
+                        onIframeLoad
+                    "
+                />
             </div>
+
+            <!--
+                Custom document content, e.g. scanned image gallery.
+
+                Keeping this inside DocumentShell is important:
+                the sticky toolbar then remains sticky while this
+                content is being scrolled.
+            -->
+            <slot />
         </section>
 
-        <div v-if="downloadError" class="text-red-700 text-sm no-print">
+        <!-- Download error -->
+        <div
+            v-if="
+                downloadError
+            "
+            class="
+                text-mini
+                text-danger
+                no-print
+            "
+        >
             {{ downloadError }}
         </div>
     </div>
@@ -373,51 +1028,159 @@ function onActionClick(actionId: string) {
 
 <style scoped lang="scss">
 iframe {
-    box-shadow: 0 0 8px #00000026;
+    box-shadow:
+        0 0 8px
+        #00000026;
 }
 
-@media print {
+/* -------------------------------------------------------------------------- */
+/* PrimeVue SplitButton                                                       */
+/* -------------------------------------------------------------------------- */
 
+/*
+ * SplitButton is intentionally kept only for the case
+ * where there are multiple download formats.
+ *
+ * Make it visually consistent with AppButton.
+ */
+:deep(.document-shell-split-button) {
+    height: 28px;
+}
+
+:deep(
+    .document-shell-split-button
+    .p-button
+) {
+    height: 28px;
+
+    border-color:
+        transparent !important;
+
+    background:
+        var(--color-darkgrey) !important;
+
+    color:
+        white !important;
+
+    box-shadow:
+        none !important;
+}
+
+:deep(
+    .document-shell-split-button
+    .p-button:hover
+) {
+    border-color:
+        transparent !important;
+
+    background:
+        var(--color-accent) !important;
+
+    color:
+        white !important;
+}
+
+:deep(
+    .document-shell-split-button
+    .p-splitbutton-button
+) {
+    padding-inline:
+        0.75rem;
+
+    border-radius:
+        0.375rem 0 0
+        0.375rem !important;
+}
+
+:deep(
+    .document-shell-split-button
+    .p-splitbutton-dropdown
+) {
+    width:
+        28px;
+
+    min-width:
+        28px;
+
+    padding:
+        0;
+
+    border-radius:
+        0 0.375rem
+        0.375rem 0 !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Print                                                                      */
+/* -------------------------------------------------------------------------- */
+
+@media print {
     html,
     body {
-        margin: 0 !important;
-        padding: 0 !important;
-        height: auto !important;
-        overflow: visible !important;
+        margin:
+            0 !important;
+
+        padding:
+            0 !important;
+
+        height:
+            auto !important;
+
+        overflow:
+            visible !important;
     }
 
     body * {
-        visibility: hidden !important;
+        visibility:
+            hidden !important;
     }
 
     iframe {
-        box-shadow: none !important;
+        box-shadow:
+            none !important;
     }
-
-
 
     #document-shell-print,
     #document-shell-print * {
-        visibility: visible !important;
+        visibility:
+            visible !important;
     }
 
     #document-shell-print {
-        position: static !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        height: auto !important;
-        overflow: visible !important;
+        position:
+            static !important;
+
+        width:
+            100% !important;
+
+        margin:
+            0 !important;
+
+        padding:
+            0 !important;
+
+        height:
+            auto !important;
+
+        overflow:
+            visible !important;
     }
 
-    #document-shell-print iframe {
-        min-height: 0 !important;
-        max-height: none !important;
-        overflow: visible !important;
+    #document-shell-print
+    iframe {
+        min-height:
+            0 !important;
+
+        max-height:
+            none !important;
+
+        overflow:
+            visible !important;
     }
 
     .no-print {
-        display: none !important;
+        display:
+            none !important;
     }
 }
 </style>

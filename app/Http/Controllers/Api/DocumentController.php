@@ -9,6 +9,7 @@ use App\Models\Document;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\DocumentService;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use App\Http\Controllers\Api\KilometersExportController;
 use App\Http\Controllers\Api\PointsExportController;
 use Illuminate\Http\Request;
@@ -18,8 +19,10 @@ use Illuminate\Support\Facades\URL;
 
 class DocumentController extends Controller
 {
-    public function __construct(private DocumentService $service)
-    {
+    public function __construct(
+        private DocumentService $service,
+        private ImmediateDocumentationAuditService $immediateAudit,
+    ) {
     }
 
     /**
@@ -327,7 +330,10 @@ class DocumentController extends Controller
             'name' => 'sometimes|string',
         ]);
 
+        $previous = $document->replicate();
         $document->update($validated);
+
+        $this->immediateAudit->documentsChanged([$previous, $document]);
 
         return $this->success(['document' => $document], 'Dokument bol aktualizovaný');
     }
@@ -356,6 +362,8 @@ class DocumentController extends Controller
 
         $document->delete();
 
+        $this->immediateAudit->documentsChanged([$document]);
+
         return $this->success(null, 'Dokument bol úspešne odstránený');
     }
 
@@ -373,7 +381,10 @@ class DocumentController extends Controller
             return $this->error('Neboli poskytnuté žiadne ID', 400);
         }
 
+        $documents = Document::query()->whereIn('id', $ids)->get();
+
         $this->service->deleteManyDocumentsWithAssets($ids);
+        $this->immediateAudit->documentsChanged($documents);
 
         return $this->success(null, 'Dokumenty boli úspešne odstránené');
     }

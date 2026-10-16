@@ -11,6 +11,7 @@ use App\Services\DocumentationAudit\DocumentationAuditContext;
 use App\Services\DocumentationAudit\Rules\CheckAgreementForAdmissionRule;
 use App\Services\DocumentationAudit\Rules\CheckFinalizedDekurzCoverageRule;
 use App\Services\DocumentationAudit\Rules\CheckFinalReportForKosEndRule;
+use App\Services\DocumentationAudit\Rules\CheckMedicalFindingReferenceDateRule;
 use App\Services\DocumentationAudit\Rules\CheckNursingAssessmentForAdmissionRule;
 use App\Services\DocumentationAudit\Rules\CheckProposalForKosPlanRule;
 use Illuminate\Config\Repository;
@@ -158,6 +159,38 @@ class DocumentationAuditRulesTest extends TestCase
         self::assertCount(0, (new CheckFinalReportForKosEndRule())->audit($documents));
     }
 
+    public function test_reference_dates_require_one_exactly_dated_medical_finding_per_unique_date(): void
+    {
+        $augustPoints = collect(range(40, 59))
+            ->map(fn (int $id): PatientPoint => $this->point($id, '3423B', '2026-09-'.str_pad((string) (($id % 10) + 1), 2, '0', STR_PAD_LEFT), '2026-08-28'))
+            ->all();
+        $septemberPoints = [
+            $this->point(60, '3390', '2026-09-20', '2026-09-20'),
+            $this->point(61, '3423B', '2026-09-21', '2026-09-20'),
+        ];
+        $withoutReferenceDate = $this->point(62, '3423B', '2026-09-22');
+        $documents = [
+            $this->document(6, 'scan', '2026-08', 'scans/one.json', '2026-08-28'),
+            $this->document(7, 'scan', '2026-09', 'scans/two.json', '2026-09-19'),
+            $this->document(8, 'scan', '2026-08', 'scans/three.json', '2026-08-28'),
+        ];
+
+        $rule = new CheckMedicalFindingReferenceDateRule();
+        $findings = $rule->audit($this->context([...$augustPoints, ...$septemberPoints, $withoutReferenceDate], $documents));
+
+        self::assertCount(1, $findings);
+        self::assertSame('2026-09-20', $findings->first()->date);
+        self::assertNull($findings->first()->patientPointId);
+        self::assertNull($findings->first()->procedureId);
+        self::assertSame(2, $findings->first()->metadata['affected_points_count']);
+        self::assertSame([60, 61], $findings->first()->metadata['patient_point_ids']);
+
+        $missing = $rule->audit($this->context([...$augustPoints, ...$septemberPoints], []));
+        self::assertCount(2, $missing);
+        self::assertSame([20, 2], $missing->pluck('metadata')->map(fn (array $metadata): int => $metadata['affected_points_count'])->all());
+        self::assertCount(2, $missing->pluck('fingerprintDiscriminator')->unique());
+    }
+
     /** @param array<int, PatientPoint> $points @param array<int, Document> $documents */
     private function context(array $points, array $documents): DocumentationAuditContext
     {
@@ -174,7 +207,7 @@ class DocumentationAuditRulesTest extends TestCase
         return new DocumentationAuditContext($patient, '2026-09', collect($points), collect($documents));
     }
 
-    private function point(int $id, string $code, string $date): PatientPoint
+    private function point(int $id, string $code, string $date, ?string $referenceDate = null): PatientPoint
     {
         $point = new PatientPoint([
             'patient_id' => 1,
@@ -183,6 +216,7 @@ class DocumentationAuditRulesTest extends TestCase
             'procedure_id' => $id,
             'procedure_code' => $code,
             'date' => $date,
+            'reference_date' => $referenceDate,
             'quantity' => 1,
         ]);
         $point->id = $id;
@@ -193,9 +227,14 @@ class DocumentationAuditRulesTest extends TestCase
         return $point;
     }
 
-    private function document(int $id, string $type, string $period, string $path): Document
+    private function document(int $id, string $type, string $period, string $path, ?string $referenceDate = null): Document
     {
-        $document = new Document(['type' => $type, 'period' => $period, 'path' => $path]);
+        $document = new Document([
+            'type' => $type,
+            'period' => $period,
+            'path' => $path,
+            'reference_date' => $referenceDate,
+        ]);
         $document->id = $id;
 
         return $document;

@@ -417,6 +417,9 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::delete('/branches/{branch}/doctors/{doctor}', [BranchDoctorController::class, 'detach'])
         ->middleware('role:manager,superadmin');
 
+    Route::post('/proposals/draft-preview', [ProposalDocumentController::class, 'previewDraft'])
+        ->middleware('role:any')
+        ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('proposals', ProposalDocumentController::class);
 
     // Patient-specific proposal routes
@@ -429,6 +432,9 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::post('/patients/{patient}/proposals/ocr-prefill', [ProposalDocumentController::class, 'prefillFromLatestScan'])
         ->middleware(['role:any', 'can:view,patient']);
 
+    Route::get('/agreements/draft-preview', [AgreementDocumentController::class, 'previewDraft'])
+        ->middleware('role:any')
+        ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('agreements', AgreementDocumentController::class);
 
     Route::documentRoutes('cps', CPDocumentController::class);

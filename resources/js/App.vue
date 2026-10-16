@@ -55,6 +55,7 @@ const isLoggedIn = computed(() => auth.isAuthenticated)
 const showNavbar = computed(() => route.meta.shownavbar !== false)
 const showFooter = computed(() => route.meta.showfooter !== false)
 const usePagePadding = computed(() => route.meta.pagePadding !== false)
+const hasQuartalNavbar = computed(() => route.meta.quartalNavbar === true)
 const pageContextKey = computed(() => {
     return `${route.fullPath}:${auth.currentRole ?? 'guest'}:${auth.currentBranch?.id ?? 'none'}`
 })
@@ -110,7 +111,11 @@ onBeforeUnmount(() => {
                 <div
                     class="relative min-h-0 flex-1 bg-white"
                     :class="[
-                        usePagePadding ? 'p-8' : 'p-0',
+                        usePagePadding
+                            ? hasQuartalNavbar
+                                ? 'px-8 pb-8 pt-0'
+                                : 'p-8'
+                            : 'p-0',
                         contentLoading ? 'overflow-hidden' : 'overflow-auto',
                     ]"
                 >

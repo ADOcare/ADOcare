@@ -29,6 +29,7 @@ export interface Document {
   insurance_company_id: number | null
   deleted_at: string | null
   company_id: number | null
+  reference_date: string | null
   // relations
   patient: Patient
   user: User

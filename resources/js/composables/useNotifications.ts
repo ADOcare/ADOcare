@@ -31,7 +31,7 @@ export type AppNotification = {
     action?: {
         target: 'patient' | 'patient_document_page' | 'car'
         id: number
-        route?: 'dekurz' | 'agreement' | 'record' | 'proposal' | 'leave'
+        route?: 'dekurz' | 'agreement' | 'record' | 'proposal' | 'leave' | 'points'
     }
 }
 
@@ -94,7 +94,7 @@ export function useNotifications() {
             ].includes(notification.type) && Number.isInteger(patientId)
             const persistent = notification.data?.persistent === true
             const targetRoute = notification.data?.target_route
-            const patientDocumentRoutes = ['dekurz', 'agreement', 'record', 'proposal', 'leave'] as const
+            const patientDocumentRoutes = ['dekurz', 'agreement', 'record', 'proposal', 'leave', 'points'] as const
             const patientDocumentRoute = patientDocumentRoutes.find((route) => route === targetRoute)
 
             return {

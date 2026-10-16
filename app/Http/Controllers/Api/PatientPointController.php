@@ -8,6 +8,7 @@ use App\Http\Resources\BaseCollection;
 use App\Http\Requests\DestroyManyPatientPointRequest;
 use App\Services\BulkDeletionService;
 use App\Services\BulkDeletionResponder;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use App\Jobs\ProcessBulkDeletionJob;
 use Illuminate\Support\Facades\Log;
 use App\Http\Requests\StorePatientPointRequest;
@@ -22,11 +23,17 @@ class PatientPointController extends Controller
 {
     private BulkDeletionService $bulkDeletionService;
     private BulkDeletionResponder $bulkDeletionResponder;
+    private ImmediateDocumentationAuditService $immediateAudit;
 
-    public function __construct(BulkDeletionService $bulkDeletionService, BulkDeletionResponder $bulkDeletionResponder)
+    public function __construct(
+        BulkDeletionService $bulkDeletionService,
+        BulkDeletionResponder $bulkDeletionResponder,
+        ImmediateDocumentationAuditService $immediateAudit,
+    )
     {
         $this->bulkDeletionService = $bulkDeletionService;
         $this->bulkDeletionResponder = $bulkDeletionResponder;
+        $this->immediateAudit = $immediateAudit;
     }
     // No controller-level middleware: auth is enforced at the routes/v1 group.
 
@@ -107,6 +114,8 @@ class PatientPointController extends Controller
 
         $point = PatientPoint::create($validated);
 
+        $this->immediateAudit->patientPointChanged($point);
+
         // (Optional) make consistent with macros:
         return $this->success($point, 'Záznam bol vytvorený', Response::HTTP_CREATED);
     }
@@ -139,8 +148,11 @@ class PatientPointController extends Controller
     {
         $this->authorize('update', $patientPoint);
         $validated = $request->validated();
+        $previous = $patientPoint->only(['patient_id', 'date']);
 
         $patientPoint->update($validated);
+
+        $this->immediateAudit->patientPointChanged($patientPoint, $previous);
 
         // (Optional) make consistent with macros:
         return $this->success($patientPoint, 'Záznam bol aktualizovaný');
@@ -160,6 +172,8 @@ class PatientPointController extends Controller
 
         $patientPoint->delete();
 
+        $this->immediateAudit->patientPointChanged($patientPoint);
+
         // Return proper 204 No Content with no body
         return response()->noContent();
     }
@@ -175,10 +189,17 @@ class PatientPointController extends Controller
     public function destroyMany(DestroyManyPatientPointRequest $request)
     {
         $ids = $request->validated()['ids'] ?? [];
+        $points = PatientPoint::query()->whereIn('id', $ids)->get();
 
         // The FormRequest already authorized each id; inform the service to skip
         // the duplicate pre-authorization step to avoid double-fetch.
         $result = $this->bulkDeletionService->handleBulkDelete($request->user(), PatientPoint::class, $ids, true);
+
+        if (!empty($result['queued'])) {
+            ProcessBulkDeletionJob::dispatch(PatientPoint::class, $ids, $request->user()?->id);
+        } elseif (empty($result['error'])) {
+            $this->immediateAudit->patientPointsChanged($points);
+        }
 
         // Delegate response rendering and logging to the responder. Use the
         // original user's id for logging/audit purposes. Message overrides can

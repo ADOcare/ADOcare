@@ -4,11 +4,16 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\Patient;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 
 class RecordDocumentService
 {
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
+    {
+    }
+
     public function create(array $data, $user): Document
     {
         $period = !empty($data['date']) ? date('Y-m', strtotime((string) $data['date'])) : null;
@@ -66,6 +71,8 @@ class RecordDocumentService
         ];
 
         $this->storeRecordFile($document->id, $recordData);
+
+        $this->immediateAudit->documentsChanged([$document]);
 
         return $document;
     }

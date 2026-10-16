@@ -20,9 +20,17 @@ class Document extends Model
         'branch_id',
         'company_id',
         'period',
+        'reference_date',
         'subtype',
         'insurance_company_id',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'reference_date' => 'date:Y-m-d',
+        ];
+    }
 
     /**
      * Get the patient that owns the document.

@@ -46,7 +46,16 @@ api.interceptors.request.use((config) => {
 
 // Simple response error handling
 api.interceptors.response.use(
-    (res) => res,
+    (res) => {
+        const method = res.config.method?.toLowerCase();
+        const isDraftPreview = res.config.url?.includes('/draft-preview') === true;
+
+        if (method && !isDraftPreview && ['post', 'put', 'patch', 'delete'].includes(method)) {
+            window.dispatchEvent(new CustomEvent('notifications-changed'));
+        }
+
+        return res;
+    },
     (err) => {
         if (err.response && err.response.status === 401) {
             // emit an event or handle globally

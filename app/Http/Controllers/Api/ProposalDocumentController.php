@@ -10,6 +10,7 @@ use App\Models\Patient;
 use App\Services\ProposalDocumentService;
 use App\Services\ProposalOcrPrefillService;
 use App\Services\DocumentService;
+use App\Http\Requests\PreviewProposalRequest;
 use App\Http\Requests\StoreProposalRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -45,6 +46,18 @@ class ProposalDocumentController extends Controller
             'document_id' => $document->id,
             'proposal' => $payload,
         ], 'Návrh ošetrovateľskej starostlivosti bol úspešne vytvorený', 201);
+    }
+
+    public function previewDraft(PreviewProposalRequest $request)
+    {
+        $payload = $this->service->previewProposal($request->validated(), $request->user());
+        $documentService = app(DocumentService::class);
+
+        return response()->view('pdf.proposal', [
+            'proposalData' => $payload,
+            'stampDataUri' => $documentService->getCompanyStampDataUri((int) ($payload['company_id'] ?? 0)),
+            'signatureDataUri' => $documentService->getUserSignatureDataUri((int) ($payload['representative_id'] ?? 0)),
+        ])->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /**

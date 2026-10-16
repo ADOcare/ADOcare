@@ -16,6 +16,7 @@ class ScanFinalizeRequest extends FormRequest
     {
         return [
             'session_token' => ['required', 'string'],
+            'reference_date' => ['required', 'date_format:Y-m-d'],
             'images' => ['required', 'array', 'min:1'],
             'images.*' => ['required', 'file', 'max:102400'],
         ];

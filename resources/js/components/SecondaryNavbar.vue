@@ -65,14 +65,13 @@ function linkClass(key: string) {
 </script>
 
 <template>
-  <Menubar
-  class="pb-2 justify-between flex items-center">
+  <Menubar class="pb-6 justify-between flex items-center">
     <template #start>
       <div class="flex">
-        <h1 class="text-heading-accent! border-r-2! border-accent! pr-sm!">
+        <h1 class="text-darkgrey! border-r! border-accent! pr-sm!">
           {{ h1Title }}
         </h1>
-        <h1 v-if="h2Title" class="text-heading-accent! text-darkgrey! px-sm! font-light!">
+        <h1 v-if="h2Title" class="text-darkgrey! text-darkgrey! px-sm! font-light!">
           {{ h2Title }}
         </h1>
       </div>

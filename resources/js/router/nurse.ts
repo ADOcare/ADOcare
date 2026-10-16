@@ -163,6 +163,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'návrh',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -174,6 +175,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'dohoda',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -185,6 +187,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'cestovný príkaz',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -196,6 +199,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'denný záznam ciest',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -207,6 +211,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'dekurz',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -218,6 +223,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'prepúšťacia správa',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -229,6 +235,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'sesterské posúdenie',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -240,6 +247,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     link: 'lekársky nález',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -249,7 +257,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Kilometre',
                     sidebar: false,
-                    navbar: false
+                    navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -259,7 +268,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Body',
                     sidebar: false,
-                    navbar: false
+                    navbar: false,
+                    quartalNavbar: true,
                 },
             },
             {
@@ -270,6 +280,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     title: 'Faktúra',
                     sidebar: false,
                     navbar: false,
+                    quartalNavbar: true,
                 },
             },
         ]
@@ -419,6 +430,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                     requiresAuth: false,
                     title: 'Lekársky nález',
                     shownavbar: false,
+                    showfooter: false,
+                    pagePadding: false,
                     allowMobile: true,
                 }
             },

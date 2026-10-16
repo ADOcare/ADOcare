@@ -8,6 +8,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use App\Services\BulkDeletionService;
+use App\Models\PatientPoint;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\Log;
 
 class ProcessBulkDeletionJob implements ShouldQueue
@@ -25,7 +27,10 @@ class ProcessBulkDeletionJob implements ShouldQueue
         $this->userId = $userId;
     }
 
-    public function handle(BulkDeletionService $service)
+    public function handle(
+        BulkDeletionService $service,
+        ImmediateDocumentationAuditService $immediateAudit,
+    )
     {
         // Require the original user to still exist and be authorized. If the user
         // cannot be rehydrated, abort — queued deletes must not run anonymously.
@@ -47,7 +52,15 @@ class ProcessBulkDeletionJob implements ShouldQueue
             return;
         }
 
+        $points = $this->modelClass === PatientPoint::class
+            ? PatientPoint::query()->whereIn('id', $this->ids)->get()
+            : collect();
         $result = $service->processQueued($this->modelClass, $this->ids);
+
+        if ($result['processed'] > 0 && $points->isNotEmpty()) {
+            $immediateAudit->patientPointsChanged($points);
+        }
+
         Log::info('ProcessBulkDeletionJob completed', ['model' => $this->modelClass, 'processed' => $result['processed'], 'failed' => $result['failed'], 'user_id' => $this->userId]);
     }
 }

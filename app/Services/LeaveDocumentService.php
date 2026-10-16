@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Models\User;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -12,6 +13,10 @@ use Illuminate\Support\Facades\Storage;
  */
 class LeaveDocumentService
 {
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
+    {
+    }
+
     /**
      * Create a leave document and persist its JSON payload.
      */
@@ -38,6 +43,8 @@ class LeaveDocumentService
             $filePath,
             json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
         );
+
+        $this->immediateAudit->documentsChanged([$document]);
 
         return $document;
     }

@@ -28,8 +28,10 @@ class DocumentationAuditService
         ?int $companyId = null,
         bool $dryRun = false,
         ?CarbonImmutable $today = null,
+        ?array $onlyRuleCodes = null,
+        bool $allowOpenPeriod = false,
     ): array {
-        $rules = $this->enabledRules();
+        $rules = $this->enabledRules($onlyRuleCodes);
         $ruleCodes = $rules->map(fn (DocumentationAuditRule $rule): string => $rule->code())->all();
         $stats = $this->emptyStats($rules, $dryRun);
 
@@ -38,7 +40,14 @@ class DocumentationAuditService
             return $stats;
         }
 
-        $selectedPeriods = $this->selectPeriods($month, $from, $patientId, $companyId, $today);
+        $selectedPeriods = $this->selectPeriods(
+            $month,
+            $from,
+            $patientId,
+            $companyId,
+            $today,
+            $allowOpenPeriod,
+        );
         $stats['periods_checked'] = $selectedPeriods->count();
 
         foreach ($selectedPeriods as $period) {
@@ -69,7 +78,7 @@ class DocumentationAuditService
                 $patients = Patient::query()->withTrashed()->whereKey($ids)->with('branch')->get()->keyBy('id');
                 $documents = Document::query()
                     ->whereIn('patient_id', $ids)
-                    ->whereIn('type', ['dekurz', 'agreement', 'record', 'proposal', 'leave'])
+                    ->whereIn('type', ['dekurz', 'agreement', 'record', 'proposal', 'leave', 'scan'])
                     ->get()
                     ->groupBy('patient_id');
 
@@ -122,11 +131,28 @@ class DocumentationAuditService
         return $stats;
     }
 
+    /** @param array<int, string> $ruleCodes @return array<string, mixed> */
+    public function runImmediate(string $period, int $patientId, array $ruleCodes): array
+    {
+        return $this->run(
+            month: $period,
+            patientId: $patientId,
+            onlyRuleCodes: array_values(array_diff($ruleCodes, ['DOC-001'])),
+            allowOpenPeriod: true,
+        );
+    }
+
     /** @return Collection<int, DocumentationAuditRule> */
-    private function enabledRules(): Collection
+    private function enabledRules(?array $onlyRuleCodes = null): Collection
     {
         return collect(config('documentation_audit.rules', []))
             ->filter(fn (array $settings): bool => (bool) ($settings['enabled'] ?? false))
+            ->when(
+                $onlyRuleCodes !== null,
+                fn (Collection $rules): Collection => $rules->filter(
+                    fn (array $settings, string $code): bool => in_array($code, $onlyRuleCodes, true),
+                ),
+            )
             ->map(fn (array $settings): DocumentationAuditRule => app($settings['class']))
             ->values();
     }
@@ -138,6 +164,7 @@ class DocumentationAuditService
         ?int $patientId,
         ?int $companyId,
         ?CarbonImmutable $today,
+        bool $allowOpenPeriod = false,
     ): Collection {
         $today ??= CarbonImmutable::today();
         $latest = $this->periods->latestEligiblePeriod($today);
@@ -146,6 +173,15 @@ class DocumentationAuditService
         }
 
         if ($month !== null) {
+            if ($allowOpenPeriod) {
+                $configuredStart = CarbonImmutable::parse((string) config('documentation_audit.start_date'))->format('Y-m');
+                $currentPeriod = $today->format('Y-m');
+
+                return $month >= $configuredStart && $month <= $currentPeriod
+                    ? collect([$month])
+                    : collect();
+            }
+
             return $this->periods->isEligible($month, $today) ? collect([$month]) : collect();
         }
 

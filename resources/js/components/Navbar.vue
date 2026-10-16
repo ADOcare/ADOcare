@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
 
@@ -11,7 +11,10 @@ import {
     useNotifications,
     type AppNotification,
 } from '@/composables/useNotifications'
-import { openPatientEditModal } from '@/helpers/modalHelpers'
+import {
+    openPatientEditModal,
+    openScanDocumentModal,
+} from '@/helpers/modalHelpers'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -47,6 +50,12 @@ async function toggleNotificationPopover(event: Event) {
     await loadNotifications()
 }
 
+function refreshNotifications() {
+    if (isAuthenticated.value) {
+        void loadNotifications(true)
+    }
+}
+
 async function openNotification(notification: AppNotification) {
     if (!notification.actionable || !notification.action) {
         return
@@ -74,7 +83,13 @@ async function openNotification(notification: AppNotification) {
             }
 
             patientStore.setPatient(patient)
-            await router.push({ name: notification.action.route ?? 'dekurz' })
+            const targetRoute = notification.action.route ?? 'dekurz'
+
+            await router.push({ name: targetRoute })
+
+            if (targetRoute === 'points') {
+                await openScanDocumentModal(notification.action.id, branchId)
+            }
         } catch (error) {
             console.error('Failed to open documentation audit action', error)
         }
@@ -200,6 +215,8 @@ async function initializePatients() {
 }
 
 onMounted(async () => {
+    window.addEventListener('notifications-changed', refreshNotifications)
+
     await authStore.waitUntilInitialized()
 
     if (isAuthenticated.value) {
@@ -210,6 +227,10 @@ onMounted(async () => {
             loadNotifications(),
         ])
     }
+})
+
+onBeforeUnmount(() => {
+    window.removeEventListener('notifications-changed', refreshNotifications)
 })
 
 watch(branchOptions, async (newOpts) => {

@@ -35,7 +35,10 @@ class ValidateSignedUrl
             return $next($request);
         }
 
-        if (!$request->hasValidSignatureWhileIgnoring($ignoredParameters)) {
+        if (
+            !$request->hasValidSignature() &&
+            !$request->hasValidSignatureWhileIgnoring($ignoredParameters)
+        ) {
             throw new InvalidSignatureException;
         }
 

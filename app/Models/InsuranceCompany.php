@@ -34,4 +34,9 @@ class InsuranceCompany extends Model
     {
         return $this->hasMany(Branch::class, 'company_id');
     }
+
+    public function insuranceRuleSets()
+    {
+        return $this->hasMany(InsuranceRuleSet::class);
+    }
 }

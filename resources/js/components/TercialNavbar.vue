@@ -11,8 +11,6 @@ import {
     useRouter,
 } from 'vue-router'
 
-import Popover from 'primevue/popover'
-
 import {
     openPatientDocumentsModal,
     openPatientEditModal,
@@ -27,8 +25,6 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { getPatientIdentifier } from '@/utils/patientIdentifier'
 
-import AppButton from '@/components/AppButton.vue'
-
 defineOptions({
     inheritAttrs: false,
 })
@@ -37,47 +33,46 @@ const attrs = useAttrs()
 
 const router = useRouter()
 
-const patientStore = usePatientStore()
-const authStore = useAuthStore()
+const patientStore =
+    usePatientStore()
 
-const patient = computed<PatientWithCoverage | null>(
-    () => patientStore.current,
-)
+const authStore =
+    useAuthStore()
 
-const currentBranchId = computed(
-    () => authStore.currentBranch?.id ?? null,
-)
+const patient =
+    computed<PatientWithCoverage | null>(
+        () => patientStore.current,
+    )
 
-const patientName = computed(() =>
-    patient.value
-        ? `${patient.value.first_name ?? ''} ${patient.value.last_name ?? ''}`.trim()
-        : '',
-)
+const currentBranchId =
+    computed(
+        () =>
+            authStore.currentBranch
+                ?.id ??
+            null,
+    )
 
-const patientIdentifier = computed(() =>
-    getPatientIdentifier(patient.value),
-)
+const patientName =
+    computed(() =>
+        patient.value
+            ? `${patient.value.first_name ?? ''} ${patient.value.last_name ?? ''}`.trim()
+            : '',
+    )
+
+const patientIdentifier =
+    computed(() =>
+        getPatientIdentifier(
+            patient.value,
+        ),
+    )
 
 /* -------------------------------------------------------------------------- */
 /* Patient actions                                                            */
 /* -------------------------------------------------------------------------- */
 
-const patientActionsPopover =
-    ref<InstanceType<typeof Popover> | null>(null)
-
-function togglePatientActions(
-    event: Event,
-) {
-    patientActionsPopover.value?.toggle(
-        event,
-    )
-}
-
 function openPatientDocuments(
     patientId: number,
 ) {
-    patientActionsPopover.value?.hide()
-
     void openPatientDocumentsModal(
         patientId,
     )
@@ -86,16 +81,18 @@ function openPatientDocuments(
 function openEditPatient(
     patientId: number,
 ) {
-    patientActionsPopover.value?.hide()
-
     void openPatientEditModal(
         patientId,
     )
 }
 
 function openScanDocument(
-    patientId: number | undefined,
-    branchId: number | null,
+    patientId:
+        | number
+        | undefined,
+    branchId:
+        | number
+        | null,
 ) {
     if (
         patientId &&
@@ -112,15 +109,18 @@ function openScanDocument(
 /* Close patient                                                              */
 /* -------------------------------------------------------------------------- */
 
-const isHovered = ref(false)
+const isHovered =
+    ref(false)
 
 function closePatient() {
-    isHovered.value = false
+    isHovered.value =
+        false
 
     patientStore.clear()
 
     router.push({
-        name: 'patients',
+        name:
+            'patients',
     })
 }
 
@@ -128,13 +128,18 @@ function closePatient() {
 /* Incomplete info modal                                                      */
 /* -------------------------------------------------------------------------- */
 
-const showIncompleteModal = ref(false)
+const showIncompleteModal =
+    ref(false)
 
 const incompletePatientId =
-    ref<number | null>(null)
+    ref<number | null>(
+        null,
+    )
 
 function patientIsComplete(
-    patient: PatientWithCoverage | null,
+    patient:
+        | PatientWithCoverage
+        | null,
 ) {
     if (!patient) {
         return true
@@ -142,46 +147,57 @@ function patientIsComplete(
 
     const first =
         String(
-            patient.first_name ?? '',
+            patient.first_name ??
+                '',
         ).trim()
 
     const last =
         String(
-            patient.last_name ?? '',
+            patient.last_name ??
+                '',
         ).trim()
 
     const personalNumber =
         String(
-            patient.personal_number ?? '',
+            patient.personal_number ??
+                '',
         ).trim()
 
     const sex =
-        patient.sex ?? null
+        patient.sex ??
+        null
 
     const doctorId =
-        patient.doctor_id ?? null
+        patient.doctor_id ??
+        null
 
     const coverage =
-        patient.coverage ?? null
+        patient.coverage ??
+        null
 
     const insuranceId =
-        coverage?.insurance_company_id ??
-        patient.insurance_company_id ??
+        coverage
+            ?.insurance_company_id ??
+        patient
+            .insurance_company_id ??
         null
 
     const street =
         String(
-            patient.address ?? '',
+            patient.address ??
+                '',
         ).trim()
 
     const city =
         String(
-            patient.city ?? '',
+            patient.city ??
+                '',
         ).trim()
 
     const zip =
         String(
-            patient.zip ?? '',
+            patient.zip ??
+                '',
         ).trim()
 
     const lat =
@@ -200,7 +216,9 @@ function patientIsComplete(
         return false
     }
 
-    if (!insuranceId) {
+    if (
+        !insuranceId
+    ) {
         return false
     }
 
@@ -269,11 +287,15 @@ function patientIsComplete(
 }
 
 watch(
-    () => patientStore.current,
+    () =>
+        patientStore.current,
 
-    (currentPatient) => {
+    (
+        currentPatient,
+    ) => {
         if (
-            !currentPatient?.id
+            !currentPatient
+                ?.id
         ) {
             showIncompleteModal.value =
                 false
@@ -304,8 +326,11 @@ watch(
     },
 
     {
-        immediate: true,
-        deep: true,
+        immediate:
+            true,
+
+        deep:
+            true,
     },
 )
 </script>
@@ -315,60 +340,125 @@ watch(
         v-if="patient"
         v-bind="attrs"
         class="
-            bg-tag2!
-            px-3!
-            py-2
             flex
             items-center
             justify-between
+            border-y!
+            border-tag2!
+            bg-tag2!
+            px-3!
+            py-2
         "
     >
-        <!-- Patient information -->
+        <!-- ================================================================ -->
+        <!-- PATIENT INFORMATION                                              -->
+        <!-- ================================================================ -->
+
         <template #start>
-            <div class="flex items-center gap-2">
+            <div
+                class="
+                    flex
+                    items-center
+                    gap-2
+                "
+            >
                 <h2
                     class="
                         text-normal!
                         text-white!
                     "
                 >
-                    {{ patientName }}
+                    {{
+                        patientName
+                    }}
                 </h2>
 
-    
                 <span
                     class="
+                        rounded-md!
+                        bg-darkgrey!
                         px-2
                         text-normal!
                         text-white!
-                        bg-darkgrey!
-                        rounded-md!
                     "
                 >
-                    {{ patientIdentifier }}
+                    {{
+                        patientIdentifier
+                    }}
                 </span>
+
+                <!-- Edit patient -->
 
                 <button
                     type="button"
                     class="
                         flex
                         h-7
+                        w-7
                         shrink-0
+                        cursor-pointer
                         items-center
                         justify-center
                         text-white
-                        cursor-pointer
                         transition-colors
                         duration-200
+                        hover:text-lightgrey
                     "
-                    aria-label="Možnosti pacienta"
-                    title="Možnosti pacienta"
-                    @click="togglePatientActions"
+                    aria-label="
+                        Upraviť pacienta
+                    "
+                    title="
+                        Upraviť pacienta
+                    "
+                    @click="
+                        openEditPatient(
+                            patient.id,
+                        )
+                    "
                 >
                     <i
                         class="
                             bi
-                            bi-three-dots-vertical
+                            bi-pencil
+                            text-normal
+                        "
+                    />
+                </button>
+
+                <!-- Patient documents -->
+
+                <button
+                    type="button"
+                    class="
+                        flex
+                        h-7
+                        w-7
+                        shrink-0
+                        cursor-pointer
+                        items-center
+                        justify-center
+                        rounded-md
+                        text-white
+                        transition-colors
+                        duration-200
+                        hover:text-lightgrey
+                    "
+                    aria-label="
+                        Dokumenty pacienta
+                    "
+                    title="
+                        Dokumenty pacienta
+                    "
+                    @click="
+                        openPatientDocuments(
+                            patient.id,
+                        )
+                    "
+                >
+                    <i
+                        class="
+                            bi
+                            bi-folder2-open
                             text-normal
                         "
                     />
@@ -376,7 +466,10 @@ watch(
             </div>
         </template>
 
-        <!-- Patient navigation -->
+        <!-- ================================================================ -->
+        <!-- PATIENT NAVIGATION                                               -->
+        <!-- ================================================================ -->
+
         <template #end>
             <div
                 class="
@@ -387,18 +480,19 @@ watch(
             >
                 <RouterLink
                     :to="{
-                        path: '/patient/points',
+                        path:
+                            '/patient/points',
                     }"
                     class="
-                        text-mini!
-                        underline
-                        px-2!
-                        pr-4!
-                        transition-colors
-                        text-almostwhite!
-                        hover:text-accent!
                         border-r
                         border-almostwhite!
+                        px-2!
+                        pr-4!
+                        text-mini!
+                        text-almostwhite!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                 >
                     bodovanie
@@ -407,13 +501,13 @@ watch(
                 <button
                     type="button"
                     class="
-                        text-mini!
-                        underline
-                        px-2!
-                        transition-colors
-                        text-almostwhite!
-                        hover:text-accent!
                         cursor-pointer
+                        px-2!
+                        text-mini!
+                        text-almostwhite!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                     @click="
                         openScanDocument(
@@ -427,15 +521,16 @@ watch(
 
                 <RouterLink
                     :to="{
-                        path: '/patient/agreement',
+                        path:
+                            '/patient/agreement',
                     }"
                     class="
-                        text-mini!
-                        underline
                         px-2!
-                        transition-colors
+                        text-mini!
                         text-almostwhite!
-                        hover:text-accent!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                 >
                     dohoda
@@ -443,15 +538,16 @@ watch(
 
                 <RouterLink
                     :to="{
-                        path: '/patient/proposal',
+                        path:
+                            '/patient/proposal',
                     }"
                     class="
-                        text-mini!
-                        underline
                         px-2!
-                        transition-colors
+                        text-mini!
                         text-almostwhite!
-                        hover:text-accent!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                 >
                     návrh
@@ -459,15 +555,16 @@ watch(
 
                 <RouterLink
                     :to="{
-                        path: '/patient/dekurz',
+                        path:
+                            '/patient/dekurz',
                     }"
                     class="
-                        text-mini!
-                        underline
                         px-2!
-                        transition-colors
+                        text-mini!
                         text-almostwhite!
-                        hover:text-accent!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                 >
                     dekurz
@@ -475,15 +572,16 @@ watch(
 
                 <RouterLink
                     :to="{
-                        path: '/patient/record',
+                        path:
+                            '/patient/record',
                     }"
                     class="
-                        text-mini!
-                        underline
                         px-2!
-                        transition-colors
+                        text-mini!
                         text-almostwhite!
-                        hover:text-accent!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                 >
                     ošetrovateľský záznam
@@ -491,16 +589,17 @@ watch(
 
                 <RouterLink
                     :to="{
-                        path: '/patient/leave',
+                        path:
+                            '/patient/leave',
                     }"
                     class="
-                        text-mini!
-                        underline
                         px-2!
                         pr-0
-                        transition-colors
+                        text-mini!
                         text-almostwhite!
-                        hover:text-accent!
+                        underline
+                        transition-colors
+                        hover:text-lightgrey!
                     "
                 >
                     prepúšťacia správa
@@ -508,87 +607,4 @@ watch(
             </div>
         </template>
     </Menubar>
-
-    <!-- Patient actions popover -->
-    <Popover 
-        ref="patientActionsPopover" 
-        :pt="{
-            content: {
-                class: 'p-1!',
-            }
-        }"
-    >
-        <div class="flex w-44 flex-col gap-2">
-            <AppButton
-                type="button"
-                variant="secondary"
-                icon="bi bi-pencil"
-                label="Upraviť"
-                class=" justify-start!"
-                @click="
-                    openEditPatient(
-                        patient!.id,
-                    )
-                "
-            />
-
-            <AppButton
-                type="button"
-                variant="secondary"
-                icon="bi bi-folder2-open"
-                label="Dokumenty"
-                class="w-full! justify-start!"
-                @click="
-                    openPatientDocuments(
-                        patient!.id,
-                    )
-                "
-            />
-        </div>
-    </Popover>
-
-    <!-- Incomplete patient warning -->
-    <Dialog
-        v-model:visible="
-            showIncompleteModal
-        "
-        modal
-        header="Ajaj"
-        :style="{
-            width: '420px',
-            maxWidth: '95vw',
-        }"
-    >
-        <div
-            class="
-                flex
-                flex-col
-                gap-4
-            "
-        >
-            <p class="text-normal">
-                Zdá sa, že informácie o tomto
-                pacientovi nie sú kompletné alebo
-                správne.
-            </p>
-
-            <div
-                class="
-                    flex
-                    justify-end
-                    gap-2
-                "
-            >
-                <AppButton
-                    v-if="incompletePatientId"
-                    label="Upraviť teraz"
-                    @click="
-                        openEditPatient(
-                            incompletePatientId,
-                        )
-                    "
-                />
-            </div>
-        </div>
-    </Dialog>
 </template>

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePublicDocument, type PublicDocumentProps } from '@/composables/usePublicDocument'
 import DocumentShell from '@/components/DocumentShell.vue'

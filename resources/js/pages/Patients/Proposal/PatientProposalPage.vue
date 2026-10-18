@@ -10,6 +10,7 @@ import {
 
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
+import Popover from 'primevue/popover'
 
 import api from '@/services/api'
 
@@ -19,6 +20,9 @@ import DocumentAlert from '@/components/DocumentAlert.vue'
 import AdonisButton from '@/components/AdonisButton.vue'
 import AppButton from '@/components/AppButton.vue'
 import FormField from '@/components/FormField.vue'
+import ReferenceDocumentDrawer from '@/components/ReferenceDocumentDrawer.vue'
+import ScanDocumentContent from '@/components/documents/ScanDocumentContent.vue'
+import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
 
 interface Diagnosis {
     id: number
@@ -41,6 +45,28 @@ interface ProcedureOption {
 interface SelectedProcedure {
     procedure: ProcedureOption | null
     frequency: string
+}
+
+interface ProposalValidationIssue {
+    rule_code: string
+    type: string
+    severity: 'error' | 'warning' | 'info'
+    procedure_codes: string[]
+    message: string
+    source_reference: string | null
+    metadata?: Record<string, unknown>
+}
+
+interface ProposalValidationResult {
+    version: string
+    care_type: string
+    errors: ProposalValidationIssue[]
+    warnings: ProposalValidationIssue[]
+    info: ProposalValidationIssue[]
+    per_procedure: Record<
+        string,
+        ProposalValidationIssue[]
+    >
 }
 
 interface Plan {
@@ -181,6 +207,19 @@ const loadingOcrPrefill =
 const isGenerating =
     ref(false)
 
+const proposalValidation =
+    ref<ProposalValidationResult | null>(
+        null,
+    )
+
+const isProposalValidationLoading =
+    ref(false)
+
+const proposalValidationFailure =
+    ref<string | null>(
+        null,
+    )
+
 const documentId =
     ref<number | null>(
         null,
@@ -232,13 +271,21 @@ const plans =
 const plansLoading =
     ref(false)
 
-const planScrollRefs =
-    ref<
-        Record<
-            string,
-            HTMLElement
-        >
-    >({})
+const carePlanPopover =
+    ref<InstanceType<typeof Popover> | null>(
+        null,
+    )
+
+const carePlanTextarea =
+    ref<ComponentPublicInstance | HTMLTextAreaElement | null>(
+        null,
+    )
+
+let carePlanSelectionStart =
+    0
+
+let carePlanSelectionEnd =
+    0
 
 /* -------------------------------------------------------------------------- */
 /* Preview                                                                    */
@@ -255,44 +302,18 @@ const previewError =
         null,
     )
 
-const previewPageRef =
-    ref<HTMLElement | null>(
-        null,
-    )
-
-const A4_WIDTH_PX =
-    210 / 25.4 * 96
-
-const A4_HEIGHT_PX =
-    297 / 25.4 * 96
-
-const previewScale =
-    ref(1)
-
-const previewFrameStyle =
-    computed(() => ({
-        width:
-            `${A4_WIDTH_PX}px`,
-
-        height:
-            `${A4_HEIGHT_PX}px`,
-
-        transform:
-            `scale(${previewScale.value})`,
-
-        transformOrigin:
-            'top left',
-    }))
-
-let previewResizeObserver:
-    ResizeObserver |
-    null = null
-
 let previewTimer:
     ReturnType<typeof setTimeout> |
     null = null
 
 let previewRequestId =
+    0
+
+let proposalValidationTimer:
+    ReturnType<typeof setTimeout> |
+    null = null
+
+let proposalValidationRequestId =
     0
 
 /* -------------------------------------------------------------------------- */
@@ -350,21 +371,27 @@ const durationOptions = [
 const frequencyOptions = [
     {
         label:
-            'V pracovné dni',
-        value:
-            'weekdays',
-    },
-    {
-        label:
-            'Počas víkendov a sviatkov',
-        value:
-            'weekends',
-    },
-    {
-        label:
             'Denne',
         value:
             'daily',
+    },
+    {
+        label:
+            '2× denne',
+        value:
+            'twice_daily',
+    },
+    {
+        label:
+            '3× denne',
+        value:
+            'three_times_daily',
+    },
+    {
+        label:
+            'V pracovné dni',
+        value:
+            'weekdays',
     },
     {
         label:
@@ -374,33 +401,45 @@ const frequencyOptions = [
     },
     {
         label:
-            '3x týždenne',
+            '3× týždenne',
         value:
             'three_times_weekly',
     },
     {
         label:
-            '2x týždenne',
+            '2× týždenne',
         value:
             'twice_weekly',
     },
     {
         label:
-            '1x týždenne',
+            '1× týždenne',
         value:
             'once_weekly',
     },
     {
         label:
-            '2x mesačne',
+            'Počas víkendov a sviatkov',
+        value:
+            'weekends',
+    },
+    {
+        label:
+            '2× mesačne',
         value:
             'twice_monthly',
     },
     {
         label:
-            '1x mesačne',
+            '1× mesačne',
         value:
             'once_monthly',
+    },
+    {
+        label:
+            'Jednorazovo',
+        value:
+            'once',
     },
     {
         label:
@@ -409,6 +448,67 @@ const frequencyOptions = [
             'as_needed',
     },
 ]
+
+const oneTimeProcedureCodes =
+    new Set([
+        '3390',
+        '3392A',
+        '3393',
+        '3395',
+    ])
+
+function frequencyOptionsFor(
+    code?: string,
+) {
+    if (
+        code &&
+        oneTimeProcedureCodes.has(
+            code,
+        )
+    ) {
+        return frequencyOptions.filter(
+            option =>
+                option.value ===
+                'once',
+        )
+    }
+
+    if (code === '3394') {
+        return frequencyOptions.filter(
+            option =>
+                option.value ===
+                'once_monthly',
+        )
+    }
+
+    return frequencyOptions
+}
+
+function handleProcedureChange(
+    row: SelectedProcedure,
+) {
+    const options =
+        frequencyOptionsFor(
+            row.procedure?.code,
+        )
+
+    if (
+        !options.some(
+            option =>
+                option.value ===
+                row.frequency,
+        )
+    ) {
+        const [onlyOption] =
+            options
+
+        row.frequency =
+            options.length === 1 &&
+            onlyOption
+                ? onlyOption.value
+                : ''
+    }
+}
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -473,22 +573,67 @@ const reverseFrequencyMap:
         Denne:
             'daily',
 
+        '1x denne':
+            'daily',
+
+        '1× denne':
+            'daily',
+
+        '2x denne':
+            'twice_daily',
+
+        '2× denne':
+            'twice_daily',
+
+        '3x denne':
+            'three_times_daily',
+
+        '3× denne':
+            'three_times_daily',
+
+        '1x_daily':
+            'daily',
+
+        '2x_daily':
+            'twice_daily',
+
+        '3x_daily':
+            'three_times_daily',
+
+        Jednorazovo:
+            'once',
+
         'Každý druhý deň':
             'every_other_day',
 
         '3x týždenne':
             'three_times_weekly',
 
+        '3× týždenne':
+            'three_times_weekly',
+
         '2x týždenne':
+            'twice_weekly',
+
+        '2× týždenne':
             'twice_weekly',
 
         '1x týždenne':
             'once_weekly',
 
+        '1× týždenne':
+            'once_weekly',
+
         '2x mesačne':
             'twice_monthly',
 
+        '2× mesačne':
+            'twice_monthly',
+
         '1x mesačne':
+            'once_monthly',
+
+        '1× mesačne':
             'once_monthly',
 
         'V pracovné dni':
@@ -514,6 +659,27 @@ function normalizeFrequencyToEnum(
             normalized
         ] ??
         normalized
+    )
+}
+
+function normalizeProcedureFrequency(
+    code: string,
+    value: string,
+): string {
+    if (
+        oneTimeProcedureCodes.has(
+            code,
+        )
+    ) {
+        return 'once'
+    }
+
+    if (code === '3394') {
+        return 'once_monthly'
+    }
+
+    return normalizeFrequencyToEnum(
+        value,
     )
 }
 
@@ -931,7 +1097,8 @@ async function preloadFromLatestProposal() {
                     procedure,
 
                     frequency:
-                        normalizeFrequencyToEnum(
+                        normalizeProcedureFrequency(
+                            procedureCode,
                             String(
                                 item?.frequency ??
                                 '',
@@ -1034,6 +1201,14 @@ const hasScanDocument =
         () =>
             !!ocrPrefillAvailability.value
                 ?.has_scan_document,
+    )
+
+const latestScanDocumentId =
+    computed(
+        () =>
+            ocrPrefillAvailability.value
+                ?.latest_scan_document_id ??
+            null,
     )
 
 async function prefillFromLatestScanWithAi() {
@@ -1182,7 +1357,8 @@ async function prefillFromLatestScanWithAi() {
                     procedure,
 
                     frequency:
-                        normalizeFrequencyToEnum(
+                        normalizeProcedureFrequency(
+                            procedureCode,
                             String(
                                 item?.frequency ??
                                 '',
@@ -1318,6 +1494,19 @@ async function searchDiagnoses(
         query: string
     },
 ) {
+    const branchId =
+        Number(
+            patientStore.current
+                ?.branch_id,
+        ) || null
+
+    if (!branchId) {
+        filteredDiagnoses.value =
+            []
+
+        return
+    }
+
     try {
         const query =
             (
@@ -1327,20 +1516,17 @@ async function searchDiagnoses(
 
         const response =
             await api.get(
-                '/v1/diagnoses',
+                '/v1/clinical-suggestions/diagnoses',
                 {
                     params: {
                         q:
                             query,
 
-                        per_page:
+                        branch_id:
+                            branchId,
+
+                        limit:
                             25,
-
-                        page:
-                            1,
-
-                        sort:
-                            'code',
                     },
                 },
             )
@@ -1381,6 +1567,19 @@ async function searchNurseDiagnoses(
         query: string
     },
 ) {
+    const branchId =
+        Number(
+            patientStore.current
+                ?.branch_id,
+        ) || null
+
+    if (!branchId) {
+        filteredNurseDiagnoses.value =
+            []
+
+        return
+    }
+
     try {
         const query =
             (
@@ -1390,23 +1589,17 @@ async function searchNurseDiagnoses(
 
         const response =
             await api.get(
-                '/v1/nurse-diagnoses',
+                '/v1/clinical-suggestions/nurse-diagnoses',
                 {
                     params: {
                         q:
                             query,
 
-                        per_page:
+                        branch_id:
+                            branchId,
+
+                        limit:
                             25,
-
-                        page:
-                            1,
-
-                        sort:
-                            'code',
-
-                        paginate:
-                            0,
                     },
                 },
             )
@@ -1447,6 +1640,19 @@ async function searchProcedures(
         query: string
     },
 ) {
+    const branchId =
+        Number(
+            patientStore.current
+                ?.branch_id,
+        ) || null
+
+    if (!branchId) {
+        filteredProcedures.value =
+            []
+
+        return
+    }
+
     try {
         const query =
             (
@@ -1456,23 +1662,23 @@ async function searchProcedures(
 
         const response =
             await api.get(
-                '/v1/procedures',
+                '/v1/clinical-suggestions/procedures',
                 {
                     params: {
                         q:
                             query,
 
-                        per_page:
+                        branch_id:
+                            branchId,
+
+                        diagnosis_ids:
+                            medicalDiagnoses.value.map(
+                                diagnosis =>
+                                    diagnosis.id,
+                            ),
+
+                        limit:
                             25,
-
-                        page:
-                            1,
-
-                        sort:
-                            'code',
-
-                        paginate:
-                            0,
                     },
                 },
             )
@@ -1540,60 +1746,159 @@ async function loadPlans() {
     }
 }
 
-function setMacroScrollRef(
-    id: string,
-) {
-    return (
-        element:
-            Element |
-            ComponentPublicInstance |
-            null,
-    ) => {
-        if (
-            element instanceof
-            HTMLElement
-        ) {
-            planScrollRefs.value[
-                id
-            ] =
-                element
-        }
+function getCarePlanTextareaElement():
+    HTMLTextAreaElement |
+    null {
+    const target =
+        carePlanTextarea.value
+
+    if (
+        target instanceof
+        HTMLTextAreaElement
+    ) {
+        return target
     }
+
+    const element =
+        (
+            target as
+                | ComponentPublicInstance
+                | null
+        )?.$el
+
+    if (
+        element instanceof
+        HTMLTextAreaElement
+    ) {
+        return element
+    }
+
+    if (
+        element instanceof
+        HTMLElement
+    ) {
+        return element.querySelector(
+            'textarea',
+        )
+    }
+
+    return null
 }
 
-function scrollMacros(
-    id: string,
-    direction: number,
-) {
-    const element =
-        planScrollRefs.value[
-            id
-        ]
+function rememberCarePlanSelection() {
+    const textarea =
+        getCarePlanTextareaElement()
 
-    if (!element) {
+    if (!textarea) {
+        carePlanSelectionStart =
+            carePlan.value.length
+
+        carePlanSelectionEnd =
+            carePlan.value.length
+
         return
     }
 
-    element.scrollBy({
-        left:
-            direction *
-            200,
+    carePlanSelectionStart =
+        textarea.selectionStart ??
+        carePlan.value.length
 
-        behavior:
-            'smooth',
-    })
+    carePlanSelectionEnd =
+        textarea.selectionEnd ??
+        carePlanSelectionStart
 }
 
-function appendToSectionText(
-    text: string,
+function toggleCarePlanMacros(
+    event: Event,
 ) {
-    if (carePlan.value) {
-        carePlan.value +=
-            `\n${text}`
-    } else {
-        carePlan.value =
-            text
-    }
+    rememberCarePlanSelection()
+
+    carePlanPopover.value?.toggle(
+        event,
+    )
+}
+
+function insertCarePlanMacro(
+    plan: Plan,
+) {
+    const currentValue =
+        carePlan.value ?? ''
+
+    const start =
+        Math.min(
+            carePlanSelectionStart,
+            currentValue.length,
+        )
+
+    const end =
+        Math.min(
+            Math.max(
+                carePlanSelectionEnd,
+                start,
+            ),
+            currentValue.length,
+        )
+
+    const before =
+        currentValue.slice(
+            0,
+            start,
+        )
+
+    const after =
+        currentValue.slice(
+            end,
+        )
+
+    const prefix =
+        before.length > 0 &&
+        !before.endsWith('\n') &&
+        !before.endsWith(' ')
+            ? '\n'
+            : ''
+
+    const suffix =
+        after.length > 0 &&
+        !after.startsWith('\n') &&
+        !after.startsWith(' ')
+            ? '\n'
+            : ''
+
+    const insertedText =
+        `${prefix}${plan.text}${suffix}`
+
+    carePlan.value =
+        `${before}${insertedText}${after}`
+
+    const nextCaretPosition =
+        before.length +
+        insertedText.length
+
+    carePlanSelectionStart =
+        nextCaretPosition
+
+    carePlanSelectionEnd =
+        nextCaretPosition
+
+    carePlanPopover.value?.hide()
+
+    requestAnimationFrame(
+        () => {
+            const textarea =
+                getCarePlanTextareaElement()
+
+            if (!textarea) {
+                return
+            }
+
+            textarea.focus()
+
+            textarea.setSelectionRange(
+                nextCaretPosition,
+                nextCaretPosition,
+            )
+        },
+    )
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1744,6 +2049,274 @@ function validateForm() {
         ).length ===
         0
     )
+}
+
+const validationSeverityWeight:
+    Record<
+        ProposalValidationIssue['severity'],
+        number
+    > = {
+        error:
+            3,
+
+        warning:
+            2,
+
+        info:
+            1,
+    }
+
+function normalizeIssueMessage(
+    message: string,
+): string {
+    return String(
+        message ?? '',
+    )
+        .trim()
+        .replace(
+            /\s+/g,
+            ' ',
+        )
+        .toLowerCase()
+}
+
+function issueKey(
+    issue: ProposalValidationIssue,
+): string {
+    const procedures =
+        [
+            ...(
+                issue.procedure_codes ??
+                []
+            ),
+        ]
+            .sort()
+            .join(',')
+
+    return [
+        normalizeIssueMessage(
+            issue.message,
+        ),
+        procedures,
+    ].join('|')
+}
+
+function uniqueProposalIssues(
+    issues: ProposalValidationIssue[],
+): ProposalValidationIssue[] {
+    const unique =
+        new Map<
+            string,
+            ProposalValidationIssue
+        >()
+
+    for (
+        const issue
+        of issues
+    ) {
+        const key =
+            issueKey(
+                issue,
+            )
+
+        const existing =
+            unique.get(
+                key,
+            )
+
+        if (
+            !existing ||
+            validationSeverityWeight[
+                issue.severity
+            ] >
+                validationSeverityWeight[
+                    existing.severity
+                ]
+        ) {
+            unique.set(
+                key,
+                issue,
+            )
+        }
+    }
+
+    return Array.from(
+        unique.values(),
+    )
+}
+
+function issuesForProcedure(
+    row: SelectedProcedure,
+): ProposalValidationIssue[] {
+    const code =
+        row.procedure?.code
+
+    if (!code) {
+        return []
+    }
+
+    return uniqueProposalIssues(
+        proposalValidation.value
+            ?.per_procedure[
+                code
+            ] ??
+        [],
+    )
+}
+
+const allProposalIssues =
+    computed<
+        ProposalValidationIssue[]
+    >(
+        () =>
+            uniqueProposalIssues([
+                ...(
+                    proposalValidation.value
+                        ?.errors ??
+                    []
+                ),
+                ...(
+                    proposalValidation.value
+                        ?.warnings ??
+                    []
+                ),
+                ...(
+                    proposalValidation.value
+                        ?.info ??
+                    []
+                ),
+            ]),
+    )
+
+const generalProposalIssues =
+    computed(
+        () =>
+            uniqueProposalIssues(
+                allProposalIssues.value.filter(
+                    issue =>
+                        (
+                            issue.procedure_codes ??
+                            []
+                        ).length ===
+                        0,
+                ),
+            ),
+    )
+
+function issueTextClass(
+    issue: ProposalValidationIssue,
+): string {
+    return issue.severity ===
+        'error'
+        ? 'text-danger'
+        : 'text-warning'
+}
+
+async function validateProposalRules():
+    Promise<boolean> {
+    if (
+        !patientId.value ||
+        !date.value ||
+        isDateAfterDeath(
+            date.value,
+        )
+    ) {
+        proposalValidation.value =
+            null
+
+        return true
+    }
+
+    const requestId =
+        ++proposalValidationRequestId
+
+    isProposalValidationLoading.value =
+        true
+
+    proposalValidationFailure.value =
+        null
+
+    try {
+        const response =
+            await api.post(
+                '/v1/proposals/validate-rules',
+                buildProposalPayload(),
+            )
+
+        if (
+            requestId !==
+            proposalValidationRequestId
+        ) {
+            return true
+        }
+
+        proposalValidation.value =
+            response.data
+                ?.data as ProposalValidationResult
+
+        return (
+            proposalValidation.value
+                ?.errors.length ===
+            0
+        )
+    } catch (error: any) {
+        if (
+            requestId ===
+            proposalValidationRequestId
+        ) {
+            console.error(
+                'Failed to validate ADOS proposal rules:',
+                error,
+            )
+
+            const result =
+                error?.response
+                    ?.data
+                    ?.data
+
+            if (result?.errors) {
+                proposalValidation.value =
+                    result as ProposalValidationResult
+
+                return false
+            }
+
+            proposalValidation.value =
+                null
+
+            proposalValidationFailure.value =
+                error?.response
+                    ?.data
+                    ?.message ??
+                'Pravidlá návrhu ADOS sa nepodarilo skontrolovať.'
+        }
+
+        return false
+    } finally {
+        if (
+            requestId ===
+            proposalValidationRequestId
+        ) {
+            isProposalValidationLoading.value =
+                false
+        }
+    }
+}
+
+function scheduleProposalValidation() {
+    if (proposalValidationTimer) {
+        clearTimeout(
+            proposalValidationTimer,
+        )
+    }
+
+    proposalValidationTimer =
+        setTimeout(
+            () => {
+                void validateProposalRules()
+            },
+            450,
+        )
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2068,6 +2641,34 @@ async function generateDocument(
         return
     }
 
+    const proposalRulesValid =
+        await validateProposalRules()
+
+    if (!proposalRulesValid) {
+        const proposalMessage =
+            proposalValidation.value
+                ?.errors[0]
+                ?.message ??
+            proposalValidationFailure.value ??
+            'Návrh obsahuje chyby podľa pravidiel ADOS.'
+
+        toast.add({
+            severity:
+                'error',
+
+            summary:
+                'Kontrola návrhu',
+
+            detail:
+                proposalMessage,
+
+            life:
+                3500,
+        })
+
+        return
+    }
+
     isGenerating.value =
         true
 
@@ -2143,6 +2744,12 @@ async function generateDocument(
             error
                 ?.response
                 ?.data
+                ?.data
+                ?.errors?.[0]
+                ?.message ??
+            error
+                ?.response
+                ?.data
                 ?.message ??
             error
                 ?.message ??
@@ -2207,6 +2814,38 @@ watch(
             patientId.value,
 
         () =>
+            date.value,
+
+        () =>
+            medicalDiagnoses.value,
+
+        () =>
+            nurseDiagnoses.value,
+
+        () =>
+            patientMobility.value,
+
+        () =>
+            expectedDuration.value,
+
+        () =>
+            procedures.value,
+    ],
+    scheduleProposalValidation,
+    {
+        deep:
+            true,
+        immediate:
+            true,
+    },
+)
+
+watch(
+    [
+        () =>
+            patientId.value,
+
+        () =>
             patientStore.current
                 ?.branch_id,
 
@@ -2249,52 +2888,23 @@ watch(
 
 onMounted(() => {
     void loadPlans()
-
-    if (
-        previewPageRef.value &&
-        typeof ResizeObserver !==
-            'undefined'
-    ) {
-        previewResizeObserver =
-            new ResizeObserver(
-                ([entry]) => {
-                    const width =
-                        entry
-                            ?.contentRect
-                            .width ??
-                        0
-
-                    if (
-                        width >
-                        0
-                    ) {
-                        previewScale.value =
-                            width /
-                            A4_WIDTH_PX
-                    }
-                },
-            )
-
-        previewResizeObserver.observe(
-            previewPageRef.value,
-        )
-    }
 })
 
 onBeforeUnmount(() => {
-    previewResizeObserver
-        ?.disconnect()
-
-    previewResizeObserver =
-        null
-
     if (previewTimer) {
         clearTimeout(
             previewTimer,
         )
     }
 
+    if (proposalValidationTimer) {
+        clearTimeout(
+            proposalValidationTimer,
+        )
+    }
+
     previewRequestId++
+    proposalValidationRequestId++
 })
 </script>
 
@@ -2318,11 +2928,28 @@ onBeforeUnmount(() => {
         "
     />
 
+    <ReferenceDocumentDrawer
+        title="Nález"
+        handle-label="Zobraziť posledný nález"
+        :available="
+            !!latestScanDocumentId
+        "
+    >
+        <ScanDocumentContent
+            v-if="latestScanDocumentId"
+            :document-id="latestScanDocumentId"
+        />
+    </ReferenceDocumentDrawer>
+
     <div
         class="
-            h-full
+            -mx-8
+            -mb-8
+            -mt-8
+            h-[calc(100%+4rem)]
             min-h-0
             overflow-hidden
+            w-[calc(100%+4rem)]
         "
     >
         <div
@@ -2331,6 +2958,8 @@ onBeforeUnmount(() => {
                 h-full
                 min-h-0
                 grid-cols-2
+                gap-6
+                p-8
             "
         >
             <!-- ============================================================ -->
@@ -2339,9 +2968,9 @@ onBeforeUnmount(() => {
 
             <aside
                 class="
+                    h-full
                     min-h-0
                     overflow-hidden
-                    pr-6
                 "
             >
                 <form
@@ -2350,495 +2979,74 @@ onBeforeUnmount(() => {
                         h-full
                         min-h-0
                         flex-col
+
                     "
                     @submit.prevent="
                         submitDocument
                     "
                 >
-                    <section
-                        class="
-                            flex
-                            h-full
-                            min-h-0
-                            flex-col
-                            overflow-hidden
-                            rounded-md
-                            bg-tag3
-                        "
-                    >
-                        <!-- SCROLLABLE FORM CONTENT -->
+                  <section
+                      class="
+                          flex
+                          h-full
+                          min-h-0
+                          flex-col
+                          overflow-hidden
+                          rounded-md
+                          bg-tag3
+                      "
+                  >
+                      <!-- SCROLLABLE FORM CONTENT -->
+
+                      <div
+                          class="
+                              min-h-0
+                              flex-1
+                              overflow-y-auto
+                              p-8
+                          "
+                      >
                         <div
                             class="
-                                min-h-0
-                                flex-1
-                                overflow-y-auto
-                                p-6
+                                flex
+                                flex-col
+                                gap-8
                             "
                         >
+                            <!-- ======================================================== -->
+                            <!-- DOPLŇUJÚCE INFORMÁCIE PACIENTA                           -->
+                            <!-- ======================================================== -->
+
                             <div
                                 class="
-                                    flex
-                                    flex-col
-                                    gap-6
+                                    grid
+                                    grid-cols-12
+                                    gap-4
                                 "
                             >
-                                <!-- Medical diagnosis -->
-
-                                <FormField
-                                    label="Lekárska diagnóza"
-                                    required
-                                    :error="
-                                        submitted
-                                            ? errors.medicalDiagnosis
-                                            : null
+                                <div
+                                    class="
+                                        col-span-12
                                     "
                                 >
-                                    <AutoComplete
-                                        v-model="
-                                            medicalDiagnoses
-                                        "
-                                        :suggestions="
-                                            filteredDiagnoses
-                                        "
-                                        multiple
-                                        :minLength="1"
-                                        dropdown
-                                        completeOnFocus
-                                        optionLabel="code"
-                                        class="w-full"
-                                        inputClass="
-                                            w-full!
-                                            shadow-none!
-                                            bg-white!
-                                            focus:ring-0!
-                                            focus:shadow-none!
-                                            border-0!
-                                        "
-                                        @complete="
-                                            searchDiagnoses
-                                        "
-                                    >
-                                        <template
-                                            #option="{
-                                                option,
-                                            }"
-                                        >
-                                            <div
-                                                class="
-                                                    flex
-                                                    flex-col
-                                                "
-                                            >
-                                                <span
-                                                    class="
-                                                        shrink-0
-                                                        font-medium
-                                                    "
-                                                >
-                                                    {{
-                                                        option.code
-                                                    }}
-                                                </span>
-
-                                                <span>
-                                                    {{
-                                                        option.description
-                                                    }}
-                                                </span>
-                                            </div>
-                                        </template>
-
-                                        <template
-                                            #chip="{
-                                                value,
-                                            }"
-                                        >
-                                            <div
-                                                class="
-                                                    inline-flex
-                                                    items-center
-                                                    gap-2
-                                                    rounded-md
-                                                    bg-darkgrey
-                                                    px-3
-                                                    py-1
-                                                    text-normal
-                                                    text-lightgrey
-                                                "
-                                            >
-                                                <span
-                                                    class="
-                                                        whitespace-nowrap
-                                                    "
-                                                >
-                                                    {{
-                                                        value.code
-                                                    }}
-                                                </span>
-
-                                                <i
-                                                    class="
-                                                        bi
-                                                        bi-x-lg
-                                                        cursor-pointer
-                                                        text-[0.65rem]
-                                                    "
-                                                    @click.stop="
-                                                        removeMedicalDiagnosis(
-                                                            value,
-                                                        )
-                                                    "
-                                                />
-                                            </div>
-                                        </template>
-                                    </AutoComplete>
-                                </FormField>
-
-                                <!-- Nurse diagnosis -->
-
-                                <FormField
-                                    label="Sesterská diagnóza"
-                                    required
-                                    :error="
-                                        submitted
-                                            ? errors.nurseDiagnosis
-                                            : null
-                                    "
-                                >
-                                    <AutoComplete
-                                        v-model="
-                                            nurseDiagnoses
-                                        "
-                                        :suggestions="
-                                            filteredNurseDiagnoses
-                                        "
-                                        multiple
-                                        :minLength="1"
-                                        dropdown
-                                        completeOnFocus
-                                        optionLabel="code"
-                                        class="w-full"
-                                        inputClass="
-                                            w-full!
-                                            shadow-none!
-                                            bg-white!
-                                            focus:ring-0!
-                                            focus:shadow-none!
-                                            border-0!
-                                        "
-                                        @complete="
-                                            searchNurseDiagnoses
-                                        "
-                                    >
-                                        <template
-                                            #option="{
-                                                option,
-                                            }"
-                                        >
-                                            <div
-                                                class="
-                                                    flex
-                                                    flex-col
-                                                "
-                                            >
-                                                <span
-                                                    class="
-                                                        shrink-0
-                                                        font-medium
-                                                    "
-                                                >
-                                                    {{
-                                                        option.code
-                                                    }}
-                                                </span>
-
-                                                <span>
-                                                    {{
-                                                        option.description
-                                                    }}
-                                                </span>
-                                            </div>
-                                        </template>
-
-                                        <template
-                                            #chip="{
-                                                value,
-                                            }"
-                                        >
-                                            <div
-                                                class="
-                                                    inline-flex
-                                                    items-center
-                                                    gap-2
-                                                    rounded-md
-                                                    bg-darkgrey
-                                                    px-3
-                                                    py-1
-                                                    text-normal
-                                                    text-lightgrey
-                                                "
-                                            >
-                                                <span
-                                                    class="
-                                                        whitespace-nowrap
-                                                    "
-                                                >
-                                                    {{
-                                                        value.code
-                                                    }}
-                                                </span>
-
-                                                <i
-                                                    class="
-                                                        bi
-                                                        bi-x-lg
-                                                        cursor-pointer
-                                                        text-[0.65rem]
-                                                    "
-                                                    @click.stop="
-                                                        removeNurseDiagnosis(
-                                                            value,
-                                                        )
-                                                    "
-                                                />
-                                            </div>
-                                        </template>
-                                    </AutoComplete>
-                                </FormField>
-
-                                <!-- Date -->
-
-                                <FormField
-                                    label="Dátum"
-                                    required
-                                    :error="
-                                        submitted
-                                            ? errors.date
-                                            : null
-                                    "
-                                    v-slot="{
-                                        id,
-                                        describedBy,
-                                        invalid,
-                                    }"
-                                >
-                                    <DatePicker
-                                        :id="id"
-                                        v-model="date"
-                                        dateFormat="dd.mm.yy"
-                                        :showIcon="false"
-                                        :maxDate="
-                                            maxSelectableDate
-                                        "
-                                        :invalid="
-                                            invalid
-                                        "
-                                        :aria-invalid="
-                                            invalid ||
-                                            undefined
-                                        "
-                                        :aria-describedby="
-                                            describedBy
-                                        "
-                                        class="w-full"
-                                        inputClass="
-                                            w-full!
-                                            cursor-pointer!
-                                            border-none!
-                                        "
-                                    />
-                                </FormField>
-
-                                <!-- Epicrisis -->
-
-                                <FormField
-                                    label="Epizóka a zdôvodnenie pre poskytovanie ošetrovateľskej starostlivosti"
-                                    required
-                                    :error="
-                                        submitted
-                                            ? errors.epicrisisDescription
-                                            : null
-                                    "
-                                >
-                                    <Textarea
-                                        v-model="
-                                            epicrisisDescription
-                                        "
-                                        class="
-                                            w-full
-                                            border-none!
-                                        "
-                                        rows="4"
-                                        :invalid="
-                                            submitted &&
-                                            !!errors.epicrisisDescription
-                                        "
-                                    />
-                                </FormField>
-
-                                <!-- Care plan -->
-
-                                <FormField
-                                    label="Plán ošetrovateľskej starostlivosti"
-                                    required
-                                    :error="
-                                        submitted
-                                            ? errors.carePlan
-                                            : null
-                                    "
-                                >
-                                    <Textarea
-                                        v-model="
-                                            carePlan
-                                        "
-                                        class="
-                                            w-full
-                                            border-none!
-                                        "
-                                        rows="4"
-                                        :invalid="
-                                            submitted &&
-                                            !!errors.carePlan
-                                        "
-                                    />
-                                </FormField>
-
-                                <!-- Plans -->
-
-                                <div class="w-full">
                                     <label
                                         class="
-                                            mb-2
                                             block
                                             text-normal
+                                            text-accent
                                         "
                                     >
-                                        Plány starostlivosti
+                                        Doplňujúce informácie pacienta
                                     </label>
-
-                                    <div
-                                        v-if="
-                                            !plansLoading &&
-                                            !plans.length
-                                        "
-                                        class="
-                                            opacity-70
-                                        "
-                                    >
-                                        Nemáte žiadne plány. Skúste opustiť stránku a znova sa načítať.
-                                    </div>
-
-                                    <div
-                                        v-else
-                                        class="
-                                            relative
-                                        "
-                                    >
-                                        <AppButton
-                                            type="button"
-                                            variant="text"
-                                            icon="
-                                                bi
-                                                bi-chevron-left
-                                            "
-                                            aria-label="
-                                                Doľava
-                                            "
-                                            class="
-                                                absolute
-                                                left-0
-                                                top-1/2
-                                                z-10
-                                                w-7!
-                                                min-w-7!
-                                                -translate-y-1/2
-                                                px-0!
-                                            "
-                                            @click="
-                                                scrollMacros(
-                                                    'care-plan',
-                                                    -1,
-                                                )
-                                            "
-                                        />
-
-                                        <AppButton
-                                            type="button"
-                                            variant="text"
-                                            icon="
-                                                bi
-                                                bi-chevron-right
-                                            "
-                                            aria-label="
-                                                Doprava
-                                            "
-                                            class="
-                                                absolute
-                                                right-0
-                                                top-1/2
-                                                z-10
-                                                w-7!
-                                                min-w-7!
-                                                -translate-y-1/2
-                                                px-0!
-                                            "
-                                            @click="
-                                                scrollMacros(
-                                                    'care-plan',
-                                                    1,
-                                                )
-                                            "
-                                        />
-
-                                        <div
-                                            :ref="
-                                                setMacroScrollRef(
-                                                    'care-plan',
-                                                )
-                                            "
-                                            class="
-                                                mb-2
-                                                flex
-                                                gap-2
-                                                overflow-x-auto
-                                                scroll-smooth
-                                                whitespace-nowrap
-                                                px-10
-                                                py-3
-                                            "
-                                            style="
-                                                scrollbar-width: thin;
-                                            "
-                                        >
-                                            <AppButton
-                                                v-for="
-                                                    plan
-                                                    in plans
-                                                "
-                                                :key="
-                                                    plan.id
-                                                "
-                                                type="button"
-                                                variant="accent"
-                                                :label="
-                                                    plan.name
-                                                "
-                                                :title="
-                                                    plan.text
-                                                "
-                                                @click="
-                                                    appendToSectionText(
-                                                        plan.text,
-                                                    )
-                                                "
-                                            />
-                                        </div>
-                                    </div>
                                 </div>
 
                                 <!-- Mobility -->
 
-                                <div>
+                                <div
+                                    class="
+                                        col-span-12
+                                    "
+                                >
                                     <label
                                         class="
                                             mb-2
@@ -2898,6 +3106,789 @@ onBeforeUnmount(() => {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <!-- ======================================================== -->
+                            <!-- OŠETROVACÍ NÁVRH                                         -->
+                            <!-- ======================================================== -->
+
+                            <div
+                                class="
+                                    grid
+                                    grid-cols-12
+                                    gap-4
+                                "
+                            >
+                                <div
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <label
+                                        class="
+                                            block
+                                            text-normal
+                                            text-accent
+                                        "
+                                    >
+                                        Ošetrovací návrh
+                                    </label>
+                                </div>
+
+                                <!-- Epicrisis -->
+
+                                                                <!-- Medical diagnosis -->
+
+                                <FormField
+                                    label="Lekárske diagnózy"
+                                    required
+                                    :error="
+                                        submitted
+                                            ? errors.medicalDiagnosis
+                                            : null
+                                    "
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <AutoComplete
+                                        v-model="
+                                            medicalDiagnoses
+                                        "
+                                        :suggestions="
+                                            filteredDiagnoses
+                                        "
+                                        multiple
+                                        :minLength="1"
+                                        dropdown
+                                        completeOnFocus
+                                        optionLabel="code"
+                                        class="
+                                            w-full
+                                            rounded-md!
+                                        "
+                                        inputClass="
+                                            w-full!
+                                            bg-white!
+                                            shadow-none!
+                                            focus:ring-0!
+                                            focus:shadow-none!
+                                        "
+                                        @complete="
+                                            searchDiagnoses
+                                        "
+                                    >
+                                        <template
+                                            #option="{
+                                                option,
+                                            }"
+                                        >
+                                            <div
+                                                class="
+                                                    flex
+                                                    flex-col
+                                                "
+                                            >
+                                                <span
+                                                    class="
+                                                        shrink-0
+                                                        font-medium
+                                                    "
+                                                >
+                                                    {{
+                                                        option.code
+                                                    }}
+                                                </span>
+
+                                                <span>
+                                                    {{
+                                                        option.description
+                                                    }}
+                                                </span>
+                                            </div>
+                                        </template>
+
+                                        <template
+                                            #chip="{
+                                                value,
+                                            }"
+                                        >
+                                            <div
+                                                class="
+                                                    inline-flex
+                                                    items-center
+                                                    gap-2
+                                                    rounded-md
+                                                    bg-darkgrey
+                                                    px-3
+                                                    py-1
+                                                    text-normal
+                                                    text-white
+                                                "
+                                            >
+                                                <span
+                                                    class="
+                                                        whitespace-nowrap
+                                                    "
+                                                >
+                                                    {{
+                                                        value.code
+                                                    }}
+                                                </span>
+
+                                                <i
+                                                    class="
+                                                        bi
+                                                        bi-x-lg
+                                                        cursor-pointer
+                                                        text-[0.65rem]
+                                                        text-lightgrey
+                                                    "
+                                                    @click.stop="
+                                                        removeMedicalDiagnosis(
+                                                            value,
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+                                        </template>
+                                    </AutoComplete>
+                                </FormField>
+
+                                <!-- Nurse diagnosis -->
+
+                                <FormField
+                                    label="Sesterské diagnózy"
+                                    required
+                                    :error="
+                                        submitted
+                                            ? errors.nurseDiagnosis
+                                            : null
+                                    "
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <AutoComplete
+                                        v-model="
+                                            nurseDiagnoses
+                                        "
+                                        :suggestions="
+                                            filteredNurseDiagnoses
+                                        "
+                                        multiple
+                                        :minLength="1"
+                                        dropdown
+                                        completeOnFocus
+                                        optionLabel="code"
+                                        class="
+                                            w-full
+                                            rounded-md!
+                                        "
+                                        inputClass="
+                                            w-full!
+                                            border-0!
+                                            bg-white!
+                                            shadow-none!
+                                            focus:ring-0!
+                                            focus:shadow-none!
+                                        "
+                                        @complete="
+                                            searchNurseDiagnoses
+                                        "
+                                    >
+                                        <template
+                                            #option="{
+                                                option,
+                                            }"
+                                        >
+                                            <div
+                                                class="
+                                                    flex
+                                                    flex-col
+                                                "
+                                            >
+                                                <span
+                                                    class="
+                                                        shrink-0
+                                                        font-medium
+                                                    "
+                                                >
+                                                    {{
+                                                        option.code
+                                                    }}
+                                                </span>
+
+                                                <span>
+                                                    {{
+                                                        option.description
+                                                    }}
+                                                </span>
+                                            </div>
+                                        </template>
+
+                                        <template
+                                            #chip="{
+                                                value,
+                                            }"
+                                        >
+                                            <div
+                                                class="
+                                                    inline-flex
+                                                    items-center
+                                                    gap-2
+                                                    rounded-md
+                                                    bg-darkgrey
+                                                    px-3
+                                                    py-1
+                                                    text-normal
+                                                    text-white
+                                                "
+                                            >
+                                                <span
+                                                    class="
+                                                        whitespace-nowrap
+                                                    "
+                                                >
+                                                    {{
+                                                        value.code
+                                                    }}
+                                                </span>
+
+                                                <i
+                                                    class="
+                                                        bi
+                                                        bi-x-lg
+                                                        cursor-pointer
+                                                        text-[0.65rem]
+                                                        text-lightgrey
+                                                    "
+                                                    @click.stop="
+                                                        removeNurseDiagnosis(
+                                                            value,
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+                                        </template>
+                                    </AutoComplete>
+                                </FormField>
+
+                                <FormField
+                                    label="Epikríza a zdôvodnenie pre poskytovanie ošetrovateľskej starostlivosti"
+                                    required
+                                    :error="
+                                        submitted
+                                            ? errors.epicrisisDescription
+                                            : null
+                                    "
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <Textarea
+                                        v-model="
+                                            epicrisisDescription
+                                        "
+                                        class="
+                                            w-full
+                                            border-0!
+                                        "
+                                        rows="4"
+                                        :invalid="
+                                            submitted &&
+                                            !!errors.epicrisisDescription
+                                        "
+                                    />
+                                </FormField>
+
+                                <!-- Care plan -->
+
+                                <FormField
+                                    label="Plán ošetrovateľskej starostlivosti"
+                                    required
+                                    :error="
+                                        submitted
+                                            ? errors.carePlan
+                                            : null
+                                    "
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <div
+                                        class="
+                                            relative
+                                        "
+                                    >
+                                        <Textarea
+                                            ref="carePlanTextarea"
+                                            v-model="
+                                                carePlan
+                                            "
+                                            class="
+                                                w-full
+                                                border-0!
+                                                pb-12!
+                                            "
+                                            rows="5"
+                                            :invalid="
+                                                submitted &&
+                                                !!errors.carePlan
+                                            "
+                                            @click="
+                                                rememberCarePlanSelection
+                                            "
+                                            @keyup="
+                                                rememberCarePlanSelection
+                                            "
+                                            @select="
+                                                rememberCarePlanSelection
+                                            "
+                                            @focus="
+                                                rememberCarePlanSelection
+                                            "
+                                        />
+
+                                        <!-- Macro button -->
+
+                                        <button
+                                            type="button"
+                                            class="
+                                                absolute
+                                                bottom-3
+                                                left-2
+                                                flex
+                                                h-7
+                                                w-10
+                                                items-center
+                                                justify-center
+                                                rounded-md
+                                                bg-tag3
+                                                text-darkgrey
+                                                transition-colors
+                                                hover:bg-accent
+                                                hover:text-white
+                                                cursor-pointer
+                                            "
+                                            aria-label="
+                                                Pridať zo šablóny
+                                            "
+                                            title="
+                                                Pridať zo šablóny
+                                            "
+                                            @mousedown.prevent="
+                                                rememberCarePlanSelection
+                                            "
+                                            @click="
+                                                toggleCarePlanMacros
+                                            "
+                                        >
+                                            <i
+                                                class="
+                                                    bi
+                                                    bi-plus-lg
+                                                "
+                                                aria-hidden="true"
+                                            />
+                                        </button>
+
+                                        <!-- Macro picker -->
+
+                                        <Popover
+                                            ref="carePlanPopover"
+                                        >
+                                            <div
+                                                class="
+                                                    flex
+                                                    w-70
+                                                    max-w-[calc(100vw-2rem)]
+                                                    flex-col
+                                                    gap-2
+                                                "
+                                            >
+                                                 <div
+                                                    v-if="
+                                                        plansLoading
+                                                    "
+                                                    class="
+                                                        flex
+                                                        items-center
+                                                        gap-2
+                                                        px-2
+                                                        py-3
+                                                        text-mini
+                                                        text-darkgrey/60
+                                                    "
+                                                >
+                                                    <i
+                                                        class="
+                                                            bi
+                                                            bi-arrow-repeat
+                                                            animate-spin
+                                                        "
+                                                        aria-hidden="true"
+                                                    />
+
+                                                    Načítavam šablóny...
+                                                </div>
+
+                                                <div
+                                                    v-else-if="
+                                                        !plans.length
+                                                    "
+                                                    class="
+                                                        px-2
+                                                        py-3
+                                                        text-mini
+                                                        text-darkgrey/60
+                                                    "
+                                                >
+                                                    Nemáte uložené žiadne šablóny.
+                                                </div>
+
+                                                <div
+                                                    v-else
+                                                    class="
+                                                        flex
+                                                        max-h-80
+                                                        flex-col
+                                                        gap-1
+                                                        overflow-y-auto
+                                                    "
+                                                >
+                                                    <button
+                                                        v-for="
+                                                            plan
+                                                            in plans
+                                                        "
+                                                        :key="
+                                                            plan.id
+                                                        "
+                                                        type="button"
+                                                        class="
+                                                            flex
+                                                            w-full
+                                                            flex-col
+                                                            gap-1
+                                                            rounded-md
+                                                            px-3
+                                                            py-2
+                                                            text-left
+                                                            transition-colors
+                                                            hover:bg-tag3
+                                                        "
+                                                        @click="
+                                                            insertCarePlanMacro(
+                                                                plan,
+                                                            )
+                                                        "
+                                                    >
+                                                        <span
+                                                            class="
+                                                                text-normal
+                                                                font-medium
+                                                                text-darkgrey
+                                                            "
+                                                        >
+                                                            {{
+                                                                plan.name
+                                                            }}
+                                                        </span>
+
+                                                        <span
+                                                            class="
+                                                                line-clamp-2
+                                                                text-mini
+                                                                text-darkgrey/60
+                                                            "
+                                                        >
+                                                            {{
+                                                                plan.text
+                                                            }}
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </Popover>
+                                    </div>
+                                </FormField>
+
+                                <!-- Procedures -->
+
+                                <FormField
+                                    label="Výkony a frekvencia realizácie"
+                                    required
+                                    :error="
+                                        submitted
+                                            ? errors.procedures
+                                            : null
+                                    "
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <div
+                                        class="
+                                            flex
+                                            flex-col
+                                            gap-3
+                                        "
+                                    >
+                                        <div
+                                            v-for="(
+                                                row,
+                                                index
+                                            ) in procedures"
+                                            :key="
+                                                index
+                                            "
+                                            class="
+                                                flex
+                                                flex-col
+                                                gap-3
+                                            "
+                                        >
+                                            <div
+                                                class="
+                                                    flex
+                                                    w-full
+                                                    items-end
+                                                    gap-4
+                                                "
+                                            >
+                                                <!-- Procedure -->
+
+                                                <div
+                                                    class="
+                                                        min-w-0
+                                                        flex-1
+                                                    "
+                                                >
+                                                    <label
+                                                        :for="
+                                                            `procedure-${index}`
+                                                        "
+                                                        class="
+                                                            mb-1
+                                                            block
+                                                            text-normal
+                                                        "
+                                                    >
+                                                        Výkon
+                                                    </label>
+
+                                                    <AutoComplete
+                                                        :id="
+                                                            `procedure-${index}`
+                                                        "
+                                                        v-model="
+                                                            row.procedure
+                                                        "
+                                                        :suggestions="
+                                                            filteredProcedures
+                                                        "
+                                                        @complete="
+                                                            searchProcedures
+                                                        "
+                                                        @update:model-value="
+                                                            handleProcedureChange(
+                                                                row,
+                                                            )
+                                                        "
+                                                        :virtualScrollerOptions="{
+                                                            itemSize:
+                                                                38,
+                                                        }"
+                                                        optionLabel="code"
+                                                        dropdown
+                                                        dropdownMode="blank"
+                                                        :minLength="0"
+                                                        completeOnFocus
+                                                        class="
+                                                            w-full
+                                                            rounded-md!
+                                                        "
+                                                        inputClass="
+                                                            w-full!
+                                                            bg-white!
+                                                            shadow-none!
+                                                            focus:ring-0!
+                                                            focus:shadow-none!
+                                                            border-0!
+                                                        "
+                                                    >
+                                                        <template
+                                                            #option="{
+                                                                option,
+                                                            }"
+                                                        >
+                                                            <div
+                                                                class="
+                                                                    flex
+                                                                    flex-col
+                                                                "
+                                                            >
+                                                                <span
+                                                                    class="
+                                                                        shrink-0
+                                                                        font-medium
+                                                                    "
+                                                                >
+                                                                    {{
+                                                                        option.code
+                                                                    }}
+                                                                </span>
+
+                                                                <span>
+                                                                    {{
+                                                                        option.description
+                                                                    }}
+                                                                </span>
+                                                            </div>
+                                                        </template>
+                                                    </AutoComplete>
+                                                </div>
+
+                                                <!-- Frequency -->
+
+                                                <div
+                                                    class="
+                                                        min-w-0
+                                                        flex-1
+                                                    "
+                                                >
+                                                    <label
+                                                        :for="
+                                                            `frequency-${index}`
+                                                        "
+                                                        class="
+                                                            mb-1
+                                                            block
+                                                            text-normal
+                                                        "
+                                                    >
+                                                        Frekvencia realizácie
+                                                    </label>
+
+                                                    <Select
+                                                        :id="
+                                                            `frequency-${index}`
+                                                        "
+                                                        v-model="
+                                                            row.frequency
+                                                        "
+                                                        :options="
+                                                            frequencyOptionsFor(
+                                                                row.procedure
+                                                                    ?.code,
+                                                            )
+                                                        "
+                                                        optionLabel="label"
+                                                        optionValue="value"
+                                                        placeholder="
+                                                            Vyberte frekvenciu
+                                                        "
+                                                        class="
+                                                            w-full
+                                                            border-0!
+                                                        "
+                                                    />
+                                                </div>
+
+                                                <!-- Add -->
+
+                                                <AppButton
+                                                    v-if="
+                                                        index ===
+                                                        procedures.length -
+                                                            1
+                                                    "
+                                                    type="button"
+                                                    variant="accent"
+                                                    expand-on-hover
+                                                    label="
+                                                        Pridať výkon
+                                                    "
+                                                    icon="
+                                                        bi
+                                                        bi-plus-lg
+                                                    "
+                                                    aria-label="
+                                                        Pridať výkon
+                                                    "
+                                                    @click="
+                                                        addProcedure
+                                                    "
+                                                />
+
+                                                <!-- Remove -->
+
+                                                <AppButton
+                                                    v-else
+                                                    type="button"
+                                                    variant="danger"
+                                                    icon="
+                                                        bi
+                                                        bi-eraser
+                                                    "
+                                                    label="
+                                                        Odstrániť výkon
+                                                    "
+                                                    expand-on-hover
+                                                    aria-label="
+                                                        Odstrániť výkon
+                                                    "
+                                                    @click="
+                                                        removeProcedure(
+                                                            index,
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+
+                                            <!-- Proposal rule issues -->
+
+                                            <div
+                                                v-if="
+                                                    issuesForProcedure(
+                                                        row,
+                                                    ).length
+                                                "
+                                                class="
+                                                    flex
+                                                    w-full
+                                                    flex-col
+                                                    gap-1
+                                                "
+                                            >
+                                                <p
+                                                    v-for="issue in issuesForProcedure(
+                                                        row,
+                                                    )"
+                                                    :key="
+                                                        issueKey(
+                                                            issue,
+                                                        )
+                                                    "
+                                                    class="
+                                                        m-0
+                                                        text-mini
+                                                    "
+                                                    :class="
+                                                        issueTextClass(
+                                                            issue,
+                                                        )
+                                                    "
+                                                >
+                                                    {{
+                                                        issue.message
+                                                    }}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </FormField>
 
                                 <!-- Duration -->
 
@@ -2908,6 +3899,9 @@ onBeforeUnmount(() => {
                                         submitted
                                             ? errors.expectedDuration
                                             : null
+                                    "
+                                    class="
+                                        col-span-12
                                     "
                                 >
                                     <div
@@ -2959,260 +3953,147 @@ onBeforeUnmount(() => {
                                         </div>
                                     </div>
                                 </FormField>
+                            </div>
 
-                                <!-- Procedures -->
+                            <!-- ======================================================== -->
+                            <!-- ADMINISTRATÍVA                                           -->
+                            <!-- ======================================================== -->
+
+                            <div
+                                class="
+                                    grid
+                                    grid-cols-12
+                                    gap-4
+                                "
+                            >
+                                <div
+                                    class="
+                                        col-span-12
+                                    "
+                                >
+                                    <label
+                                        class="
+                                            block
+                                            text-normal
+                                            text-accent
+                                        "
+                                    >
+                                        Administratíva
+                                    </label>
+                                </div>
+
+                                <!-- Date -->
 
                                 <FormField
-                                    label="Výkony a frekvencia realizácie"
+                                    label="Dátum"
                                     required
                                     :error="
                                         submitted
-                                            ? errors.procedures
+                                            ? errors.date
                                             : null
                                     "
+                                    class="
+                                        col-span-12
+                                    "
+                                    v-slot="{
+                                        id,
+                                        describedBy,
+                                        invalid,
+                                    }"
                                 >
-                                    <div
+                                    <DatePicker
+                                        :id="id"
+                                        v-model="date"
+                                        dateFormat="dd.mm.yy"
+                                        :showIcon="false"
+                                        :maxDate="maxSelectableDate"
+                                        :invalid="invalid"
+                                        :aria-invalid="invalid || undefined"
+                                        :aria-describedby="describedBy"
+                                        class="w-full"
+                                        inputClass="w-full! cursor-pointer! border-none!"
+                                    />
+                                </FormField>
+
+                                <div
+                                    v-if="
+                                        proposalValidationFailure ||
+                                        generalProposalIssues.length
+                                    "
+                                    class="
+                                        col-span-12
+                                        flex
+                                        flex-col
+                                        gap-1
+                                    "
+                                    role="status"
+                                >
+                                    <p
+                                        v-if="proposalValidationFailure"
                                         class="
-                                            flex
-                                            flex-col
-                                            gap-2
+                                            m-0
+                                            text-mini
+                                            text-danger
                                         "
                                     >
-                                        <div
-                                            v-for="(
-                                                row,
-                                                index
-                                            ) in procedures"
-                                            :key="
-                                                index
-                                            "
-                                            class="
-                                                flex
-                                                items-end
-                                                gap-4
-                                            "
-                                        >
-                                            <div
-                                                class="
-                                                    min-w-0
-                                                    flex-1
-                                                "
-                                            >
-                                                <label
-                                                    :for="
-                                                        `procedure-${index}`
-                                                    "
-                                                    class="
-                                                        mb-1
-                                                        block
-                                                        text-normal
-                                                    "
-                                                >
-                                                    Výkon
-                                                </label>
+                                        {{ proposalValidationFailure }}
+                                    </p>
 
-                                                <AutoComplete
-                                                    :id="
-                                                        `procedure-${index}`
-                                                    "
-                                                    v-model="
-                                                        row.procedure
-                                                    "
-                                                    :suggestions="
-                                                        filteredProcedures
-                                                    "
-                                                    @complete="
-                                                        searchProcedures
-                                                    "
-                                                    :virtualScrollerOptions="{
-                                                        itemSize:
-                                                            38,
-                                                    }"
-                                                    optionLabel="code"
-                                                    dropdown
-                                                    dropdownMode="blank"
-                                                    :minLength="0"
-                                                    completeOnFocus
-                                                    class="
-                                                        w-full
-                                                    "
-                                                    inputClass="
-                                                        w-full!
-                                                        shadow-none!
-                                                        bg-white!
-                                                        focus:ring-0!
-                                                        focus:shadow-none!
-                                                        border-0!
-                                                    "
-                                                >
-                                                    <template
-                                                        #option="{
-                                                            option,
-                                                        }"
-                                                    >
-                                                        <div
-                                                            class="
-                                                                flex
-                                                                flex-col
-                                                            "
-                                                        >
-                                                            <span
-                                                                class="
-                                                                    shrink-0
-                                                                    font-medium
-                                                                "
-                                                            >
-                                                                {{
-                                                                    option.code
-                                                                }}
-                                                            </span>
+                                    <p
+                                        v-for="issue in generalProposalIssues"
+                                        :key="
+                                            issueKey(
+                                                issue,
+                                            )
+                                        "
+                                        class="
+                                            m-0
+                                            text-mini
+                                        "
+                                        :class="
+                                            issueTextClass(
+                                                issue,
+                                            )
+                                        "
+                                    >
+                                        {{ issue.message }}
+                                    </p>
+                                </div>
+                            </div>
 
-                                                            <span>
-                                                                {{
-                                                                    option.description
-                                                                }}
-                                                            </span>
-                                                        </div>
-                                                    </template>
-                                                </AutoComplete>
-                                            </div>
+                            <div
+                                class="
+                                    flex
+                                    shrink-0
+                                    items-center
+                                    gap-2
+                                    justify-end
+                                "
+                            >
+                                <AdonisButton
+                                    v-if="hasScanDocument"
+                                    variant="accent"
+                                    :loading="loadingOcrPrefill"
+                                    @click="
+                                        prefillFromLatestScanWithAi
+                                    "
+                                />
 
-                                            <div
-                                                class="
-                                                    min-w-0
-                                                    flex-1
-                                                "
-                                            >
-                                                <label
-                                                    :for="
-                                                        `frequency-${index}`
-                                                    "
-                                                    class="
-                                                        mb-1
-                                                        block
-                                                        text-normal
-                                                    "
-                                                >
-                                                    Frekvencia realizácie
-                                                </label>
-
-                                                <Select
-                                                    :id="
-                                                        `frequency-${index}`
-                                                    "
-                                                    v-model="
-                                                        row.frequency
-                                                    "
-                                                    :options="
-                                                        frequencyOptions
-                                                    "
-                                                    optionLabel="label"
-                                                    optionValue="value"
-                                                    placeholder="
-                                                        Vyberte frekvenciu
-                                                    "
-                                                    class="
-                                                        w-full
-                                                        border-none!
-                                                    "
-                                                />
-                                            </div>
-
-                                            <AppButton
-                                                v-if="
-                                                    index ===
-                                                    procedures.length -
-                                                        1
-                                                "
-                                                type="button"
-                                                variant="accent"
-                                                icon="
-                                                    bi
-                                                    bi-plus
-                                                "
-                                                aria-label="
-                                                    Pridať výkon
-                                                "
-                                                class="
-                                                    w-7!
-                                                    min-w-7!
-                                                    px-0!
-                                                "
-                                                @click="
-                                                    addProcedure
-                                                "
-                                            />
-
-                                            <AppButton
-                                                v-else
-                                                type="button"
-                                                variant="danger"
-                                                icon="
-                                                    bi
-                                                    bi-eraser
-                                                "
-                                                aria-label="
-                                                    Odstrániť výkon
-                                                "
-                                                class="
-                                                    w-7!
-                                                    min-w-7!
-                                                    px-0!
-                                                "
-                                                @click="
-                                                    removeProcedure(
-                                                        index,
-                                                    )
-                                                "
-                                            />
-                                        </div>
-                                    </div>
-                                </FormField>
+                                <AppButton
+                                    type="submit"
+                                    variant="accent"
+                                    label="Generovať dokument"
+                                    :loading="isGenerating"
+                                    loading-label="Generujem"
+                                    :disabled="!patientId"
+                                />
                             </div>
                         </div>
+                      </div>
 
-                        <!-- FIXED FORM ACTIONS -->
-                        <div
-                            class="
-                                flex
-                                shrink-0
-                                items-center
-                                justify-end
-                                gap-2
-                                p-6
-                                pt-4
-                            "
-                        >
-                            <AdonisButton
-                                v-if="
-                                    hasScanDocument
-                                "
-                                :loading="
-                                    loadingOcrPrefill
-                                "
-                                @click="
-                                    prefillFromLatestScanWithAi
-                                "
-                            />
+                      
 
-                            <AppButton
-                                type="submit"
-                                variant="accent"
-                                label="
-                                    Generovať dokument
-                                "
-                                :loading="
-                                    isGenerating
-                                "
-                                loading-label="
-                                    Generujem
-                                "
-                                :disabled="
-                                    !patientId
-                                "
-                            />
-                        </div>
-                    </section>
+                  </section>
                 </form>
             </aside>
 
@@ -3222,129 +4103,22 @@ onBeforeUnmount(() => {
 
             <section
                 class="
+                    h-full
                     min-h-0
                     min-w-0
                     overflow-hidden
-                    border-l
-                    border-darkgrey/20
-                    pl-6
+                    rounded-md
                 "
                 aria-label="
                     Náhľad dokumentu
                 "
             >
-                <div
-                    class="
-                        flex
-                        h-full
-                        min-h-0
-                        flex-col
-                    "
-                >
-                    <div
-                        class="
-                            min-h-0
-                            flex-1
-                            overflow-y-auto
-                            bg-white
-                            px-6
-                            pb-6
-                        "
-                    >
-                        <div
-                            class="
-                                flex
-                                min-h-full
-                                justify-center
-                            "
-                        >
-                            <div
-                                ref="
-                                    previewPageRef
-                                "
-                                class="
-                                    relative
-                                    aspect-[210/297]
-                                    w-full
-                                    max-w-3xl
-                                    self-start
-                                    overflow-hidden
-                                    border
-                                    border-almostwhite/50
-                                    bg-white
-                                    shadow-lg
-                                "
-                            >
-                                <iframe
-                                    v-if="
-                                        previewHtml
-                                    "
-                                    :srcdoc="
-                                        previewHtml
-                                    "
-                                    title="
-                                        Náhľad návrhu ošetrovateľskej starostlivosti
-                                    "
-                                    :style="
-                                        previewFrameStyle
-                                    "
-                                    class="
-                                        absolute
-                                        left-0
-                                        top-0
-                                        border-0
-                                    "
-                                />
-
-                                <div
-                                    v-else
-                                    class="
-                                        flex
-                                        h-full
-                                        items-center
-                                        justify-center
-                                        p-8
-                                        text-center
-                                        text-normal
-                                        text-darkgrey
-                                    "
-                                >
-                                    {{
-                                        previewError ??
-                                        'Náhľad dokumentu'
-                                    }}
-                                </div>
-
-                                <div
-                                    v-if="
-                                        isPreviewLoading
-                                    "
-                                    class="
-                                        absolute
-                                        inset-0
-                                        flex
-                                        items-center
-                                        justify-center
-                                        bg-white/75
-                                    "
-                                >
-                                    <i
-                                        class="
-                                            bi
-                                            bi-arrow-repeat
-                                            animate-spin
-                                            text-xl
-                                            text-accent
-                                        "
-                                        aria-label="
-                                            Aktualizujem náhľad
-                                        "
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <DocumentPreviewViewer
+                    :html="previewHtml"
+                    :loading="isPreviewLoading"
+                    :error="previewError"
+                    title="Náhľad návrhu ošetrovateľskej starostlivosti"
+                />
             </section>
         </div>
     </div>

@@ -173,7 +173,7 @@ watch(
 </script>
 
 <template>
-    <aside class="flex h-full w-64 flex-col border-0! bg-darkgrey! p-4 text-tag2! border-y border-tag2!">
+    <aside class="flex h-full w-64 flex-col bg-darkgrey! p-4 py-2 text-tag2! border-y border-l border-tag2!">
         <div class="flex-1 space-y-4 overflow-y-auto">
             <RouterLink v-if="auth.currentRole === 'nurse'" :to="{ name: 'patients' }"
                 class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-tag2 hover:!text-white text-normal">

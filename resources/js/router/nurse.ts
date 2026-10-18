@@ -71,7 +71,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         meta: {
             title: 'Export',
             sectionRoot: 'data',
-            sidebar: showOnSidebar
+            sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -293,7 +294,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         meta: {
             title: 'Pacient',
             sectionRoot: 'patient',
-            sidebar: false
+            sidebar: false,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -374,7 +376,8 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
         meta: {
             title: 'Nastavenia',
             sectionRoot: 'settings',
-            sidebar: showOnSidebar
+            sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -410,6 +413,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
             sectionTitle: 'Prehľad',
             title: 'Pacienti',
             sidebar: false,
+            secondaryNavbar: true,
         },
     },
     {

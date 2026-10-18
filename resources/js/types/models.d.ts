@@ -206,12 +206,15 @@ export interface InsuranceCompany {
   // relations
   patients: Patient[]
   branches: Branch[]
+  insurance_rule_sets: InsuranceRuleSet[]
   // counts
   patients_count: number
   branches_count: number
+  insurance_rule_sets_count: number
   // exists
   patients_exists: boolean
   branches_exists: boolean
+  insurance_rule_sets_exists: boolean
 }
 
 export interface TextBlock {
@@ -696,16 +699,19 @@ export interface Procedure {
   // relations
   patient_dekurz_templates: PatientProcedureDekurzTemplate[]
   dekurz_entries: DekurzEntry[]
+  insurance_rules: InsuranceRule[]
   insurance_companies_prices: InsuranceCompany[]
   insurance_companies_prices_minimal: InsuranceCompany[]
   // counts
   patient_dekurz_templates_count: number
   dekurz_entries_count: number
+  insurance_rules_count: number
   insurance_companies_prices_count: number
   insurance_companies_prices_minimal_count: number
   // exists
   patient_dekurz_templates_exists: boolean
   dekurz_entries_exists: boolean
+  insurance_rules_exists: boolean
   insurance_companies_prices_exists: boolean
   insurance_companies_prices_minimal_exists: boolean
 }
@@ -849,6 +855,30 @@ export interface Visit {
   branch_exists: boolean
 }
 
+export interface InsuranceRuleSet {
+  // columns
+  id: number
+  insurance_company_id: number
+  care_type: string
+  name: string
+  valid_from: string
+  valid_to: string | null
+  source_url: string | null
+  source_version: string | null
+  source_published_at: string | null
+  is_active: boolean
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  insurance_company: InsuranceCompany
+  rules: InsuranceRule[]
+  // counts
+  rules_count: number
+  // exists
+  insurance_company_exists: boolean
+  rules_exists: boolean
+}
+
 export interface ReportMonth {
   // columns
   id: number
@@ -990,6 +1020,29 @@ export interface PointClaimBatch {
   // exists
   lines_exists: boolean
   document_exists: boolean
+}
+
+export interface InsuranceRule {
+  // columns
+  id: number
+  rule_set_id: number
+  code: string
+  type: string
+  severity: string
+  procedure_id: number | null
+  parameters: Array<unknown>
+  message: string | null
+  source_reference: string | null
+  enabled: boolean
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  rule_set: InsuranceRuleSet
+  procedure: Procedure
+  // counts
+  // exists
+  rule_set_exists: boolean
+  procedure_exists: boolean
 }
 
 export interface PatientProcedureDekurzTemplate {

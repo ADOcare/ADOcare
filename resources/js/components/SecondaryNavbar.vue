@@ -58,34 +58,53 @@ const activeKey = computed(() => {
 
 function linkClass(key: string) {
   return [
-    'text-mini! underline! px-sm! transition-colors',
+    'text-mini! underline px-2! transition-colors',
     activeKey.value === key ? 'text-accent!' : 'text-darkgrey! hover:text-accent!'
   ]
 }
 </script>
 
 <template>
-  <Menubar class="pb-6 justify-between flex items-center">
+  <Menubar
+    class="
+      flex
+      items-center
+      justify-between
+      bg-tag2!
+      border-y!
+      border-darkgrey!
+      px-3!
+      py-3!
+    "
+  >
     <template #start>
-      <div class="flex">
-        <h1 class="text-darkgrey! border-r! border-accent! pr-sm!">
+      <div class="flex items-center text-white!">
+        <h2 class="border-r! border-white! pr-2! text-normal!">
           {{ h1Title }}
-        </h1>
-        <h1 v-if="h2Title" class="text-darkgrey! text-darkgrey! px-sm! font-light!">
+        </h2>
+        <h2 v-if="h2Title" class="px-2! text-normal!">
           {{ h2Title }}
-        </h1>
+        </h2>
       </div>
     </template>
 
     <template #end>
-      <RouterLink
-        v-for="l in links"
-        :key="l.key"
-        :to="l.to"
-        :class="linkClass(l.key)"
-      >
-        {{ l.label }}
-      </RouterLink>
+      <div class="flex items-center gap-2">
+        <div
+          id="secondary-navbar-document-actions"
+          class="flex items-center gap-2 empty:hidden"
+          aria-label="Referenčné dokumenty"
+        />
+
+        <RouterLink
+          v-for="l in links"
+          :key="l.key"
+          :to="l.to"
+          :class="linkClass(l.key)"
+        >
+          {{ l.label }}
+        </RouterLink>
+      </div>
     </template>
 
   </Menubar>

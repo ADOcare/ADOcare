@@ -3,16 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Filters\ApiQuery;
-use App\Http\Resources\BaseCollection;
-use App\Models\Document;
-use App\Models\Patient;
-use App\Services\ProposalDocumentService;
-use App\Services\ProposalOcrPrefillService;
-use App\Services\DocumentService;
 use App\Http\Requests\PreviewProposalRequest;
 use App\Http\Requests\StoreProposalRequest;
-use Illuminate\Http\Request;
+use App\Http\Requests\ValidateProposalRulesRequest;
+use App\Models\Document;
+use App\Models\Patient;
+use App\Services\AdosProposalValidationService;
+use App\Services\DocumentService;
+use App\Services\ProposalDocumentService;
+use App\Services\ProposalOcrPrefillService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -21,13 +20,14 @@ class ProposalDocumentController extends Controller
     public function __construct(
         private ProposalDocumentService $service,
         private ProposalOcrPrefillService $ocrPrefillService,
-    ) {
-    }
+        private AdosProposalValidationService $proposalValidationService,
+    ) {}
 
     /**
      * Store a new proposal document.
      *
      * @group Documents
+     *
      * @bodyParam patient_id integer required Patient ID. Example: 1
      * @bodyParam medical_diagnosis_ids integer[] nullable Array of medical diagnosis IDs. Example: [1, 2]
      * @bodyParam nurse_diagnosis_ids integer[] nullable Array of nurse diagnosis IDs. Example: [3, 4]
@@ -36,16 +36,41 @@ class ProposalDocumentController extends Controller
      * @bodyParam care_plan string required
      * @bodyParam expected_duration string required
      * @bodyParam procedures array nullable Array of procedures
+     *
      * @response 201 {"document_id":123, "proposal": {"document_id":123}}
      */
     public function store(StoreProposalRequest $request)
     {
-        [$document, $payload] = $this->service->createProposal($request->validated(), $request->user());
+        $data = $request->validated();
+        $validation = $this->proposalValidationService->validate(
+            Patient::query()->findOrFail($data['patient_id']),
+            $data,
+        );
+
+        if ($validation['errors'] !== []) {
+            return response()->json([
+                'message' => 'Návrh obsahuje chyby podľa pravidiel ADOS.',
+                'data' => $validation,
+            ], 422);
+        }
+
+        [$document, $payload] = $this->service->createProposal($data, $request->user());
 
         return $this->success([
             'document_id' => $document->id,
             'proposal' => $payload,
         ], 'Návrh ošetrovateľskej starostlivosti bol úspešne vytvorený', 201);
+    }
+
+    public function validateRules(ValidateProposalRulesRequest $request)
+    {
+        $data = $request->validated();
+        $result = $this->proposalValidationService->validate(
+            Patient::query()->findOrFail($data['patient_id']),
+            $data,
+        );
+
+        return $this->success($result, 'Kontrola pravidiel ADOS bola dokončená.');
     }
 
     public function previewDraft(PreviewProposalRequest $request)
@@ -64,14 +89,16 @@ class ProposalDocumentController extends Controller
      * Show proposal payload for a document (route-model binding).
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 123
+     *
      * @response 200 {"document": {"id":123}, "proposal_data": {...}}
      */
     public function show(Document $document)
     {
         $document->loadMissing('patient');
         $payload = $this->service->getProposalPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return $this->error('Dáta návrhu sa nenašli', 404);
         }
 
@@ -82,7 +109,9 @@ class ProposalDocumentController extends Controller
      * Return latest proposal for a patient (route-model binding).
      *
      * @group Documents
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @response 200 {"document_id":123, "proposal_data": {...}}
      */
     public function latestByPatient(Patient $patient)
@@ -92,7 +121,7 @@ class ProposalDocumentController extends Controller
             ->orderBy('created_at', 'desc')
             ->first();
 
-        if (!$document) {
+        if (! $document) {
             return $this->success([
                 'document_id' => null,
                 'proposal_data' => null,
@@ -100,7 +129,7 @@ class ProposalDocumentController extends Controller
         }
 
         $payload = $this->service->getProposalPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return $this->success([
                 'document_id' => $document->id,
                 'proposal_data' => null,
@@ -114,6 +143,7 @@ class ProposalDocumentController extends Controller
      * Return availability of OCR prefill from the latest scan for patient.
      *
      * @group Documents
+     *
      * @urlParam patient int required Patient ID. Example: 1
      */
     public function ocrPrefillAvailability(Patient $patient)
@@ -127,6 +157,7 @@ class ProposalDocumentController extends Controller
      * Build proposal prefill from latest patient scan OCR via Vertex AI.
      *
      * @group Documents
+     *
      * @urlParam patient int required Patient ID. Example: 1
      */
     public function prefillFromLatestScan(Patient $patient)
@@ -137,6 +168,7 @@ class ProposalDocumentController extends Controller
             return $this->error($e->getMessage(), 422);
         } catch (\Throwable $e) {
             report($e);
+
             return $this->error('Nepodarilo sa spracovať OCR dokument pomocou AI.', 500);
         }
 
@@ -153,7 +185,7 @@ class ProposalDocumentController extends Controller
         $document->loadMissing('user');
 
         $payload = $this->service->getProposalPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return $this->error('Dáta návrhu sa nenašli', 404);
         }
 
@@ -177,11 +209,11 @@ class ProposalDocumentController extends Controller
         $document->loadMissing('user');
 
         $pdfPath = app(DocumentService::class)->getTravelDocumentPdfPath($document);
-        if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
+        if (! $pdfPath || ! Storage::disk('local')->exists($pdfPath)) {
             return $this->error('PDF návrhu sa nenašlo', 500);
         }
 
-        $downloadName = pathinfo($document->name, PATHINFO_FILENAME) . '.pdf';
+        $downloadName = pathinfo($document->name, PATHINFO_FILENAME).'.pdf';
 
         return response()->download(Storage::disk('local')->path($pdfPath), $downloadName, [
             'Content-Type' => 'application/pdf',

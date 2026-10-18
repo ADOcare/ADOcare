@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\Patient;
+use App\Support\ClinicalFrequency;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Storage;
 class ProposalOcrPrefillService
 {
     private const VERTEX_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
+
     private const MAX_OCR_TEXT_CHARS = 24000;
 
     /**
@@ -147,7 +149,7 @@ class ProposalOcrPrefillService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function extractOcrText(array $payload): string
     {
@@ -253,7 +255,7 @@ class ProposalOcrPrefillService
             );
 
             if ($googleMessage !== '') {
-                $message .= ' ' . $googleMessage;
+                $message .= ' '.$googleMessage;
             }
 
             throw new \RuntimeException($message);
@@ -410,7 +412,7 @@ class ProposalOcrPrefillService
 
         $header = $this->base64UrlEncode($headerJson);
         $claimSet = $this->base64UrlEncode($claimSetJson);
-        $unsignedJwt = $header . '.' . $claimSet;
+        $unsignedJwt = $header.'.'.$claimSet;
         $signature = '';
 
         $signed = openssl_sign(
@@ -427,8 +429,8 @@ class ProposalOcrPrefillService
         }
 
         $jwt = $unsignedJwt
-            . '.'
-            . $this->base64UrlEncode($signature);
+            .'.'
+            .$this->base64UrlEncode($signature);
 
         $response = Http::asForm()
             ->timeout(30)
@@ -447,7 +449,7 @@ class ProposalOcrPrefillService
             $message = 'Nepodarilo sa získať Vertex access token.';
 
             if ($googleMessage !== '') {
-                $message .= ' ' . $googleMessage;
+                $message .= ' '.$googleMessage;
             }
 
             throw new \RuntimeException($message);
@@ -478,26 +480,28 @@ class ProposalOcrPrefillService
 
     private function buildPrompt(string $ocrText): string
     {
+        $frequencyValues = implode('"|"', ClinicalFrequency::canonicalValues());
+
         return "Si asistent pre zdravotnícky systém. Z OCR textu extrahuj údaje pre návrh ošetrovateľskej starostlivosti.\n"
-            . "Vráť výlučne JSON bez markdownu a bez ďalšieho textu.\n"
-            . "Použi presne tento formát:\n"
-            . "{\n"
-            . "  \"medical_diagnosis_codes\": string[],\n"
-            . "  \"nurse_diagnosis_codes\": string[],\n"
-            . "  \"epicrisis_description\": string,\n"
-            . "  \"care_plan\": string,\n"
-            . "  \"patient_mobility\": (\"H\"|\"I\"|\"F\")[],\n"
-            . "  \"expected_duration\": (\"one_month\"|\"three_months\"|\"six_months\"|\"over_six_months\"|\"\"),\n"
-            . "  \"procedures\": [{ \"code\": string, \"frequency\": (\"weekdays\"|\"weekends\"|\"daily\"|\"every_other_day\"|\"three_times_weekly\"|\"twice_weekly\"|\"once_weekly\"|\"twice_monthly\"|\"once_monthly\"|\"as_needed\"|\"\") }]\n"
-            . "}\n"
-            . "Ak niečo nie je možné spoľahlivo zistiť, použi prázdnu hodnotu.\n"
-            . "Nedomýšľaj kódy diagnóz ani výkonov.\n\n"
-            . "OCR TEXT:\n"
-            . $ocrText;
+            ."Vráť výlučne JSON bez markdownu a bez ďalšieho textu.\n"
+            ."Použi presne tento formát:\n"
+            ."{\n"
+            ."  \"medical_diagnosis_codes\": string[],\n"
+            ."  \"nurse_diagnosis_codes\": string[],\n"
+            ."  \"epicrisis_description\": string,\n"
+            ."  \"care_plan\": string,\n"
+            ."  \"patient_mobility\": (\"H\"|\"I\"|\"F\")[],\n"
+            ."  \"expected_duration\": (\"one_month\"|\"three_months\"|\"six_months\"|\"over_six_months\"|\"\"),\n"
+            ."  \"procedures\": [{ \"code\": string, \"frequency\": (\"{$frequencyValues}\"|\"\") }]\n"
+            ."}\n"
+            ."Ak niečo nie je možné spoľahlivo zistiť, použi prázdnu hodnotu.\n"
+            ."Nedomýšľaj kódy diagnóz ani výkonov.\n\n"
+            ."OCR TEXT:\n"
+            .$ocrText;
     }
 
     /**
-     * @param array<string, mixed> $decoded
+     * @param  array<string, mixed>  $decoded
      * @return array<string, mixed>
      */
     private function normalizeGeminiOutput(array $decoded): array
@@ -539,19 +543,7 @@ class ProposalOcrPrefillService
             $duration = '';
         }
 
-        $allowedFrequency = [
-            'weekdays',
-            'weekends',
-            'daily',
-            'every_other_day',
-            'three_times_weekly',
-            'twice_weekly',
-            'once_weekly',
-            'twice_monthly',
-            'once_monthly',
-            'as_needed',
-            '',
-        ];
+        $allowedFrequency = ClinicalFrequency::canonicalValues();
 
         $procedures = [];
 
@@ -565,7 +557,7 @@ class ProposalOcrPrefillService
             }
 
             $code = trim((string) ($procedure['code'] ?? ''));
-            $frequency = trim((string) ($procedure['frequency'] ?? ''));
+            $frequency = ClinicalFrequency::normalize(trim((string) ($procedure['frequency'] ?? '')));
 
             if (
                 $frequency !== ''

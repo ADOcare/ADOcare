@@ -165,7 +165,16 @@
         };
 
         $frequencyMap = [
+            'once' => 'Jednorazovo',
             'daily' => 'Denne',
+            'twice_daily' => '2× denne',
+            'three_times_daily' => '3× denne',
+            '1x_daily' => '1x denne',
+            '2x_daily' => '2x denne',
+            '3x_daily' => '3x denne',
+            '4x_daily' => '4x denne',
+            '5x_daily' => '5x denne',
+            '6x_daily' => '6x denne',
             'every_other_day' => 'Každý druhý deň',
             'three_times_weekly' => '3x týždenne',
             'twice_weekly' => '2x týždenne',

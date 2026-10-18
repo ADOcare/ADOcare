@@ -7,6 +7,7 @@ import { useToast } from 'primevue/usetoast'
 import Button from 'primevue/button'
 
 import Navbar from '@/components/Navbar.vue'
+import SecondaryNavbar from '@/components/SecondaryNavbar.vue'
 import Footer from '@/components/Footer.vue'
 import Sidebar from '@/components/Sidebar.vue'
 import TercialNavbar from './components/TercialNavbar.vue'
@@ -55,6 +56,7 @@ const isLoggedIn = computed(() => auth.isAuthenticated)
 const showNavbar = computed(() => route.meta.shownavbar !== false)
 const showFooter = computed(() => route.meta.showfooter !== false)
 const usePagePadding = computed(() => route.meta.pagePadding !== false)
+const showSecondaryNavbar = computed(() => route.meta.secondaryNavbar === true)
 const hasQuartalNavbar = computed(() => route.meta.quartalNavbar === true)
 const pageContextKey = computed(() => {
     return `${route.fullPath}:${auth.currentRole ?? 'guest'}:${auth.currentBranch?.id ?? 'none'}`
@@ -107,9 +109,13 @@ onBeforeUnmount(() => {
         <div class="flex flex-1 overflow-hidden">
             <div class="flex min-w-0 flex-1 flex-col">
                 <TercialNavbar v-if="isLoggedIn && showNavbar" class="flex-none" />
+                <SecondaryNavbar
+                    v-if="isLoggedIn && showNavbar && showSecondaryNavbar"
+                    class="flex-none"
+                />
 
                 <div
-                    class="relative min-h-0 flex-1 bg-white"
+                    class="relative isolate min-h-0 flex-1 bg-white"
                     :class="[
                         usePagePadding
                             ? hasQuartalNavbar

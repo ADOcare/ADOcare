@@ -25,6 +25,11 @@ class Procedure extends Model
         return $this->hasMany(DekurzEntry::class);
     }
 
+    public function insuranceRules()
+    {
+        return $this->hasMany(InsuranceRule::class);
+    }
+
 
     // Procedure prices based on insurance companies
     public function insuranceCompaniesPrices()

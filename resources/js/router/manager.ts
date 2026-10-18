@@ -42,6 +42,7 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
         meta: {
             title: 'Výkonnosť',
             sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -75,6 +76,7 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
         meta: {
             title: 'Prehľady',
             sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -100,6 +102,7 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
             title: 'Pomocník',
             sectionRoot: 'manager-wizards',
             sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -122,6 +125,7 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
         meta: {
             title: 'Dokumenty',
             sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {
@@ -153,6 +157,7 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
             title: 'Nastavenia',
             sectionRoot: 'manager-settings',
             sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
 
@@ -184,6 +189,7 @@ const managerRoutes: Readonly<RouteRecordRaw[]> = [
             title: 'Spoločnosť',
             sectionRoot: 'manager-company',
             sidebar: showOnSidebar,
+            secondaryNavbar: true,
         },
         children: [
             {

@@ -2,42 +2,66 @@
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\Document;
 use App\Models\Patient;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use App\Models\Branch;
-use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 
 class ProposalDocumentService
 {
-    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
-    {
-    }
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit) {}
 
     /**
      * Create proposal document and persist JSON payload.
+     *
      * @return array [Document, array(payload)]
      */
     public function createProposal(array $data, $actor): array
     {
         $patient = Patient::findOrFail($data['patient_id']);
         $branch = Branch::findOrFail($data['branch_id']);
+        $insuranceCompany = $this->insuranceCompanyFor($patient);
 
         $document = Document::create([
             'patient_id' => $patient->id,
             'user_id' => $actor->id,
             'type' => 'proposal',
             'mime_type' => 'application/json',
-            'name' => 'navrh_' . now()->format('d.m.Y'),
-            'path' => 'proposals/' . now()->timestamp . '.json', 
+            'name' => 'navrh_'.now()->format('d.m.Y'),
+            'path' => 'proposals/'.now()->timestamp.'.json',
             'period' => date('Y-m', strtotime($data['date'])),
             'branch_id' => $data['branch_id'],
-            ]);
+            'insurance_company_id' => $insuranceCompany?->id,
+        ]);
 
         $payload = $this->buildProposalData($data, $actor, $patient, $branch, $document->id);
 
         Storage::disk('local')->put($document->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        $nurseDiagnosisIds = collect($data['nurse_diagnosis_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique();
+
+        if ($nurseDiagnosisIds->isNotEmpty()) {
+            $now = now();
+            $companyId = (int) $branch->getAttribute('company_id');
+
+            DB::table('proposal_nurse_diagnoses')->insertOrIgnore(
+                $nurseDiagnosisIds
+                    ->map(fn ($nurseDiagnosisId) => [
+                        'document_id' => $document->getKey(),
+                        'company_id' => $companyId,
+                        'nurse_diagnosis_id' => $nurseDiagnosisId,
+                        'active' => true,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ])
+                    ->all(),
+            );
+        }
 
         $this->immediateAudit->documentsChanged([$document]);
 
@@ -60,34 +84,41 @@ class ProposalDocumentService
         $doctor = $patient->doctor;
 
         $diagnosis = [];
-        if (!empty($data['medical_diagnosis_ids']) && is_array($data['medical_diagnosis_ids'])) {
+        if (! empty($data['medical_diagnosis_ids']) && is_array($data['medical_diagnosis_ids'])) {
             foreach ($data['medical_diagnosis_ids'] as $diagId) {
                 $d = DB::table('diagnoses')->find((int) $diagId);
                 if ($d) {
-                    $diagnosis[] = $d->code . ' - ' . $d->description;
+                    $diagnosis[] = $d->code.' - '.$d->description;
                 }
             }
         }
 
         $nurseDiagnosis = [];
-        if (!empty($data['nurse_diagnosis_ids']) && is_array($data['nurse_diagnosis_ids'])) {
+        if (! empty($data['nurse_diagnosis_ids']) && is_array($data['nurse_diagnosis_ids'])) {
             foreach ($data['nurse_diagnosis_ids'] as $nurseDiagId) {
                 $nd = DB::table('nurse_diagnoses')->find((int) $nurseDiagId);
                 if ($nd) {
-                    $nurseDiagnosis[] = $nd->code . ' - ' . $nd->description;
+                    $nurseDiagnosis[] = $nd->code.' - '.$nd->description;
                 }
             }
         }
 
         $procedures = [];
-        if (!empty($data['procedures']) && is_array($data['procedures'])) {
+        if (! empty($data['procedures']) && is_array($data['procedures'])) {
             foreach ($data['procedures'] as $procEntry) {
-                if (empty($procEntry['procedure_id'])) continue;
+                if (empty($procEntry['procedure_id'])) {
+                    continue;
+                }
                 $proc = DB::table('procedures')->find((int) $procEntry['procedure_id']);
-                if (! $proc) continue;
+                if (! $proc) {
+                    continue;
+                }
                 $procedures[] = [
                     'code' => $proc->code,
                     'frequency' => $procEntry['frequency'] ?? '',
+                    'details' => is_array($procEntry['details'] ?? null)
+                        ? $procEntry['details']
+                        : [],
                 ];
             }
         }
@@ -95,15 +126,15 @@ class ProposalDocumentService
         return [
             'company_id' => $company?->id,
             'representative_id' => $branch->representative?->id ?? null,
-            'representative_name' => trim(($branch->representative?->title ?? '') . ' ' . ($branch->representative?->first_name ?? '') . ' ' . ($branch->representative?->last_name ?? '')),
+            'representative_name' => trim(($branch->representative?->title ?? '').' '.($branch->representative?->first_name ?? '').' '.($branch->representative?->last_name ?? '')),
             'company_address' => $company?->address ?? '',
             'company_name' => $company?->name ?? '',
-            'user_name' => trim(' ' . ($actor->title ?? '')) . ' ' . ($actor->first_name ?? '') . ' ' . ($actor->last_name ?? ''),
-            'doctor_name' => trim(($doctor->title ?? '') . ' ' . ($doctor->first_name ?? '') . ' ' . ($doctor->last_name ?? '')),
-            'patient_name' => trim(($patient->first_name ?? '') . ' ' . ($patient->last_name ?? '') . ' ' . ($patient->title ?? '')),
+            'user_name' => trim(' '.($actor->title ?? '')).' '.($actor->first_name ?? '').' '.($actor->last_name ?? ''),
+            'doctor_name' => trim(($doctor->title ?? '').' '.($doctor->first_name ?? '').' '.($doctor->last_name ?? '')),
+            'patient_name' => trim(($patient->first_name ?? '').' '.($patient->last_name ?? '').' '.($patient->title ?? '')),
             'patient_birth_number' => $patient->personal_number ?? '',
-            'patient_address' => trim(($patient->address ?? '') . ', ' . ($patient->city ?? '') . ', ' . ($patient->postal_code ?? '')),
-            'insurance_code' => $patient->insuranceCompany->branch_code ?? '',
+            'patient_address' => trim(($patient->address ?? '').', '.($patient->city ?? '').', '.($patient->postal_code ?? '')),
+            'insurance_code' => $this->insuranceCompanyFor($patient)?->branch_code ?? '',
             'diagnosis' => $diagnosis,
             'nurse_diagnosis' => $nurseDiagnosis,
             'epicrisis' => $data['epicrisis_description'] ?? '',
@@ -119,8 +150,19 @@ class ProposalDocumentService
 
     public function getProposalPayload(Document $document): ?array
     {
-        if (! $document->path || ! Storage::disk('local')->exists($document->path)) return null;
+        if (! $document->path || ! Storage::disk('local')->exists($document->path)) {
+            return null;
+        }
         $content = Storage::disk('local')->get($document->path);
+
         return json_decode($content, true);
+    }
+
+    private function insuranceCompanyFor(Patient $patient)
+    {
+        $patient->loadMissing(['currentCoverage.insuranceCompany', 'insuranceCompany']);
+
+        return $patient->currentCoverage?->insuranceCompany
+            ?? $patient->insuranceCompany;
     }
 }

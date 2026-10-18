@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Branch;
 use App\Models\Diagnosis;
+use App\Models\NurseDiagnosis;
 use App\Models\Procedure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -21,16 +22,10 @@ class ClinicalSuggestionController extends Controller
         ]);
 
         $companyId = $this->authorizedCompanyId($request, (int) $validated['branch_id']);
-        $usage = DB::table('patient_points as points')
-            ->join('branches', 'branches.id', '=', 'points.branch_id')
-            ->where('branches.company_id', $companyId)
-            ->whereNotNull('points.diagnosis_id')
-            ->groupBy('points.diagnosis_id')
-            ->select('points.diagnosis_id')
-            ->selectRaw('SUM(COALESCE(points.quantity, 1)) as usage_count');
+        $usage = $this->usageQuery($companyId, 'diagnosis');
 
         $query = Diagnosis::query()
-            ->leftJoinSub($usage, 'usage', 'usage.diagnosis_id', '=', 'diagnoses.id')
+            ->leftJoinSub($usage, 'usage', 'usage.item_id', '=', 'diagnoses.id')
             ->select(['diagnoses.id', 'diagnoses.code', 'diagnoses.description'])
             ->selectRaw('COALESCE(usage.usage_count, 0) as usage_count');
 
@@ -50,29 +45,27 @@ class ClinicalSuggestionController extends Controller
         $validated = $request->validate([
             'branch_id' => ['required', 'integer', 'exists:branches,id'],
             'diagnosis_id' => ['nullable', 'integer', 'exists:diagnoses,id'],
+            'diagnosis_ids' => ['nullable', 'array', 'max:100'],
+            'diagnosis_ids.*' => ['integer', 'distinct', 'exists:diagnoses,id'],
             'q' => ['nullable', 'string', 'max:255'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $companyId = $this->authorizedCompanyId($request, (int) $validated['branch_id']);
-        $diagnosisId = isset($validated['diagnosis_id'])
-            ? (int) $validated['diagnosis_id']
-            : null;
-
-        $usage = DB::table('patient_points as points')
-            ->join('branches', 'branches.id', '=', 'points.branch_id')
-            ->where('branches.company_id', $companyId)
-            ->whereNotNull('points.procedure_id')
+        $diagnosisIds = collect($validated['diagnosis_ids'] ?? [])
             ->when(
-                $diagnosisId !== null,
-                fn ($query) => $query->where('points.diagnosis_id', $diagnosisId),
+                isset($validated['diagnosis_id']),
+                fn ($ids) => $ids->push((int) $validated['diagnosis_id']),
             )
-            ->groupBy('points.procedure_id')
-            ->select('points.procedure_id')
-            ->selectRaw('SUM(COALESCE(points.quantity, 1)) as usage_count');
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $usage = $this->usageQuery($companyId, 'procedure', $diagnosisIds);
 
         $query = Procedure::query()
-            ->leftJoinSub($usage, 'usage', 'usage.procedure_id', '=', 'procedures.id')
+            ->leftJoinSub($usage, 'usage', 'usage.item_id', '=', 'procedures.id')
             ->select(['procedures.id', 'procedures.code', 'procedures.description'])
             ->selectRaw('COALESCE(usage.usage_count, 0) as usage_count');
 
@@ -85,6 +78,48 @@ class ClinicalSuggestionController extends Controller
             ->get();
 
         return $this->success($results, 'Procedure suggestions retrieved');
+    }
+
+    public function nurseDiagnoses(Request $request)
+    {
+        $validated = $request->validate([
+            'branch_id' => ['required', 'integer', 'exists:branches,id'],
+            'q' => ['nullable', 'string', 'max:255'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $companyId = $this->authorizedCompanyId($request, (int) $validated['branch_id']);
+        $usage = $this->usageQuery($companyId, 'nurse_diagnosis');
+
+        $query = NurseDiagnosis::query()
+            ->leftJoinSub($usage, 'usage', 'usage.item_id', '=', 'nurse_diagnoses.id')
+            ->select(['nurse_diagnoses.id', 'nurse_diagnoses.code', 'nurse_diagnoses.description'])
+            ->selectRaw('COALESCE(usage.usage_count, 0) as usage_count');
+
+        $this->applySearch($query, $validated['q'] ?? null);
+
+        $results = $query
+            ->orderByDesc('usage_count')
+            ->orderBy('nurse_diagnoses.code')
+            ->limit((int) ($validated['limit'] ?? 25))
+            ->get();
+
+        return $this->success($results, 'Nurse diagnosis suggestions retrieved');
+    }
+
+    private function usageQuery(int $companyId, string $type, array $contextIds = [])
+    {
+        return DB::table('clinical_suggestion_usages')
+            ->where('company_id', $companyId)
+            ->where('suggestion_type', $type)
+            ->when(
+                $contextIds !== [],
+                fn ($query) => $query->whereIn('context_id', $contextIds),
+                fn ($query) => $query->where('context_id', 0),
+            )
+            ->groupBy('item_id')
+            ->select('item_id')
+            ->selectRaw('SUM(usage_count) as usage_count');
     }
 
     private function authorizedCompanyId(Request $request, int $branchId): int
@@ -110,7 +145,7 @@ class ClinicalSuggestionController extends Controller
             return;
         }
 
-        $like = '%' . mb_strtolower($search) . '%';
+        $like = '%'.mb_strtolower($search).'%';
         $table = $query->getModel()->getTable();
 
         $query->where(function (Builder $query) use ($like, $table) {

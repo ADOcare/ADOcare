@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import PatientDataTable from '@/components/PatientDataTable.vue'
-import SecondaryNavbar from '@/components/SecondaryNavbar.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const authStore = useAuthStore()
@@ -20,8 +19,6 @@ const endpointUrl = computed(() => {
 
 <template>
     <div class="h-full flex flex-col overflow-hidden min-h-0">
-        <SecondaryNavbar class="flex-none" />
-
         <div class="min-h-0 flex-1">
             <PatientDataTable :endpoint-url="endpointUrl" :key="tableKey" />
         </div>

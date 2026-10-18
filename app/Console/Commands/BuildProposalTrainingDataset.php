@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\ClinicalFrequency;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
@@ -17,23 +18,23 @@ class BuildProposalTrainingDataset extends Command
     protected $description = 'Build Gemini Vertex supervised-tuning dataset for OCR -> proposal generation';
 
     private const SYSTEM_INSTRUCTION = 'You are a nursing documentation assistant. '
-        . 'Given OCR output from a healthcare document, suggest likely proposal data. '
-        . 'The output is only a draft suggestion for a nurse to review and edit. '
-        . 'Use only valid enum values for diagnosis, nurse_diagnosis, mobility, expected_duration, procedure codes, and frequencies. '
-        . 'Return JSON only.';
+        .'Given OCR output from a healthcare document, suggest likely proposal data. '
+        .'The output is only a draft suggestion for a nurse to review and edit. '
+        .'Use only valid enum values for diagnosis, nurse_diagnosis, mobility, expected_duration, procedure codes, and frequencies. '
+        .'Return JSON only.';
 
     private const ALLOWED_DIAGNOSIS_CODES = [
-        'A0010','A039','A4600','C348','C3490','C4380','C44','C443','C4430','C502','C508','C61','C673','C6730','C774','D34',
-        'E030','E1031','E1072','E1074','E1081','E11','E1172','E1174','E1180','E1190','E782','E7880','F252','F488','G0600',
-        'G21','G553','I10','I1000','I109','I1090','I25','I250','I2500','I269','I3210','I482','I509','I614','I6140','I639',
-        'I69','I693','I70','I7010','I7020','I7023','I7024','I7025','I709','I7420','I8011','I803','I83','I8300','I8320',
-        'J2090','J410','J4100','J450','J90','K30','K3511','K7680','K92','L022','L0220','L024','L0240','L028','L029',
-        'L0302','L0310','L0311','L033','L040','L08','L088','L0880','L720','L8907','L8914','L8915','L8916','L8917',
-        'L8918','L8919','L8924','L8925','L8927','L8928','L8929','L97','L9700','L984','L9840','M100','M130','M1300',
-        'M1380','M16','M1600','M1630','M17','M175','M179','M4216','M5010','M511','M54','M5400','M5403','M5404',
-        'M5405','M5406','M5408','M5417','M5419','M544','M5450','M546','M5488','M5490','M8100','N083','N183',
-        'N4180','N648','N6480','R104','R26','R262','R263','R2630','R63','R636','R6360','S2201','S3203','S3204',
-        'S325','S5180','S7201','S7210','S7211','S723','S8180','T813','T8902',
+        'A0010', 'A039', 'A4600', 'C348', 'C3490', 'C4380', 'C44', 'C443', 'C4430', 'C502', 'C508', 'C61', 'C673', 'C6730', 'C774', 'D34',
+        'E030', 'E1031', 'E1072', 'E1074', 'E1081', 'E11', 'E1172', 'E1174', 'E1180', 'E1190', 'E782', 'E7880', 'F252', 'F488', 'G0600',
+        'G21', 'G553', 'I10', 'I1000', 'I109', 'I1090', 'I25', 'I250', 'I2500', 'I269', 'I3210', 'I482', 'I509', 'I614', 'I6140', 'I639',
+        'I69', 'I693', 'I70', 'I7010', 'I7020', 'I7023', 'I7024', 'I7025', 'I709', 'I7420', 'I8011', 'I803', 'I83', 'I8300', 'I8320',
+        'J2090', 'J410', 'J4100', 'J450', 'J90', 'K30', 'K3511', 'K7680', 'K92', 'L022', 'L0220', 'L024', 'L0240', 'L028', 'L029',
+        'L0302', 'L0310', 'L0311', 'L033', 'L040', 'L08', 'L088', 'L0880', 'L720', 'L8907', 'L8914', 'L8915', 'L8916', 'L8917',
+        'L8918', 'L8919', 'L8924', 'L8925', 'L8927', 'L8928', 'L8929', 'L97', 'L9700', 'L984', 'L9840', 'M100', 'M130', 'M1300',
+        'M1380', 'M16', 'M1600', 'M1630', 'M17', 'M175', 'M179', 'M4216', 'M5010', 'M511', 'M54', 'M5400', 'M5403', 'M5404',
+        'M5405', 'M5406', 'M5408', 'M5417', 'M5419', 'M544', 'M5450', 'M546', 'M5488', 'M5490', 'M8100', 'N083', 'N183',
+        'N4180', 'N648', 'N6480', 'R104', 'R26', 'R262', 'R263', 'R2630', 'R63', 'R636', 'R6360', 'S2201', 'S3203', 'S3204',
+        'S325', 'S5180', 'S7201', 'S7210', 'S7211', 'S723', 'S8180', 'T813', 'T8902',
     ];
 
     private const ALLOWED_NURSE_DIAGNOSIS_CODES = [
@@ -49,19 +50,6 @@ class BuildProposalTrainingDataset extends Command
         '3422A', '3422B', '3422C',
         '3423', '3423A', '3423B', '3424',
         '3433', '3436', '3437', '3439', '3440',
-    ];
-
-    private const ALLOWED_FREQUENCIES = [
-        'weekdays',
-        'weekends',
-        'daily',
-        'every_other_day',
-        'three_times_weekly',
-        'twice_weekly',
-        'once_weekly',
-        'twice_monthly',
-        'once_monthly',
-        'as_needed',
     ];
 
     private const ALLOWED_MOBILITY = ['H', 'I', 'F'];
@@ -80,13 +68,15 @@ class BuildProposalTrainingDataset extends Command
         $outputDir = base_path($this->option('output'));
         $minScore = (float) $this->option('min-score');
 
-        if (!File::isDirectory($documentsDir)) {
+        if (! File::isDirectory($documentsDir)) {
             $this->error("Documents directory not found: {$documentsDir}");
+
             return self::FAILURE;
         }
 
-        if (!File::isDirectory($proposalsDir)) {
+        if (! File::isDirectory($proposalsDir)) {
             $this->error("Proposals directory not found: {$proposalsDir}");
+
             return self::FAILURE;
         }
 
@@ -98,8 +88,8 @@ class BuildProposalTrainingDataset extends Command
         $this->info('Loading proposals...');
         $proposalDocs = $this->loadJsonFiles($proposalsDir, 'proposal');
 
-        $this->line('OCR docs loaded: ' . count($ocrDocs['items']));
-        $this->line('Proposals loaded: ' . count($proposalDocs['items']));
+        $this->line('OCR docs loaded: '.count($ocrDocs['items']));
+        $this->line('Proposals loaded: '.count($proposalDocs['items']));
 
         $skipped = array_merge($ocrDocs['skipped'], $proposalDocs['skipped']);
 
@@ -113,6 +103,7 @@ class BuildProposalTrainingDataset extends Command
                     'path' => data_get($proposal, '__path'),
                     'reason' => 'missing_birth_number',
                 ];
+
                 continue;
             }
 
@@ -137,6 +128,7 @@ class BuildProposalTrainingDataset extends Command
                     'path' => data_get($ocrDoc, '__path'),
                     'reason' => 'missing_birth_number',
                 ];
+
                 continue;
             }
 
@@ -153,6 +145,7 @@ class BuildProposalTrainingDataset extends Command
                     'reason' => $matchMeta['reason'] ?? 'no_match',
                     'best_score' => $matchMeta['best_score'] ?? null,
                 ];
+
                 continue;
             }
 
@@ -168,6 +161,7 @@ class BuildProposalTrainingDataset extends Command
                     'patient_birth_number' => data_get($ocrDoc, 'patient_birth_number'),
                     'reason' => $rejectReason,
                 ];
+
                 continue;
             }
 
@@ -187,9 +181,9 @@ class BuildProposalTrainingDataset extends Command
         $bar->finish();
         $this->newLine(2);
 
-        $trainPath = $outputDir . DIRECTORY_SEPARATOR . 'train.jsonl';
-        $pairedReportPath = $outputDir . DIRECTORY_SEPARATOR . 'paired_report.json';
-        $skippedReportPath = $outputDir . DIRECTORY_SEPARATOR . 'skipped_report.json';
+        $trainPath = $outputDir.DIRECTORY_SEPARATOR.'train.jsonl';
+        $pairedReportPath = $outputDir.DIRECTORY_SEPARATOR.'paired_report.json';
+        $skippedReportPath = $outputDir.DIRECTORY_SEPARATOR.'skipped_report.json';
 
         $this->writeJsonl($trainPath, $rows);
 
@@ -204,8 +198,8 @@ class BuildProposalTrainingDataset extends Command
         );
 
         $this->info('Dataset build finished.');
-        $this->line('Train pairs: ' . count($rows));
-        $this->line('Skipped: ' . count($skipped));
+        $this->line('Train pairs: '.count($rows));
+        $this->line('Skipped: '.count($skipped));
         $this->line("train.jsonl: {$trainPath}");
         $this->line("paired_report.json: {$pairedReportPath}");
         $this->line("skipped_report.json: {$skippedReportPath}");
@@ -231,12 +225,13 @@ class BuildProposalTrainingDataset extends Command
                     JSON_THROW_ON_ERROR
                 );
 
-                if (!is_array($decoded)) {
+                if (! is_array($decoded)) {
                     $skipped[] = [
                         'type' => $type,
                         'path' => $file->getPathname(),
                         'reason' => 'invalid_json_structure',
                     ];
+
                     continue;
                 }
 
@@ -291,7 +286,7 @@ class BuildProposalTrainingDataset extends Command
 
             $nameSimilarity = $this->nameSimilarity($ocrName, $proposalName);
             $score += $nameSimilarity * 3.0;
-            $details[] = 'name_similarity=' . number_format($nameSimilarity, 2, '.', '');
+            $details[] = 'name_similarity='.number_format($nameSimilarity, 2, '.', '');
 
             if ($ocrTime && $proposalTime) {
                 $deltaSeconds = $proposalTime->diffInSeconds($ocrTime, false);
@@ -399,7 +394,7 @@ class BuildProposalTrainingDataset extends Command
                 'diagnosis_codes' => self::ALLOWED_DIAGNOSIS_CODES,
                 'nurse_diagnosis_codes' => self::ALLOWED_NURSE_DIAGNOSIS_CODES,
                 'procedure_codes' => self::ALLOWED_PROCEDURE_CODES,
-                'frequencies' => self::ALLOWED_FREQUENCIES,
+                'frequencies' => ClinicalFrequency::canonicalValues(),
                 'mobility' => self::ALLOWED_MOBILITY,
                 'expected_duration' => self::ALLOWED_DURATION,
                 'fixed_frequency_rules' => [
@@ -458,11 +453,11 @@ class BuildProposalTrainingDataset extends Command
         }
 
         $hasStructuredSignal =
-            !empty($output['diagnosis']) ||
-            !empty($output['nurse_diagnosis']) ||
-            !empty($output['procedures']);
+            ! empty($output['diagnosis']) ||
+            ! empty($output['nurse_diagnosis']) ||
+            ! empty($output['procedures']);
 
-        if (!$hasStructuredSignal) {
+        if (! $hasStructuredSignal) {
             return 'missing_structured_signal';
         }
 
@@ -536,7 +531,7 @@ class BuildProposalTrainingDataset extends Command
 
     protected function normalizeProcedures(mixed $value): array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 
@@ -544,18 +539,18 @@ class BuildProposalTrainingDataset extends Command
         $seen = [];
 
         foreach ($value as $item) {
-            if (!is_array($item)) {
+            if (! is_array($item)) {
                 continue;
             }
 
             $code = strtoupper(trim((string) data_get($item, 'code', '')));
-            $frequency = trim((string) data_get($item, 'frequency', ''));
+            $frequency = ClinicalFrequency::normalize(trim((string) data_get($item, 'frequency', '')));
 
             if ($code === '' || $frequency === '') {
                 continue;
             }
 
-            if (!in_array($code, self::ALLOWED_PROCEDURE_CODES, true)) {
+            if (! in_array($code, self::ALLOWED_PROCEDURE_CODES, true)) {
                 continue;
             }
 
@@ -567,11 +562,11 @@ class BuildProposalTrainingDataset extends Command
                 $frequency = 'weekends';
             }
 
-            if (!in_array($frequency, self::ALLOWED_FREQUENCIES, true)) {
+            if (! in_array($frequency, ClinicalFrequency::canonicalValues(), true)) {
                 continue;
             }
 
-            $key = $code . '|' . $frequency;
+            $key = $code.'|'.$frequency;
 
             if (isset($seen[$key])) {
                 continue;
@@ -590,7 +585,7 @@ class BuildProposalTrainingDataset extends Command
 
     protected function normalizeExtractedText(mixed $value): string
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return '';
         }
 
@@ -603,7 +598,7 @@ class BuildProposalTrainingDataset extends Command
 
     protected function normalizeString(mixed $value): string
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return '';
         }
 
@@ -616,14 +611,14 @@ class BuildProposalTrainingDataset extends Command
             $value = [$value];
         }
 
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return [];
         }
 
         $result = [];
 
         foreach ($value as $item) {
-            if (!is_string($item)) {
+            if (! is_string($item)) {
                 continue;
             }
 
@@ -725,7 +720,7 @@ class BuildProposalTrainingDataset extends Command
 
     protected function parseDateTime(?string $value): ?Carbon
     {
-        if (!$value || !is_string($value)) {
+        if (! $value || ! is_string($value)) {
             return null;
         }
 
@@ -755,7 +750,7 @@ class BuildProposalTrainingDataset extends Command
                     continue;
                 }
 
-                fwrite($handle, $json . "\n");
+                fwrite($handle, $json."\n");
             }
         } finally {
             fclose($handle);

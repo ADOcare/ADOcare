@@ -1,68 +1,63 @@
 <?php
 
-use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AgreementDocumentController;
 use App\Http\Controllers\Api\AppNotificationController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BatchDocumentController;
+use App\Http\Controllers\Api\BranchController;
 use App\Http\Controllers\Api\BranchDoctorController;
 use App\Http\Controllers\Api\BranchPatientController;
 use App\Http\Controllers\Api\CarController;
 use App\Http\Controllers\Api\CarDocumentController;
 use App\Http\Controllers\Api\CarServiceController;
+use App\Http\Controllers\Api\CityController;
+use App\Http\Controllers\Api\ClinicalSuggestionController;
+use App\Http\Controllers\Api\CompanyController;
+use App\Http\Controllers\Api\CountryController;
+use App\Http\Controllers\Api\CPDocumentController;
+use App\Http\Controllers\Api\DekurzDocumentController;
+use App\Http\Controllers\Api\DekurzV2Controller;
+use App\Http\Controllers\Api\DiagnosisController;
+use App\Http\Controllers\Api\DoctorController;
+use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\DZCDocumentController;
+use App\Http\Controllers\Api\GeocodeController;
+use App\Http\Controllers\Api\InsuranceCompanyController;
+use App\Http\Controllers\Api\InvoiceController;
+use App\Http\Controllers\Api\KilometersBatchDocumentController;
 use App\Http\Controllers\Api\KilometersExportController;
+use App\Http\Controllers\Api\LeaveDocumentController;
+use App\Http\Controllers\Api\MacroController;
+use App\Http\Controllers\Api\ManagerController;
+use App\Http\Controllers\Api\MonthlyExportController;
+use App\Http\Controllers\Api\MyCompanyController;
+use App\Http\Controllers\Api\NurseDiagnosisController;
 use App\Http\Controllers\Api\PatientController;
 use App\Http\Controllers\Api\PatientDeathCheckController;
 use App\Http\Controllers\Api\PatientInsuranceCheckController;
 use App\Http\Controllers\Api\PatientInsurancePrefillController;
-use App\Http\Controllers\Api\InsuranceCompanyController;
-use App\Http\Controllers\Api\DiagnosisController;
-use App\Http\Controllers\Api\ProcedureController;
-use App\Http\Controllers\Api\ClinicalSuggestionController;
 use App\Http\Controllers\Api\PatientPointController;
-use App\Http\Controllers\Api\PointsExportController;
+use App\Http\Controllers\Api\PlanController;
 use App\Http\Controllers\Api\PointClaimCandidateController;
 use App\Http\Controllers\Api\PointClaimLineResultController;
-use App\Http\Controllers\Api\BranchController;
-use App\Http\Controllers\Api\CompanyController;
-use App\Http\Controllers\Api\MyCompanyController;
-use App\Http\Controllers\Api\DoctorController;
+use App\Http\Controllers\Api\PointsBatchDocumentController;
+use App\Http\Controllers\Api\PointsExportController;
+use App\Http\Controllers\Api\ProcedureController;
+use App\Http\Controllers\Api\ProposalDocumentController;
+use App\Http\Controllers\Api\RecordDocumentController;
 use App\Http\Controllers\Api\ReportMonthController;
 use App\Http\Controllers\Api\RoleController;
-use App\Http\Controllers\Api\TextBlockController;
-use App\Http\Controllers\Api\UserController;
-use App\Http\Controllers\Api\GeocodeController;
-use \App\Http\Controllers\Api\MacroController;
-use App\Http\Controllers\Api\PlanController;
-use App\Http\Controllers\Api\DekurzController;
-use App\Http\Controllers\Api\NurseDiagnosisController;
-use App\Http\Controllers\Api\InvoiceController;
-use App\Http\Controllers\Api\DocumentController;
-use App\Http\Controllers\Api\ProposalDocumentController;
-use App\Http\Controllers\Api\AgreementDocumentController;
-use App\Http\Controllers\Api\CPDocumentController;
-use App\Http\Controllers\Api\DZCDocumentController;
-use App\Http\Controllers\Api\DekurzDocumentController;
-use App\Http\Controllers\Api\LeaveDocumentController;
-use App\Http\Controllers\Api\RecordDocumentController;
-use App\Http\Controllers\Api\PointsExportController as PointsExportControllerAlias;
-use App\Http\Controllers\Api\KilometersExportController as KilometersExportControllerAlias;
-use App\Http\Controllers\Api\KilometersBatchDocumentController;
-use App\Http\Controllers\Api\PointsBatchDocumentController;
-use App\Http\Controllers\Api\BatchDocumentController;
-use App\Http\Controllers\Api\VisitsController;
-use App\Http\Controllers\Api\CityController;
-use App\Http\Controllers\Api\ManagerController;
-use App\Http\Controllers\Api\MonthlyExportController;
-use App\Http\Controllers\Api\TotalsController;
-use App\Http\Controllers\Api\CountryController;
-use App\Http\Controllers\Api\ScanSessionController;
-use App\Http\Controllers\Api\DekurzV2Controller;
-use App\Http\Controllers\Api\ScanUploadController;
 use App\Http\Controllers\Api\ScanFileController;
+use App\Http\Controllers\Api\ScanSessionController;
+use App\Http\Controllers\Api\ScanUploadController;
 use App\Http\Controllers\Api\SubscriptionTierController;
-
-
+use App\Http\Controllers\Api\TextBlockController;
+use App\Http\Controllers\Api\TotalsController;
+use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\VisitsController;
+use App\Http\Middleware\ForceJsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Middleware\ForceJsonResponse;
 
 Route::get('/v1/scans/{sessionId}/{filename}', [\App\Http\Controllers\Api\ScanFileController::class, 'image'])
     ->middleware(['api.auth', 'subscription.active'])
@@ -89,7 +84,6 @@ Route::prefix('auth')->group(function () {
         Route::patch('profile', [AuthController::class, 'updateProfile']);
     });
 });
-
 
 Route::get('/public/documents/{document}/data', [DocumentController::class, 'publicDocumentData'])
     ->name('documents.public.data')
@@ -322,6 +316,7 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:superadmin');
     Route::prefix('clinical-suggestions')->middleware('role:any')->group(function () {
         Route::get('diagnoses', [ClinicalSuggestionController::class, 'diagnoses']);
+        Route::get('nurse-diagnoses', [ClinicalSuggestionController::class, 'nurseDiagnoses']);
         Route::get('procedures', [ClinicalSuggestionController::class, 'procedures']);
     });
     Route::apiResourceComplete('patient-points', PatientPointController::class, 'role:any');
@@ -365,8 +360,6 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:any');
     Route::delete('companies/{company}/stamp', [CompanyController::class, 'deleteStamp'])
         ->middleware('role:manager,superadmin');
-
-
 
     // Points/kilometers batch endpoints use POST for their filter payload but only ever read
     // and export existing data - they must stay available while an account is read-only.
@@ -417,6 +410,10 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::delete('/branches/{branch}/doctors/{doctor}', [BranchDoctorController::class, 'detach'])
         ->middleware('role:manager,superadmin');
 
+    Route::post('/proposals/validate-rules', [ProposalDocumentController::class, 'validateRules'])
+        ->middleware('role:any');
+    Route::post('/proposals/validate-insurance-rules', [ProposalDocumentController::class, 'validateRules'])
+        ->middleware('role:any');
     Route::post('/proposals/draft-preview', [ProposalDocumentController::class, 'previewDraft'])
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class);
@@ -450,7 +447,6 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
 
     Route::get('/dzcs/{document}/csv', [DZCDocumentController::class, 'exportCsv'])
         ->middleware(['role:any', 'can:view,document']);
-
 
     // Special dekurz endpoints
     Route::get('/dekurz/available-dates', [DekurzDocumentController::class, 'availableDates'])

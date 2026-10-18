@@ -72,6 +72,9 @@ const currentPage =
 const pageCount =
     ref(1)
 
+const previewDocumentVersion =
+    ref(0)
+
 const viewportSize =
     ref({
         width: 0,
@@ -103,6 +106,10 @@ let panInteraction:
 
 let resizeObserver:
     ResizeObserver |
+    null = null
+
+let iframeInitializationFrame:
+    number |
     null = null
 
 /* -------------------------------------------------------------------------- */
@@ -784,6 +791,18 @@ function getPageElements() {
     return []
 }
 
+function getDeclaredPageCount(
+    html: string,
+) {
+    return Math.max(
+        1,
+        html.match(
+            /\sdata-page(?:=|\s)/g,
+        )?.length ??
+            0,
+    )
+}
+
 function detectPages() {
     const document =
         getIframeDocument()
@@ -808,26 +827,8 @@ function detectPages() {
         return
     }
 
-    const totalHeight =
-        Math.max(
-            document.documentElement
-                ?.scrollHeight ??
-                0,
-
-            document.body
-                ?.scrollHeight ??
-                0,
-        )
-
     pageCount.value =
-        Math.max(
-            1,
-
-            Math.ceil(
-                totalHeight /
-                    A4_HEIGHT_PX,
-            ),
-        )
+        1
 }
 
 /* -------------------------------------------------------------------------- */
@@ -865,6 +866,38 @@ function showPage(
 
     const pageElements =
         getPageElements()
+
+    if (
+        pageElements.length >
+        1
+    ) {
+        pageElements.forEach(
+            (
+                element,
+                index,
+            ) => {
+                element.style.setProperty(
+                    'display',
+                    index ===
+                        nextPage
+                        ? 'block'
+                        : 'none',
+                    'important',
+                )
+            },
+        )
+
+        iframeWindow.scrollTo({
+            top:
+                0,
+            left:
+                0,
+            behavior:
+                'auto',
+        })
+
+        return
+    }
 
     let top =
         nextPage *
@@ -954,6 +987,27 @@ async function handleIframeLoad() {
     centerDocument()
 }
 
+function scheduleIframeInitialization() {
+    if (
+        iframeInitializationFrame !==
+        null
+    ) {
+        cancelAnimationFrame(
+            iframeInitializationFrame,
+        )
+    }
+
+    iframeInitializationFrame =
+        requestAnimationFrame(
+            () => {
+                iframeInitializationFrame =
+                    null
+
+                void handleIframeLoad()
+            },
+        )
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reset                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -980,9 +1034,25 @@ watch(
         props.html,
 
     async () => {
+        previewDocumentVersion.value++
+
         resetPreview()
 
+        pageCount.value =
+            getDeclaredPageCount(
+                props.html,
+            )
+
         await nextTick()
+
+        scheduleIframeInitialization()
+    },
+    {
+        immediate:
+            true,
+
+        flush:
+            'post',
     },
 )
 
@@ -1027,6 +1097,18 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+    if (
+        iframeInitializationFrame !==
+        null
+    ) {
+        cancelAnimationFrame(
+            iframeInitializationFrame,
+        )
+    }
+
+    iframeInitializationFrame =
+        null
+
     resizeObserver
         ?.disconnect()
 
@@ -1104,8 +1186,9 @@ onBeforeUnmount(() => {
                     v-if="
                         html
                     "
-                    ref="
-                        iframeRef
+                    ref="iframeRef"
+                    :key="
+                        previewDocumentVersion
                     "
                     :srcdoc="
                         html
@@ -1176,111 +1259,117 @@ onBeforeUnmount(() => {
                 text-white
             "
         >
-            <!-- Previous -->
-
-            <button
-                type="button"
-                :disabled="
-                    !hasPreviousPage
-                "
-                class="
-                    flex
-                    h-8
-                    w-8
-                    items-center
-                    justify-center
-                    rounded-md
-                    transition
-                    hover:bg-white/10
-                    disabled:pointer-events-none
-                    disabled:opacity-25
-                "
-                aria-label="
-                    Predchádzajúca strana
-                "
-                title="
-                    Predchádzajúca strana
-                "
-                @click="
-                    previousPage
+            <template
+                v-if="
+                    pageCount > 1
                 "
             >
-                <i
+                <!-- Previous -->
+
+                <button
+                    type="button"
+                    :disabled="
+                        !hasPreviousPage
+                    "
                     class="
-                        bi
-                        bi-chevron-left
+                        flex
+                        h-8
+                        w-8
+                        items-center
+                        justify-center
+                        rounded-md
+                        transition
+                        hover:bg-white/10
+                        disabled:pointer-events-none
+                        disabled:opacity-25
+                    "
+                    aria-label="
+                        Predchádzajúca strana
+                    "
+                    title="
+                        Predchádzajúca strana
+                    "
+                    @click="
+                        previousPage
+                    "
+                >
+                    <i
+                        class="
+                            bi
+                            bi-chevron-left
+                        "
+                    />
+                </button>
+
+                <!-- Page -->
+
+                <div
+                    class="
+                        min-w-12
+                        px-1
+                        text-center
+                        text-xs
+                        font-medium
+                    "
+                >
+                    {{
+                        currentPage +
+                        1
+                    }}
+                    /
+                    {{
+                        pageCount
+                    }}
+                </div>
+
+                <!-- Next -->
+
+                <button
+                    type="button"
+                    :disabled="
+                        !hasNextPage
+                    "
+                    class="
+                        flex
+                        h-8
+                        w-8
+                        items-center
+                        justify-center
+                        rounded-md
+                        transition
+                        hover:bg-white/10
+                        disabled:pointer-events-none
+                        disabled:opacity-25
+                    "
+                    aria-label="
+                        Nasledujúca strana
+                    "
+                    title="
+                        Nasledujúca strana
+                    "
+                    @click="
+                        nextPage
+                    "
+                >
+                    <i
+                        class="
+                            bi
+                            bi-chevron-right
+                        "
+                    />
+                </button>
+
+                <!-- Divider -->
+
+                <div
+                    class="
+                        mx-1
+                        h-5
+                        w-px
+                        bg-white/20
                     "
                 />
-            </button>
-
-            <!-- Page -->
-
-            <div
-                class="
-                    min-w-12
-                    px-1
-                    text-center
-                    text-xs
-                    font-medium
-                "
-            >
-                {{
-                    currentPage +
-                    1
-                }}
-                /
-                {{
-                    pageCount
-                }}
-            </div>
-
-            <!-- Next -->
-
-            <button
-                type="button"
-                :disabled="
-                    !hasNextPage
-                "
-                class="
-                    flex
-                    h-8
-                    w-8
-                    items-center
-                    justify-center
-                    rounded-md
-                    transition
-                    hover:bg-white/10
-                    disabled:pointer-events-none
-                    disabled:opacity-25
-                "
-                aria-label="
-                    Nasledujúca strana
-                "
-                title="
-                    Nasledujúca strana
-                "
-                @click="
-                    nextPage
-                "
-            >
-                <i
-                    class="
-                        bi
-                        bi-chevron-right
-                    "
-                />
-            </button>
-
-            <!-- Divider -->
-
-            <div
-                class="
-                    mx-1
-                    h-5
-                    w-px
-                    bg-white/20
-                "
-            />
+            </template>
 
             <!-- Zoom out -->
 

@@ -10,8 +10,8 @@ use App\Models\Procedure;
 use App\Models\User;
 use App\Policies\PatientPolicy;
 use App\Services\DekurzBuilderService;
-use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzDocumentService;
+use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzEntryBatchService;
 use App\Services\DekurzFinalizationValidator;
 use App\Services\DekurzProcedureClassifier;
@@ -20,6 +20,7 @@ use App\Services\DekurzScoringService;
 use App\Services\DekurzSupportingDocumentService;
 use App\Services\DekurzTextResolver;
 use App\Services\DekurzV2Finalizer;
+use App\Services\DekurzV2PreviewService;
 use App\Services\DekurzV2SnapshotBuilder;
 use App\Services\DocumentService;
 use App\Services\PatientProcedureDekurzTemplateService;
@@ -42,7 +43,7 @@ class DekurzV2BuilderTest extends TestCase
     {
         parent::setUp();
 
-        $app = new Container();
+        $app = new Container;
         Container::setInstance($app);
         $app->instance('config', new Repository([
             'dekurz' => require __DIR__.'/../../config/dekurz.php',
@@ -59,7 +60,7 @@ class DekurzV2BuilderTest extends TestCase
         $app->instance('db', $database->getDatabaseManager());
         $app->bind('db.schema', fn () => $database->schema());
         $app->singleton('validator', fn ($app) => new ValidationFactory(
-            new Translator(new ArrayLoader(), 'sk'),
+            new Translator(new ArrayLoader, 'sk'),
             $app,
         ));
 
@@ -142,6 +143,43 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame('Individuálne upravený denný text.', $saved['text']);
     }
 
+    public function test_preview_is_read_only_and_reflects_saved_draft_content(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $preview = new DekurzV2PreviewService($this->builder(), new DekurzDocumentService);
+
+        $beforeDraft = $preview->build($patient, '2026-10', $actor, 12);
+
+        self::assertSame(12, $beforeDraft['dekurz_number']);
+        self::assertSame('Anna Pacientová', $beforeDraft['patient_name']);
+        self::assertSame('Predvolený text pre ranu.', $beforeDraft['days'][0]['text']);
+        self::assertSame(0, Document::count());
+
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        $day = $draft->days->first(fn ($day): bool => $day->date->toDateString() === '2026-10-03');
+        $day->update(['general_note' => 'Poznámka dňa.']);
+        $day->entries->first()->update(['text' => 'Upravený denný text.']);
+        PatientPoint::query()->delete();
+
+        $afterEdit = $preview->build($patient, '2026-10', $actor);
+        $renderedDay = collect($afterEdit['days'])->firstWhere('date', '2026-10-03');
+
+        self::assertCount(3, $afterEdit['days']);
+        self::assertStringContainsString('Upravený denný text.', $renderedDay['text']);
+        self::assertStringContainsString('Poznámka dňa.', $renderedDay['text']);
+        self::assertSame(0, Document::count());
+
+        $livePreview = $preview->build($patient, '2026-10', $actor, previewDays: [[
+            'date' => '2026-10-03',
+            'general_note' => 'Práve písaná poznámka.',
+            'entries' => [['text' => 'Práve písaný text.']],
+        ]]);
+
+        self::assertCount(1, $livePreview['days']);
+        self::assertSame("Práve písaný text.\n\nPráve písaná poznámka.", $livePreview['days'][0]['text']);
+    }
+
     public function test_reconciliation_detects_added_removed_and_changed_scoring_rows(): void
     {
         $patient = Patient::findOrFail(1);
@@ -189,7 +227,7 @@ class DekurzV2BuilderTest extends TestCase
 
     public function test_template_upsert_and_reset_are_independent_from_daily_entries(): void
     {
-        $service = new PatientProcedureDekurzTemplateService(new DekurzProcedureClassifier());
+        $service = new PatientProcedureDekurzTemplateService(new DekurzProcedureClassifier);
         $patient = Patient::findOrFail(1);
         $procedure = Procedure::findOrFail(10);
         $actor = User::findOrFail(1);
@@ -215,7 +253,7 @@ class DekurzV2BuilderTest extends TestCase
         $source->update(['text' => 'Text pre ďalšie dni.', 'source' => 'manual', 'edited_at' => now()]);
         $protected->update(['text' => 'Už upravený text.', 'source' => 'manual', 'edited_at' => now()]);
 
-        $result = (new DekurzEntryBatchService())->applyToUnedited($draft, $source);
+        $result = (new DekurzEntryBatchService)->applyToUnedited($draft, $source);
 
         self::assertSame(1, $result['updated_count']);
         self::assertSame([$target->id], $result['updated_entry_ids']);
@@ -289,7 +327,7 @@ class DekurzV2BuilderTest extends TestCase
         $draft->days->flatMap->entries->first()->update(['text' => 'Neskoršia zmena.']);
 
         self::assertSame($payload, json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR));
-        self::assertSame($payload, (new DekurzDocumentService())->findDekurzFileForDocument($document));
+        self::assertSame($payload, (new DekurzDocumentService)->findDekurzFileForDocument($document));
     }
 
     public function test_finalization_rolls_back_database_and_snapshot_when_pdf_generation_fails(): void
@@ -321,8 +359,8 @@ class DekurzV2BuilderTest extends TestCase
         $patient = Patient::findOrFail(1);
         $outsider = User::findOrFail(2);
 
-        self::assertFalse((new PatientPolicy())->view($outsider, $patient));
-        self::assertFalse((new PatientPolicy())->update($outsider, $patient));
+        self::assertFalse((new PatientPolicy)->view($outsider, $patient));
+        self::assertFalse((new PatientPolicy)->update($outsider, $patient));
 
         $this->expectException(AuthorizationException::class);
         $this->initializer()->initialize($patient, '2026-10', $outsider);
@@ -330,34 +368,34 @@ class DekurzV2BuilderTest extends TestCase
 
     private function builder(): DekurzBuilderService
     {
-        $classifier = new DekurzProcedureClassifier();
+        $classifier = new DekurzProcedureClassifier;
 
         return new DekurzBuilderService(
             new DekurzScoringService($classifier),
             $classifier,
-            new DekurzTextResolver(),
-            new DekurzSupportingDocumentService(),
+            new DekurzTextResolver,
+            new DekurzSupportingDocumentService,
         );
     }
 
     private function initializer(): DekurzDraftInitializer
     {
-        $classifier = new DekurzProcedureClassifier();
+        $classifier = new DekurzProcedureClassifier;
 
         return new DekurzDraftInitializer(
             new DekurzScoringService($classifier),
-            new DekurzTextResolver(),
-            new DekurzScoringConsistencyService(),
+            new DekurzTextResolver,
+            new DekurzScoringConsistencyService,
         );
     }
 
     private function finalizationValidator(): DekurzFinalizationValidator
     {
-        $classifier = new DekurzProcedureClassifier();
+        $classifier = new DekurzProcedureClassifier;
 
         return new DekurzFinalizationValidator(
             new DekurzScoringService($classifier),
-            new DekurzScoringConsistencyService(),
+            new DekurzScoringConsistencyService,
         );
     }
 
@@ -365,14 +403,15 @@ class DekurzV2BuilderTest extends TestCase
     {
         return new DekurzV2Finalizer(
             $this->finalizationValidator(),
-            new DekurzV2SnapshotBuilder(new DekurzDocumentService(), new DekurzSupportingDocumentService()),
+            new DekurzV2SnapshotBuilder(new DekurzDocumentService, new DekurzSupportingDocumentService),
             $documentService,
         );
     }
 
     private function useInMemoryStorage(): object
     {
-        $storage = new class {
+        $storage = new class
+        {
             /** @var array<string, string> */
             public array $files = [];
 
@@ -585,10 +624,9 @@ class DekurzV2BuilderTest extends TestCase
     /** @param array<string, array<string, mixed>> $payloads */
     private function storePayloads(array $payloads): void
     {
-        Storage::swap(new class($payloads) {
-            public function __construct(private array $payloads)
-            {
-            }
+        Storage::swap(new class($payloads)
+        {
+            public function __construct(private array $payloads) {}
 
             public function disk(string $name): self
             {

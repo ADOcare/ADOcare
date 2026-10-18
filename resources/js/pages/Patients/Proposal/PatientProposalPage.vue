@@ -4070,14 +4070,14 @@ onBeforeUnmount(() => {
                                     justify-end
                                 "
                             >
-                                <AdonisButton
+                                <!-- <AdonisButton
                                     v-if="hasScanDocument"
                                     variant="accent"
                                     :loading="loadingOcrPrefill"
                                     @click="
                                         prefillFromLatestScanWithAi
                                     "
-                                />
+                                /> -->
 
                                 <AppButton
                                     type="submit"

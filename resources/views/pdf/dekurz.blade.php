@@ -39,6 +39,21 @@
             break-before: page;
         }
 
+        @media screen {
+            html,
+            body {
+                width: 210mm;
+            }
+
+            .dekurz-page {
+                width: 210mm;
+                height: 297mm;
+                margin: 0;
+                padding: 5mm 10mm;
+                overflow: hidden;
+            }
+        }
+
         .page-inner {
             width: 100%;
         }
@@ -150,7 +165,7 @@
         $sortedDays = collect($days)->sortBy('date')->values()->toArray();
 
         $estimateWrappedLines = static function (?string $text): int {
-            $normalized = trim((string) preg_replace('/\s+/u', ' ', strip_tags((string) $text)));
+            $normalized = trim(strip_tags((string) $text));
 
             if ($normalized === '') {
                 return 1;
@@ -160,8 +175,8 @@
             $lines = 0;
 
             foreach ($paragraphs as $paragraph) {
-                $length = mb_strlen(trim($paragraph));
-                $lines += max(1, (int) ceil($length / 105));
+                $line = trim((string) preg_replace('/[\t ]+/u', ' ', $paragraph));
+                $lines += max(1, (int) ceil(mb_strlen($line) / 90));
             }
 
             return max(1, $lines);
@@ -170,7 +185,36 @@
         $estimateRowLines = static function (array $row) use ($estimateWrappedLines): int {
             $descriptionLines = $estimateWrappedLines($row['text'] ?? '');
 
-            return max(2, $descriptionLines + 2);
+            return max(3, $descriptionLines + 3);
+        };
+
+        $splitTextForPages = static function (?string $text, int $maximumLines = 18) use ($estimateWrappedLines): array {
+            $text = trim((string) $text);
+
+            if ($text === '' || $estimateWrappedLines($text) <= $maximumLines) {
+                return [$text];
+            }
+
+            $tokens = preg_split('/(\s+)/u', $text, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [$text];
+            $chunks = [];
+            $current = '';
+
+            foreach ($tokens as $token) {
+                $candidate = $current.$token;
+
+                if ($current !== '' && $estimateWrappedLines($candidate) > $maximumLines) {
+                    $chunks[] = trim($current);
+                    $current = ltrim($token);
+                } else {
+                    $current = $candidate;
+                }
+            }
+
+            if (trim($current) !== '') {
+                $chunks[] = trim($current);
+            }
+
+            return $chunks ?: [''];
         };
 
         $formatVisitTime = static function ($value): string {
@@ -187,12 +231,23 @@
             }
         };
 
-        $rowsPerPageLines = 30;
+        $rowsPerPageLines = 27;
+        $layoutRows = [];
+
+        foreach ($sortedDays as $row) {
+            foreach ($splitTextForPages($row['text'] ?? '') as $chunkIndex => $textChunk) {
+                $layoutRow = $row;
+                $layoutRow['text'] = $textChunk;
+                $layoutRow['is_continuation'] = $chunkIndex > 0;
+                $layoutRows[] = $layoutRow;
+            }
+        }
+
         $pages = [];
         $currentPageRows = [];
         $currentPageLines = 0;
 
-        foreach ($sortedDays as $row) {
+        foreach ($layoutRows as $row) {
             $rowLines = $estimateRowLines($row);
 
             if (!empty($currentPageRows) && $currentPageLines + $rowLines > $rowsPerPageLines) {
@@ -221,7 +276,7 @@
             $dekurzNumber = (int) ($dekurzData['dekurz_number'] ?? 1) + $pageIdx;
         @endphp
 
-        <div class="dekurz-page">
+        <div class="dekurz-page" data-page="{{ $pageIdx + 1 }}">
             <div class="page-inner">
                 <div class="page-title">
                     DEKURZ OŠETROVATEĽSKEJ STAROSTLIVOSTI
@@ -280,7 +335,7 @@
                             <td class="align-top">
                                 <div class="text-normal">Poradové číslo dekurzu:</div>
                                 <div class="font-normal">
-                                    <strong>{{ $dekurzNumber }}</strong>
+                                    <strong data-dekurz-number>{{ $dekurzNumber }}</strong>
                                 </div>
                             </td>
                         </tr>
@@ -312,10 +367,14 @@
                                 $text = trim($row['text'] ?? '');
                             @endphp
 
-                            <tr>
+                            <tr data-dekurz-row>
                                 <td class="align-top">
                                     <div class="whitespace-pre-line text-normal">
-                                        {{ $dateStr }}<br />{{ $terrainTimeStr }}
+                                        @if (!empty($row['is_continuation']))
+                                            {{ $dateStr }}<br />pokračovanie
+                                        @else
+                                            {{ $dateStr }}<br />{{ $terrainTimeStr }}
+                                        @endif
                                     </div>
                                 </td>
 
@@ -337,7 +396,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr>
+                            <tr data-empty-state>
                                 <td colspan="2" class="empty-state-cell">Žiadne záznamy.</td>
                             </tr>
                         @endforelse
@@ -346,6 +405,73 @@
             </div>
         </div>
     @endforeach
+
+    <script>
+        (() => {
+            const initialPages = Array.from(document.querySelectorAll('.dekurz-page[data-page]'));
+            const rows = initialPages.flatMap((page) => Array.from(page.querySelectorAll('[data-dekurz-row]')));
+            const firstPage = initialPages[0];
+
+            if (!firstPage || rows.length === 0) {
+                return;
+            }
+
+            const baseNumber = Number(firstPage.querySelector('[data-dekurz-number]')?.textContent ?? 1);
+            const pageTemplate = firstPage.cloneNode(true);
+
+            pageTemplate.querySelectorAll('[data-dekurz-row], [data-empty-state]').forEach((element) => element.remove());
+            initialPages.forEach((page) => page.remove());
+
+            let pageIndex = 0;
+            let currentPage;
+            let currentBody;
+
+            const appendPage = () => {
+                const page = pageTemplate.cloneNode(true);
+                const number = page.querySelector('[data-dekurz-number]');
+
+                page.dataset.page = String(pageIndex + 1);
+                page.style.display = '';
+
+                if (number) {
+                    number.textContent = String(baseNumber + pageIndex);
+                }
+
+                document.body.appendChild(page);
+                pageIndex++;
+                currentPage = page;
+                currentBody = page.querySelector('.entries-table tbody');
+            };
+
+            const pageOverflows = () => {
+                const table = currentPage?.querySelector('.entries-table');
+
+                if (!currentPage || !table) {
+                    return false;
+                }
+
+                const pageStyle = getComputedStyle(currentPage);
+                const contentBottom = currentPage.getBoundingClientRect().bottom -
+                    Number.parseFloat(pageStyle.paddingBottom || '0');
+
+                return table.getBoundingClientRect().bottom > contentBottom - 2;
+            };
+
+            appendPage();
+
+            rows.forEach((row) => {
+                currentBody.appendChild(row);
+
+                if (pageOverflows() && currentBody.querySelectorAll('[data-dekurz-row]').length > 1) {
+                    row.remove();
+                    appendPage();
+                    currentBody.appendChild(row);
+                }
+            });
+
+            document.documentElement.dataset.pageLayoutReady = 'true';
+        })();
+    </script>
 </body>
 
 </html>

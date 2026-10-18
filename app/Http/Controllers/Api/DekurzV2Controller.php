@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DekurzBuilderRequest;
 use App\Http\Requests\InitializeDekurzDraftRequest;
+use App\Http\Requests\PreviewDekurzDraftRequest;
 use App\Http\Requests\UpdateDekurzDayRequest;
 use App\Http\Requests\UpdateDekurzEntryRequest;
 use App\Http\Requests\UpsertPatientProcedureDekurzTemplateRequest;
@@ -17,6 +18,8 @@ use App\Services\DekurzBuilderService;
 use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzEntryBatchService;
 use App\Services\DekurzV2Finalizer;
+use App\Services\DekurzV2PreviewService;
+use App\Services\DocumentService;
 use App\Services\PatientProcedureDekurzTemplateService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -28,9 +31,9 @@ class DekurzV2Controller extends Controller
         private DekurzDraftInitializer $draftInitializer,
         private DekurzEntryBatchService $entryBatch,
         private DekurzV2Finalizer $finalizer,
+        private DekurzV2PreviewService $preview,
         private PatientProcedureDekurzTemplateService $templates,
-    ) {
-    }
+    ) {}
 
     public function builder(DekurzBuilderRequest $request, Patient $patient)
     {
@@ -52,6 +55,29 @@ class DekurzV2Controller extends Controller
             $this->builder->build($patient, $month),
             'Koncept Dekurzu bol pripravený.',
         );
+    }
+
+    public function previewDraft(PreviewDekurzDraftRequest $request, DocumentService $documents)
+    {
+        $patient = Patient::query()->findOrFail($request->integer('patient_id'));
+        $this->authorize('view', $patient);
+        $payload = $this->preview->build(
+            $patient,
+            $request->validated('month'),
+            $request->user(),
+            $request->validated('dekurz_number'),
+            $request->validated('days'),
+        );
+
+        return response()->view('pdf.dekurz', [
+            'dekurzData' => $payload,
+            'signatureDataUri' => $documents->getUserSignatureDataUri((int) $request->user()->id),
+        ])->withHeaders([
+            'Content-Type' => 'text/html; charset=utf-8',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, private',
+            'Pragma' => 'no-cache',
+            'Expires' => '0',
+        ]);
     }
 
     public function upsertTemplate(

@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\Document;
 use App\Models\Patient;
+use App\Models\PatientDekurzCustomTrack;
+use App\Models\PatientDekurzCustomTrackPeriod;
 use App\Models\PatientPoint;
 use App\Models\PatientProcedureDekurzTemplate;
 use App\Models\Procedure;
@@ -19,6 +21,7 @@ use App\Services\DekurzScoringConsistencyService;
 use App\Services\DekurzScoringService;
 use App\Services\DekurzSupportingDocumentService;
 use App\Services\DekurzTextResolver;
+use App\Services\DekurzTimelineReadinessService;
 use App\Services\DekurzV2Finalizer;
 use App\Services\DekurzV2PreviewService;
 use App\Services\DekurzV2SnapshotBuilder;
@@ -71,6 +74,9 @@ class DekurzV2BuilderTest extends TestCase
         $this->createExistingTables();
         (require __DIR__.'/../../database/migrations/2026_10_15_000000_create_dekurz_v2_foundation_tables.php')->up();
         (require __DIR__.'/../../database/migrations/2026_10_15_010000_add_dekurz_builder_fields.php')->up();
+        (require __DIR__.'/../../database/migrations/2026_10_19_000000_add_sequential_tracks_to_dekurz.php')->up();
+        (require __DIR__.'/../../database/migrations/2026_10_19_030000_add_exclusion_to_dekurz_entries.php')->up();
+        (require __DIR__.'/../../database/migrations/2026_10_21_000000_link_legacy_dekurz_templates_to_custom_tracks.php')->up();
         $this->seedRecords();
     }
 
@@ -91,10 +97,11 @@ class DekurzV2BuilderTest extends TestCase
         $medication = collect($result['procedures'])->firstWhere('code', '3416');
         self::assertSame(5, $medication['total_quantity']);
         self::assertSame(2, $medication['scoring_rows_count']);
-        self::assertSame([100, 101], array_column($medication['scoring_rows'], 'id'));
         self::assertSame(['2026-10-03'], $medication['dates']);
         self::assertSame(['2026-10-01', '2026-10-03', '2026-10-05'], array_column($result['days'], 'date'));
         self::assertNotContains('2026-10-02', array_column($result['days'], 'date'));
+        $medicationEntry = collect($result['days'][1]['entries'])->firstWhere('procedure_id', 10);
+        self::assertSame([100, 101], $medicationEntry['patient_point_ids']);
     }
 
     public function test_template_resolution_uses_patient_then_procedure_default_then_empty(): void
@@ -104,12 +111,22 @@ class DekurzV2BuilderTest extends TestCase
             'procedure_id' => 10,
             'text' => 'Text pacienta pre 3416.',
         ]);
+        PatientProcedureDekurzTemplate::create([
+            'patient_id' => 1,
+            'procedure_id' => 12,
+            'text' => 'Starší uložený text návštevy.',
+        ]);
 
-        $procedures = collect($this->builder()->build(Patient::findOrFail(1), '2026-10')['procedures'])->keyBy('code');
+        $result = $this->builder()->build(Patient::findOrFail(1), '2026-10');
+        $procedures = collect($result['procedures'])->keyBy('code');
 
-        self::assertSame(['text' => 'Text pacienta pre 3416.', 'source' => 'patient_template'], $procedures['3416']['template']);
-        self::assertSame(['text' => 'Predvolený text pre ranu.', 'source' => 'procedure_default'], $procedures['3423B']['template']);
-        self::assertSame(['text' => '', 'source' => 'empty'], $procedures['3418']['template']);
+        self::assertSame('Text pacienta pre 3416.', $procedures['3416']['template']['text']);
+        self::assertSame('patient_template', $procedures['3416']['template']['source']);
+        self::assertSame('Predvolený text pre ranu.', $procedures['3423B']['template']['text']);
+        self::assertSame('procedure_default', $procedures['3423B']['template']['source']);
+        self::assertSame('', $procedures['3418']['template']['text']);
+        self::assertSame('empty', $procedures['3418']['template']['source']);
+        self::assertArrayNotHasKey('3439', $procedures->all());
     }
 
     public function test_draft_initialization_is_idempotent_and_does_not_overwrite_saved_text(): void
@@ -117,30 +134,111 @@ class DekurzV2BuilderTest extends TestCase
         $patient = Patient::findOrFail(1);
         $actor = User::findOrFail(1);
         $initializer = $this->initializer();
+        PatientPoint::create($this->pointAttributes(105, '3416', 10, '2026-10-10', 1));
 
         $draft = $initializer->initialize($patient, '2026-10', $actor);
-        self::assertCount(3, $draft->days);
+        self::assertSame(7, $draft->dekurz_number);
+        self::assertSame('7', $patient->fresh()->dekurz_number);
+        self::assertCount(4, $draft->days);
         self::assertSame(4, $draft->days->sum(fn ($day): int => $day->entries->count()));
-        $entry = $draft->days->flatMap->entries->firstWhere('patient_point_snapshot_id', 100);
-        self::assertSame(100, $entry->patient_point_id);
-        self::assertSame(2, $entry->quantity);
+        $entries = $draft->days->flatMap->entries->keyBy('patient_point_snapshot_id');
+        $editedEntry = $entries->get(100);
+        $untouchedEntry = $entries->get(105);
+        self::assertSame(100, $editedEntry->patient_point_id);
+        self::assertSame(5, $editedEntry->quantity);
 
-        $entry->update([
+        $editedEntry->update([
             'text' => 'Individuálne upravený denný text.',
             'source' => 'manual',
             'edited_at' => now(),
         ]);
-        Procedure::findOrFail(10)->update(['default_dekurz_text' => 'Nový predvolený text.']);
+        PatientProcedureDekurzTemplate::create([
+            'patient_id' => $patient->id,
+            'procedure_id' => 10,
+            'text' => 'Nový text pacienta.',
+        ]);
 
         $reopened = $initializer->initialize($patient, '2026-10', $actor);
-        self::assertSame(3, $reopened->days->count());
+        self::assertSame(4, $reopened->days->count());
         self::assertSame(4, $reopened->days->sum(fn ($day): int => $day->entries->count()));
-        self::assertSame('Individuálne upravený denný text.', $entry->fresh()->text);
+        self::assertSame('Individuálne upravený denný text.', $editedEntry->fresh()->text);
+        self::assertSame('', $untouchedEntry->fresh()->text);
+        self::assertSame('empty', $untouchedEntry->fresh()->source);
 
         $days = collect($this->builder()->build($patient, '2026-10')['days']);
-        $saved = collect($days->firstWhere('date', '2026-10-03')['entries'])->firstWhere('patient_point_id', 100);
-        self::assertSame('saved_draft', $saved['source']);
+        $saved = collect($days->firstWhere('date', '2026-10-03')['entries'])
+            ->first(fn (array $entry): bool => in_array(100, $entry['patient_point_ids'], true));
+        self::assertSame('manual', $saved['source']);
         self::assertSame('Individuálne upravený denný text.', $saved['text']);
+    }
+
+    public function test_unfinalized_months_share_the_patient_current_dekurz_number(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $initializer = $this->initializer();
+
+        $octoberDraft = $initializer->initialize($patient, '2026-10', $actor);
+        $septemberDraft = $initializer->initialize($patient, '2026-09', $actor);
+
+        self::assertSame(7, $octoberDraft->dekurz_number);
+        self::assertSame(7, $septemberDraft->dekurz_number);
+        self::assertSame(7, $this->builder()->build($patient->fresh(), '2026-08')['patient']['dekurz_number']);
+    }
+
+    public function test_new_draft_requires_calculated_visit_times_for_every_documentable_day(): void
+    {
+        DB::table('visits')
+            ->where('patient_id', 1)
+            ->where('date', '2026-10-05')
+            ->delete();
+
+        try {
+            $this->initializer()->initialize(
+                Patient::findOrFail(1),
+                '2026-10',
+                User::findOrFail(1),
+            );
+            self::fail('ValidationException was not thrown.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            self::assertArrayHasKey('timeline', $exception->errors());
+            self::assertStringContainsString('Časy návštev', $exception->errors()['timeline'][0]);
+        }
+
+        self::assertSame(0, DB::table('dekurz_drafts')->count());
+    }
+
+    public function test_v1_patient_text_is_materialized_as_an_editable_custom_section(): void
+    {
+        $template = PatientProcedureDekurzTemplate::create([
+            'patient_id' => 1,
+            'procedure_id' => 10,
+            'text' => 'Zachovaný text z verzie 01.',
+            'legacy_imported_at' => now(),
+        ]);
+
+        $draft = $this->initializer()->initialize(
+            Patient::findOrFail(1),
+            '2026-10',
+            User::findOrFail(1),
+        );
+
+        $track = PatientDekurzCustomTrack::query()
+            ->where('legacy_template_id', $template->id)
+            ->firstOrFail();
+        $entries = $draft->days->flatMap->entries
+            ->where('custom_track_id', $track->id);
+
+        self::assertSame('Zachovaný text z verzie 01.', $track->current_text);
+        self::assertStringStartsWith('Pôvodný text – ', $track->name);
+        self::assertSame(1, PatientDekurzCustomTrackPeriod::query()->where('custom_track_id', $track->id)->count());
+        self::assertCount(3, $entries);
+        self::assertSame(['custom_template', 'previous_entry', 'previous_entry'], $entries->pluck('source')->all());
+        self::assertSame(['Zachovaný text z verzie 01.'], $entries->pluck('text')->unique()->values()->all());
+        self::assertCount(0, $entries->whereNotNull('procedure_id'));
+        self::assertFalse($draft->days->flatMap->entries
+            ->where('procedure_id', 10)
+            ->contains('text', 'Zachovaný text z verzie 01.'));
     }
 
     public function test_preview_is_read_only_and_reflects_saved_draft_content(): void
@@ -186,7 +284,7 @@ class DekurzV2BuilderTest extends TestCase
         $this->initializer()->initialize($patient, '2026-10', User::findOrFail(1));
 
         PatientPoint::create($this->pointAttributes(105, '3416', 10, '2026-10-10', 1));
-        PatientPoint::findOrFail(100)->update(['quantity' => 9]);
+        PatientPoint::findOrFail(100)->update(['procedure_id' => 11]);
         PatientPoint::findOrFail(101)->delete();
 
         $changes = $this->builder()->build($patient, '2026-10')['scoring_changes'];
@@ -194,10 +292,10 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame([105], array_column($changes['added'], 'id'));
         self::assertSame([101], array_column($changes['removed'], 'patient_point_id'));
         self::assertSame(100, $changes['changed'][0]['patient_point_id']);
-        self::assertSame(['draft' => 2, 'current' => 9], $changes['changed'][0]['differences']['quantity']);
+        self::assertSame(['draft' => 10, 'current' => 11], $changes['changed'][0]['differences']['procedure_id']);
     }
 
-    public function test_supporting_documents_use_reference_dates_month_relevance_and_strict_previous_dekurz(): void
+    public function test_supporting_documents_always_use_latest_document_period(): void
     {
         $this->storePayloads([
             'scans/exact.json' => ['scanned_at' => '2026-09-15T09:00:00+00:00'],
@@ -212,17 +310,20 @@ class DekurzV2BuilderTest extends TestCase
         $this->createDocument(220, 'dekurz', '2026-08', 'dekurz/august.json', '2026-08-31');
         $this->createDocument(221, 'dekurz', '2026-09', 'dekurz/september.json', '2026-09-30');
         $this->createDocument(222, 'dekurz', '2026-10', 'dekurz/october.json', '2026-10-31');
+        $this->createDocument(202, 'scan', '2026-11', 'scans/future.json', '2025-01-01');
+        $this->createDocument(212, 'proposal', '2026-11', 'proposals/future.json', '2025-01-01');
+        $this->createDocument(223, 'dekurz', '2026-11', 'dekurz/future.json', '2025-01-01');
 
         $documents = $this->builder()->build(Patient::findOrFail(1), '2026-10')['supporting_documents'];
 
         self::assertSame('2026-09-15', $documents['finding']['dominant_reference_date']);
-        self::assertSame(200, $documents['finding']['default']['id']);
-        self::assertSame('exact_reference_date', $documents['finding']['default']['match']);
-        self::assertSame('/v1/scan/200/preview', $documents['finding']['default']['preview_url']);
-        self::assertSame(211, $documents['proposal']['default']['id']);
-        self::assertSame('requested_month', $documents['proposal']['default']['match']);
-        self::assertSame(221, $documents['previous_dekurz']['id']);
-        self::assertSame('latest_strictly_before_month', $documents['previous_dekurz']['match']);
+        self::assertSame(202, $documents['finding']['default']['id']);
+        self::assertSame('/v1/scan/202/preview', $documents['finding']['default']['preview_url']);
+        self::assertSame(212, $documents['proposal']['default']['id']);
+        self::assertSame(223, $documents['previous_dekurz']['id']);
+        self::assertSame('latest_by_period', $documents['finding']['default']['match']);
+        self::assertSame('latest_by_period', $documents['proposal']['default']['match']);
+        self::assertSame('latest_by_period', $documents['previous_dekurz']['match']);
     }
 
     public function test_template_upsert_and_reset_are_independent_from_daily_entries(): void
@@ -242,24 +343,33 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame(0, PatientProcedureDekurzTemplate::count());
     }
 
-    public function test_daily_text_is_applied_only_to_unedited_entries_for_the_same_procedure(): void
+    public function test_daily_text_is_propagated_to_following_entries_for_the_same_procedure(): void
     {
         PatientPoint::create($this->pointAttributes(105, '3416', 10, '2026-10-10', 1));
-        $draft = $this->initializer()->initialize(Patient::findOrFail(1), '2026-10', User::findOrFail(1));
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize(Patient::findOrFail(1), '2026-10', $actor);
         $entries = $draft->days->flatMap->entries->keyBy('patient_point_snapshot_id');
         $source = $entries->get(100);
-        $protected = $entries->get(101);
         $target = $entries->get(105);
-        $source->update(['text' => 'Text pre ďalšie dni.', 'source' => 'manual', 'edited_at' => now()]);
-        $protected->update(['text' => 'Už upravený text.', 'source' => 'manual', 'edited_at' => now()]);
 
-        $result = (new DekurzEntryBatchService)->applyToUnedited($draft, $source);
+        $result = (new DekurzEntryBatchService(
+            new PatientProcedureDekurzTemplateService(new DekurzProcedureClassifier),
+        ))->propagate(
+            $draft,
+            $source,
+            'Text pre ďalšie dni.',
+            'following',
+            [],
+            [],
+            false,
+            $actor,
+        );
 
-        self::assertSame(1, $result['updated_count']);
-        self::assertSame([$target->id], $result['updated_entry_ids']);
-        self::assertSame('Už upravený text.', $protected->fresh()->text);
+        self::assertSame(2, $result['updated_count']);
+        self::assertSame([$source->id, $target->id], $result['updated_entry_ids']);
+        self::assertSame('Text pre ďalšie dni.', $source->fresh()->text);
         self::assertSame('Text pre ďalšie dni.', $target->fresh()->text);
-        self::assertNotNull($target->fresh()->edited_at);
+        self::assertSame('previous_entry', $target->fresh()->source);
     }
 
     public function test_finalization_validation_accepts_a_complete_consistent_draft(): void
@@ -296,6 +406,7 @@ class DekurzV2BuilderTest extends TestCase
     public function test_finalization_creates_an_immutable_v2_snapshot_and_completes_the_draft(): void
     {
         $patient = Patient::findOrFail(1);
+        $patient->update(['dekurz_number' => '5']);
         $actor = User::findOrFail(1);
         $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
         $draft->days->flatMap->entries->each(fn ($entry) => $entry->update(['text' => 'Text pri finalizácii.']));
@@ -303,23 +414,25 @@ class DekurzV2BuilderTest extends TestCase
         $documentService = $this->createMock(DocumentService::class);
         $documentService->expects(self::once())
             ->method('getTravelDocumentPdfPath')
-            ->willReturnCallback(function (Document $document) use ($storage): string {
+            ->willReturnCallback(function (Document $document, ?int &$pageCount = null) use ($storage): string {
                 $path = "documents/pdf/dekurz/{$document->id}.pdf";
                 $storage->put($path, 'PDF');
+                $pageCount = 4;
 
                 return $path;
             });
 
-        $document = $this->finalizer($documentService)->finalize($patient, $draft, $actor);
+        $document = $this->finalizer($documentService)->finalize($patient, $draft, $actor, 2);
         $payload = json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR);
 
-        self::assertSame(2, $payload['schema_version']);
+        self::assertSame(3, $payload['schema_version']);
         self::assertSame('dekurz_v2', $payload['source']);
         self::assertSame($draft->id, $payload['draft_id']);
         self::assertSame('Text pri finalizácii.', $payload['days'][0]['entries'][0]['text']);
+        self::assertSame(5, $payload['dekurz_number']);
         self::assertSame('completed', $draft->fresh()->status);
         self::assertSame($document->id, $draft->fresh()->final_document_id);
-        self::assertSame('8', $patient->fresh()->dekurz_number);
+        self::assertSame('7', $patient->fresh()->dekurz_number);
         self::assertTrue($storage->exists("documents/pdf/dekurz/{$document->id}.pdf"));
 
         PatientPoint::findOrFail(102)->update(['quantity' => 9]);
@@ -386,6 +499,7 @@ class DekurzV2BuilderTest extends TestCase
             new DekurzScoringService($classifier),
             new DekurzTextResolver,
             new DekurzScoringConsistencyService,
+            new DekurzTimelineReadinessService,
         );
     }
 
@@ -588,6 +702,19 @@ class DekurzV2BuilderTest extends TestCase
             $this->pointAttributes(103, '3439', 12, '2026-10-02', 1),
             $this->pointAttributes(104, '3418', 13, '2026-10-05', 1),
         ]);
+        DB::table('visits')->insert(collect([
+            '2026-10-01',
+            '2026-10-03',
+            '2026-10-05',
+            '2026-10-10',
+        ])->map(fn (string $date): array => [
+            'patient_id' => 1,
+            'user_id' => 1,
+            'branch_id' => 1,
+            'date' => $date,
+            'terrain_time' => '08:00:00',
+            'administrative_time' => '14:00:00',
+        ])->all());
     }
 
     private function pointAttributes(int $id, string $code, int $procedureId, string $date, int $quantity): array

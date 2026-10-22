@@ -188,7 +188,7 @@ export default {
 
 
         datepicker: {
-            root: { class: `${baseField} flex! items-center!` },
+            root: { class: `${baseField} flex! items-center! rounded-md!` },
             input: {
                 class: 'w-full! h-full! border-0! bg-transparent! ' +
                     'text-normal! text-darkgrey! ' +

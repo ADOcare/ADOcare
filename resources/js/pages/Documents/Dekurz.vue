@@ -13,5 +13,6 @@ const { previewUrl, downloadOptions } = usePublicDocument(props, {
 </script>
 
 <template>
-    <DocumentShell title="Dekurz" :previewUrl="previewUrl" :downloadOptions="downloadOptions" :showPrintButton="true" />
+    <DocumentShell title="Dekurz" :previewUrl="previewUrl" :downloadOptions="downloadOptions" :showPrintButton="true"
+        paginatedPreview />
 </template>

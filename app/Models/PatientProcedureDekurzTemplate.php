@@ -13,9 +13,17 @@ class PatientProcedureDekurzTemplate extends Model
         'patient_id',
         'procedure_id',
         'text',
+        'legacy_imported_at',
         'created_by',
         'updated_by',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'legacy_imported_at' => 'datetime',
+        ];
+    }
 
     public function patient()
     {

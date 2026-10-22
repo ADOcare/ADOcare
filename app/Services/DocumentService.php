@@ -9,15 +9,14 @@ use App\Models\Company;
 use App\Models\Document;
 use App\Models\InsuranceCompany;
 use App\Models\Invoice;
-use App\Models\Patient;
 use App\Models\User;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -83,7 +82,7 @@ class DocumentService
             ])
             ->whereIn('type', ['cp', 'dzc']);
 
-        if (!empty($branchIds)) {
+        if (! empty($branchIds)) {
             $query->whereIn('branch_id', $branchIds);
         }
 
@@ -125,8 +124,8 @@ class DocumentService
     /**
      * Build signed public links for documents the user can view.
      *
-     * @param array<int> $ids
-     * @param array<int, string>|null $types
+     * @param  array<int>  $ids
+     * @param  array<int, string>|null  $types
      * @return array<int, array<string, mixed>>
      */
     public function buildDocumentLinks(array $ids, User $user, int $ttlMinutes = 10080, ?array $types = null): array
@@ -137,14 +136,14 @@ class DocumentService
 
         $query = Document::query()->whereIn('id', $ids);
 
-        if (!empty($types)) {
+        if (! empty($types)) {
             $query->whereIn('type', $types);
         }
 
         $documents = $query
             ->with(['patient.branch', 'branch'])
             ->get()
-            ->filter(fn(Document $document) => $user->can('view', $document));
+            ->filter(fn (Document $document) => $user->can('view', $document));
 
         if ($documents->isEmpty()) {
             return [];
@@ -165,7 +164,7 @@ class DocumentService
     /**
      * Build signed public links for invoices the user can view.
      *
-     * @param array<int> $ids
+     * @param  array<int>  $ids
      * @return array<int, array<string, mixed>>
      */
     public function buildInvoiceLinks(array $ids, User $user, int $ttlMinutes = 10080): array
@@ -177,7 +176,7 @@ class DocumentService
         $invoices = Invoice::query()
             ->whereIn('id', $ids)
             ->get()
-            ->filter(fn(Invoice $invoice) => $user->can('view', $invoice));
+            ->filter(fn (Invoice $invoice) => $user->can('view', $invoice));
 
         if ($invoices->isEmpty()) {
             return [];
@@ -185,7 +184,7 @@ class DocumentService
 
         return $invoices->map(function (Invoice $invoice) use ($ttlMinutes) {
             $displayName = $invoice->invoice_number
-                ? 'Faktúra ' . $invoice->invoice_number
+                ? 'Faktúra '.$invoice->invoice_number
                 : ($invoice->name ?: 'Faktúra');
 
             return [
@@ -254,14 +253,14 @@ class DocumentService
         Document::whereIn('id', $documents->modelKeys())->delete();
 
         foreach ($documents as $document) {
-            if (!$document instanceof Document) {
+            if (! $document instanceof Document) {
                 continue;
             }
 
             $this->deleteScanAssetsIfAny($document);
 
             if (Storage::disk('local')->exists($document->path)) {
-                if (!Storage::disk('local')->delete($document->path)) {
+                if (! Storage::disk('local')->delete($document->path)) {
                     \Log::error('Failed to delete document file (batch)', [
                         'document_id' => $document->id,
                         'path' => $document->path,
@@ -336,22 +335,23 @@ class DocumentService
         ]);
     }
 
-    public function getTravelDocumentPdfPath(Document $document): ?string
+    public function getTravelDocumentPdfPath(Document $document, ?int &$pageCount = null): ?string
     {
         $cachePath = $this->getTravelDocumentPdfCachePath($document);
         $disk = Storage::disk('local');
-
 
         if ($disk->exists($cachePath)) {
             $disk->delete($cachePath);
         }
 
         $pdfData = $this->buildTravelPdfAttachment($document);
-        if (!$pdfData) {
+        if (! $pdfData) {
             return null;
         }
 
+        $pageCount = $pdfData['page_count'];
         $disk->put($cachePath, $pdfData['data']);
+
         return $cachePath;
     }
 
@@ -368,7 +368,7 @@ class DocumentService
     /**
      * Build sheet data for batch statement templates.
      *
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      * @return array<string, mixed>
      */
     public function buildStatementSheetFromBatchPayload(array $payload, string $type): array
@@ -380,13 +380,13 @@ class DocumentService
         $branch = Branch::query()->find((int) data_get($payload, 'branch.id'));
         $company = Company::query()->find((int) data_get($payload, 'company.id'));
         $insurance = InsuranceCompany::query()->find((int) data_get($payload, 'insurance.id'));
-        $performedBy = trim(($user?->first_name ?? '') . ' ' . ($user?->last_name ?? ''));
-        $branchName = trim(($branch?->city ?? '') . ', ' . ($branch?->address ?? ''), ' ,');
+        $performedBy = trim(($user?->first_name ?? '').' '.($user?->last_name ?? ''));
+        $branchName = trim(($branch?->city ?? '').', '.($branch?->address ?? ''), ' ,');
         $savedAt = data_get($payload, 'saved_at');
 
         return [
             'fileType' => $type === 'kilometers' ? 'vykázané kilometre' : 'vykázané body',
-            'fileName' => (string) ($meta['fileName'] ?? ('davka.' . $batchNumber . '.txt')),
+            'fileName' => (string) ($meta['fileName'] ?? ('davka.'.$batchNumber.'.txt')),
             'kilometers' => (string) ($meta['totalKilometers'] ?? ''),
             'amount' => (string) ($meta['amount'] ?? '0'),
             'periodFrom' => (string) ($period[0] ?? ''),
@@ -422,7 +422,7 @@ class DocumentService
             default => null,
         };
 
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             return null;
         }
 
@@ -444,6 +444,7 @@ class DocumentService
 
         return $downloadPayload;
     }
+
     /**
      * Get or generate invoice PDF path.
      * Generates PDF from Blade template if it doesn't exist.
@@ -472,7 +473,7 @@ class DocumentService
             true
         );
 
-        if (!is_array($invoiceData)) {
+        if (! is_array($invoiceData)) {
             return null;
         }
 
@@ -482,15 +483,18 @@ class DocumentService
             ])->setPaper('a4', 'portrait');
 
             Storage::disk('local')->put($pdfPath, $pdf->output());
+
             return $pdfPath;
         } catch (\Exception $e) {
             Log::error('Failed to generate invoice PDF', [
                 'invoice_id' => $invoice->id,
                 'error' => $e->getMessage(),
             ]);
+
             return null;
         }
     }
+
     public function getTravelDocumentPdfCachePath(Document $document): string
     {
         return sprintf('documents/pdf/%s/%d.pdf', $document->type, $document->id);
@@ -507,14 +511,28 @@ class DocumentService
     private function buildTravelPdfAttachment(Document $document): ?array
     {
         $preview = $this->buildDocumentViewData($document);
-        if (!$preview) {
+        if (! $preview) {
             return null;
         }
 
         $pdf = Pdf::loadView($preview['view'], $preview['data'])->setPaper('a4', 'portrait');
+        $numberedDekurzPages = null;
+
+        if ($document->type === 'dekurz') {
+            $xpath = new \DOMXPath($pdf->getDomPDF()->getDom());
+            $numberedDekurzPages = $xpath->query(
+                '//*[contains(concat(" ", normalize-space(@class), " "), " dekurz-page ")]'
+            )?->length;
+        }
+
+        $pdf->render();
 
         return [
             'data' => $pdf->output(),
+            'page_count' => max(
+                1,
+                (int) ($numberedDekurzPages ?: $pdf->getDomPDF()->getCanvas()->get_page_count()),
+            ),
             'name' => $preview['filename'] ?? $this->buildDefaultPdfFilename($document),
             'mime' => 'application/pdf',
         ];
@@ -543,7 +561,7 @@ class DocumentService
     private function buildCpViewData(Document $document): ?array
     {
         $payload = app(CPDocumentService::class)->getCpPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -562,7 +580,7 @@ class DocumentService
     private function buildDzcViewData(Document $document): ?array
     {
         $payload = app(DZCDocumentService::class)->getDzcPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -581,7 +599,7 @@ class DocumentService
     private function buildProposalViewData(Document $document): ?array
     {
         $payload = app(ProposalDocumentService::class)->getProposalPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -598,7 +616,7 @@ class DocumentService
     private function buildAgreementViewData(Document $document): ?array
     {
         $payload = app(AgreementDocumentService::class)->getAgreementPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -615,7 +633,7 @@ class DocumentService
     private function buildLeaveViewData(Document $document): ?array
     {
         $payload = app(LeaveDocumentService::class)->findLeaveFileForDocument($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -632,7 +650,7 @@ class DocumentService
     {
         $payload = app(RecordDocumentService::class)->findRecordFileForDocument($document);
 
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -648,17 +666,17 @@ class DocumentService
     private function buildDekurzViewData(Document $document): ?array
     {
         $payload = app(DekurzDocumentService::class)->findDekurzFileForDocument($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
-        if (!array_key_exists('patient_birth_number', $payload)) {
+        if (! array_key_exists('patient_birth_number', $payload)) {
             $payload['patient_birth_number'] = $payload['patient_personal_number'] ?? '';
         }
 
-        if (!array_key_exists('visits', $payload)) {
+        if (! array_key_exists('visits', $payload)) {
             $payload['visits'] = collect($payload['days'] ?? [])
-                ->map(fn(array $day) => [
+                ->map(fn (array $day) => [
                     'date' => $day['date'] ?? null,
                     'time_from' => $day['terrain_time'] ?? null,
                     'time_to' => $day['administrative_time'] ?? null,
@@ -681,7 +699,7 @@ class DocumentService
     private function buildScanViewData(Document $document): ?array
     {
         $payload = app(ScanDocumentService::class)->getScanPayload($document);
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -704,7 +722,7 @@ class DocumentService
             ? app(KilometersBatchDocumentService::class)->getKilometersBatchPayload($document)
             : app(PointsBatchDocumentService::class)->getPointsBatchPayload($document);
 
-        if (!$payload) {
+        if (! $payload) {
             return null;
         }
 
@@ -723,19 +741,19 @@ class DocumentService
             $base = (string) ($document->type ?? 'document');
         }
 
-        return $this->sanitizeFilenamePart($base) . '.pdf';
+        return $this->sanitizeFilenamePart($base).'.pdf';
     }
 
     private function loadUserSignatureDataUri(?int $userId): ?string
     {
-        if (!$userId) {
+        if (! $userId) {
             return null;
         }
 
         $user = User::find($userId);
         $signaturePath = $user?->signature_path;
 
-        if (!$signaturePath || !Storage::disk('local')->exists($signaturePath)) {
+        if (! $signaturePath || ! Storage::disk('local')->exists($signaturePath)) {
             return null;
         }
 
@@ -744,19 +762,19 @@ class DocumentService
             return null;
         }
 
-        return 'data:image/png;base64,' . base64_encode($binary);
+        return 'data:image/png;base64,'.base64_encode($binary);
     }
 
     private function loadCompanyStampDataUri(?int $companyId): ?string
     {
-        if (!$companyId) {
+        if (! $companyId) {
             return null;
         }
 
         $company = Company::find($companyId);
         $stampPath = $company?->stamp_path;
 
-        if (!$stampPath || !Storage::disk('local')->exists($stampPath)) {
+        if (! $stampPath || ! Storage::disk('local')->exists($stampPath)) {
             return null;
         }
 
@@ -765,7 +783,7 @@ class DocumentService
             return null;
         }
 
-        return 'data:image/png;base64,' . base64_encode($binary);
+        return 'data:image/png;base64,'.base64_encode($binary);
     }
 
     private function buildTravelPdfFilename(string $prefix, array $payload, Document $document): string
@@ -776,7 +794,7 @@ class DocumentService
             $month = (string) ($payload['month'] ?? '');
             $year = (string) ($payload['year'] ?? '');
             if ($month !== '' && $year !== '') {
-                $period = $year . '-' . str_pad($month, 2, '0', STR_PAD_LEFT);
+                $period = $year.'-'.str_pad($month, 2, '0', STR_PAD_LEFT);
             }
         }
 
@@ -794,9 +812,9 @@ class DocumentService
         }
 
         return $this->sanitizeFilenamePart($prefix)
-            . '_' . $this->sanitizeFilenamePart($period)
-            . '_' . $this->sanitizeFilenamePart($normalizedUserName)
-            . '.pdf';
+            .'_'.$this->sanitizeFilenamePart($period)
+            .'_'.$this->sanitizeFilenamePart($normalizedUserName)
+            .'.pdf';
     }
 
     private function sanitizeFilenamePart(string $value): string
@@ -830,7 +848,7 @@ class DocumentService
             }
         }
 
-        if (!$sessionId) {
+        if (! $sessionId) {
             return;
         }
 

@@ -19,6 +19,7 @@ class DekurzDraft extends Model
         'patient_id',
         'branch_id',
         'period',
+        'dekurz_number',
         'status',
         'created_by',
         'updated_by',
@@ -28,6 +29,7 @@ class DekurzDraft extends Model
 
     protected $casts = [
         'period' => 'date',
+        'dekurz_number' => 'integer',
         'completed_at' => 'datetime',
     ];
 

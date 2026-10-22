@@ -14,5 +14,5 @@ const { previewUrl, downloadOptions } = usePublicDocument(props, {
 
 <template>
     <DocumentShell title="Návrh na poskytovanie ošetrovateľskej starostlivosti" :previewUrl="previewUrl"
-        :downloadOptions="downloadOptions" :showPrintButton="true" />
+        :downloadOptions="downloadOptions" :showPrintButton="true" paginatedPreview />
 </template>

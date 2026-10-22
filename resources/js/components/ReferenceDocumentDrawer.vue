@@ -9,13 +9,13 @@ import {
 } from 'vue'
 
 import api from '@/services/api'
-
-let floatingLayerCounter = 3000
+import {
+    useReferenceDocumentDrawerManager,
+} from '@/composables/useReferenceDocumentDrawerManager'
 
 const props = withDefaults(
     defineProps<{
         available?: boolean
-        bubbleIndex?: number
         handleLabel?: string
         previewUrl?: string | null
         previewUrlEndpoint?: string | null
@@ -23,7 +23,6 @@ const props = withDefaults(
     }>(),
     {
         available: false,
-        bubbleIndex: 0,
         handleLabel:
             'Zobraziť referenčný dokument',
         previewUrl: null,
@@ -119,11 +118,6 @@ const previewError =
 
 const isPreviewFrameLoaded =
     ref(false)
-
-const zIndex = ref(
-    2000 +
-        props.bubbleIndex,
-)
 
 let previewRequestId =
     0
@@ -282,8 +276,76 @@ let hasPlayedInitialPreview =
     false
 
 /* -------------------------------------------------------------------------- */
+/* Shared drawer manager                                                      */
+/* -------------------------------------------------------------------------- */
+
+const {
+    activeDrawerId,
+    createDrawerId,
+    registerDrawer,
+    unregisterDrawer,
+    activateDrawer,
+    deactivateDrawer,
+    claimInitialIntro,
+    getDrawerIndex,
+    isDrawerActive,
+} =
+    useReferenceDocumentDrawerManager()
+
+const drawerId =
+    createDrawerId()
+
+const drawerIndex =
+    getDrawerIndex(
+        drawerId,
+    )
+
+const isActiveDrawer =
+    isDrawerActive(
+        drawerId,
+    )
+
+const isRegistered =
+    ref(false)
+
+/* -------------------------------------------------------------------------- */
 /* Computed                                                                   */
 /* -------------------------------------------------------------------------- */
+
+const zIndex =
+    computed(
+        () => {
+            /*
+             * The one expanded drawer is always
+             * above every minimized bubble.
+             */
+            if (
+                isOpen.value &&
+                isActiveDrawer.value
+            ) {
+                return 6000
+            }
+
+            /*
+             * A bubble being moved may rise above
+             * the other bubbles, but never above
+             * the currently open drawer.
+             */
+            if (
+                isBubbleDragging.value ||
+                isBubbleFlying.value ||
+                isWindowDragging.value ||
+                isWindowResizing.value
+            ) {
+                return 5000
+            }
+
+            return (
+                2000 +
+                drawerIndex.value
+            )
+        },
+    )
 
 const hasDocument =
     computed(
@@ -394,10 +456,13 @@ function clamp(
 }
 
 function bringToFront() {
-    floatingLayerCounter++
-
-    zIndex.value =
-        floatingLayerCounter
+    if (
+        isOpen.value
+    ) {
+        activateDrawer(
+            drawerId,
+        )
+    }
 }
 
 function getAreaWidth() {
@@ -528,7 +593,7 @@ function getInitialBubblePosition() {
 
     const y =
         AREA_MARGIN +
-        props.bubbleIndex *
+        drawerIndex.value *
             (
                 BUBBLE_HEIGHT +
                 BUBBLE_GAP
@@ -1471,6 +1536,10 @@ async function loadPreview() {
 async function openDocument() {
     cancelBubblePhysics()
 
+    activateDrawer(
+        drawerId,
+    )
+
     bringToFront()
 
     initializeWindowSize()
@@ -1723,6 +1792,10 @@ function minimizeDocument(
                 isOpen.value =
                     false
 
+                deactivateDrawer(
+                    drawerId,
+                )
+
                 fitBubbleToArea()
 
                 windowSize.value = {
@@ -1790,6 +1863,10 @@ function minimizeInitialIntro() {
             () => {
                 isOpen.value =
                     false
+
+                deactivateDrawer(
+                    drawerId,
+                )
 
                 isInitialIntro.value =
                     false
@@ -1884,6 +1961,10 @@ async function playInitialPreview() {
     /*
      * Put the expanded window on screen first.
      */
+    activateDrawer(
+        drawerId,
+    )
+
     isInitialIntro.value =
         true
 
@@ -2379,6 +2460,83 @@ function stopWindowInteraction(
 }
 
 /* -------------------------------------------------------------------------- */
+/* Shared manager close                                                       */
+/* -------------------------------------------------------------------------- */
+
+function forceCloseFromManager() {
+    if (
+        !isOpen.value
+    ) {
+        return
+    }
+
+    cancelBubblePhysics()
+
+    if (
+        minimizeTimer
+    ) {
+        clearTimeout(
+            minimizeTimer,
+        )
+
+        minimizeTimer =
+            null
+    }
+
+    if (
+        initialShrinkTimer
+    ) {
+        clearTimeout(
+            initialShrinkTimer,
+        )
+
+        initialShrinkTimer =
+            null
+    }
+
+    if (
+        morphTimer
+    ) {
+        clearTimeout(
+            morphTimer,
+        )
+
+        morphTimer =
+            null
+    }
+
+    isOpen.value =
+        false
+
+    isInitialIntro.value =
+        false
+
+    isMorphing.value =
+        false
+
+    isWindowDragging.value =
+        false
+
+    isWindowResizing.value =
+        false
+
+    windowInteraction =
+        null
+
+    windowSize.value = {
+        ...preferredWindowSize.value,
+    }
+
+    if (
+        bubbleHasBeenMoved.value
+    ) {
+        fitBubbleToArea()
+    } else {
+        initializeBubblePosition()
+    }
+}
+
+/* -------------------------------------------------------------------------- */
 /* Parent resize                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -2503,6 +2661,17 @@ watch(
             disconnectResizeObserver()
 
             if (
+                isRegistered.value
+            ) {
+                unregisterDrawer(
+                    drawerId,
+                )
+
+                isRegistered.value =
+                    false
+            }
+
+            if (
                 initialShrinkTimer
             ) {
                 clearTimeout(
@@ -2516,14 +2685,67 @@ watch(
             return
         }
 
+        if (
+            !isRegistered.value
+        ) {
+            registerDrawer(
+                drawerId,
+                forceCloseFromManager,
+            )
+
+            isRegistered.value =
+                true
+        }
+
         await initializePlayground()
 
-        await playInitialPreview()
+        /*
+         * Exactly one available drawer on the
+         * page is allowed to perform the load
+         * intro. Every other drawer starts as
+         * a normal minimized bubble.
+         */
+        if (
+            claimInitialIntro(
+                drawerId,
+            )
+        ) {
+            await playInitialPreview()
+        }
     },
 
     {
         immediate:
             true,
+    },
+)
+
+watch(
+    activeDrawerId,
+
+    activeId => {
+        if (
+            isOpen.value &&
+            activeId !==
+                drawerId
+        ) {
+            forceCloseFromManager()
+        }
+    },
+)
+
+watch(
+    drawerIndex,
+
+    () => {
+        if (
+            isOpen.value ||
+            bubbleHasBeenMoved.value
+        ) {
+            return
+        }
+
+        initializeBubblePosition()
     },
 )
 
@@ -2548,6 +2770,17 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+    if (
+        isRegistered.value
+    ) {
+        unregisterDrawer(
+            drawerId,
+        )
+
+        isRegistered.value =
+            false
+    }
+
     cancelBubblePhysics()
 
     disconnectResizeObserver()

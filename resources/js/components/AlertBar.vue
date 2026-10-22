@@ -101,7 +101,3 @@ onMounted(() => {
         </div>
     </div>
 </template>
-
-<style scoped>
-/* Colors rely on utility classes but keep minimal base fallback */
-</style>

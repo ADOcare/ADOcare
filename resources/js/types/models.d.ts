@@ -284,6 +284,30 @@ export interface Doctor {
   assigned_branches_exists: boolean
 }
 
+export interface PatientDekurzCustomTrack {
+  // columns
+  id: number
+  patient_id: number
+  name: string
+  current_text: string | null
+  created_at: string | null
+  updated_at: string | null
+  legacy_template_id: number | null
+  // relations
+  patient: Patient
+  legacy_template: PatientProcedureDekurzTemplate
+  periods: PatientDekurzCustomTrackPeriod[]
+  entries: DekurzEntry[]
+  // counts
+  periods_count: number
+  entries_count: number
+  // exists
+  patient_exists: boolean
+  legacy_template_exists: boolean
+  periods_exists: boolean
+  entries_exists: boolean
+}
+
 export interface User {
   // columns
   id: number
@@ -783,7 +807,7 @@ export interface DekurzEntry {
   // columns
   id: number
   dekurz_day_id: number
-  procedure_id: number
+  procedure_id: number | null
   patient_point_id: number | null
   quantity: number | null
   text: string
@@ -792,14 +816,24 @@ export interface DekurzEntry {
   created_at: string | null
   updated_at: string | null
   patient_point_snapshot_id: number | null
+  custom_track_id: number | null
+  source_entry_id: number | null
+  patient_point_ids: Array<unknown> | null
+  patient_point_snapshot_ids: Array<unknown> | null
+  track_position: number
+  is_excluded: boolean
   // relations
   day: DekurzDay
   procedure: Procedure
+  custom_track: PatientDekurzCustomTrack
+  source_entry: DekurzEntry
   patient_point: PatientPoint
   // counts
   // exists
   day_exists: boolean
   procedure_exists: boolean
+  custom_track_exists: boolean
+  source_entry_exists: boolean
   patient_point_exists: boolean
 }
 
@@ -877,6 +911,22 @@ export interface InsuranceRuleSet {
   // exists
   insurance_company_exists: boolean
   rules_exists: boolean
+}
+
+export interface PatientDekurzCustomTrackPeriod {
+  // columns
+  id: number
+  custom_track_id: number
+  period: string
+  distribution: string
+  selected_dates: Array<unknown> | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  track: PatientDekurzCustomTrack
+  // counts
+  // exists
+  track_exists: boolean
 }
 
 export interface ReportMonth {
@@ -973,6 +1023,7 @@ export interface DekurzDraft {
   completed_at: string | null
   created_at: string | null
   updated_at: string | null
+  dekurz_number: number | null
   // relations
   patient: Patient
   branch: Branch
@@ -1055,6 +1106,7 @@ export interface PatientProcedureDekurzTemplate {
   updated_by: number | null
   created_at: string | null
   updated_at: string | null
+  legacy_imported_at: string | null
   // relations
   patient: Patient
   procedure: Procedure

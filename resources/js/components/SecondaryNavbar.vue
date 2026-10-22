@@ -59,7 +59,7 @@ const activeKey = computed(() => {
 function linkClass(key: string) {
   return [
     'text-mini! underline px-2! transition-colors',
-    activeKey.value === key ? 'text-accent!' : 'text-darkgrey! hover:text-accent!'
+    activeKey.value === key ? 'text-tag1!' : 'text-white! hover:text-tag1!'
   ]
 }
 </script>

@@ -23,6 +23,10 @@ const props = withDefaults(
     },
 )
 
+const emit = defineEmits<{
+    pageCountChange: [pageCount: number]
+}>()
+
 /* -------------------------------------------------------------------------- */
 /* Constants                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -979,6 +983,11 @@ async function handleIframeLoad() {
         0
 
     detectPages()
+
+    emit(
+        'pageCountChange',
+        pageCount.value,
+    )
 
     showPage(
         0,

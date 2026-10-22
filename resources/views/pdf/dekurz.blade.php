@@ -54,6 +54,35 @@
             }
         }
 
+        @media print {
+            @page {
+                size: A4 portrait;
+                margin: 0;
+            }
+
+            html,
+            body {
+                width: 210mm;
+                margin: 0;
+                padding: 0;
+            }
+
+            .dekurz-page {
+                width: 210mm;
+                height: 297mm;
+                margin: 0;
+                padding: 5mm 10mm;
+                overflow: hidden;
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+
+            .dekurz-page + .dekurz-page {
+                page-break-before: always;
+                break-before: page;
+            }
+        }
+
         .page-inner {
             width: 100%;
         }

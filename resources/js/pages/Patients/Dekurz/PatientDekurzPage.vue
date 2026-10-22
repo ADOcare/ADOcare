@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import {
     computed,
+    markRaw,
     onBeforeUnmount,
     onMounted,
     ref,
     watch,
 } from 'vue'
-
-import { useToast } from 'primevue/usetoast'
+import { useRouter } from 'vue-router'
 
 import api from '@/services/api'
 import { fetchBlobUrl } from '@/utils/blobUrl'
@@ -18,7 +18,6 @@ import { usePatientStore } from '@/stores/patientStore'
 import type {
     DekurzDay,
     DekurzEntry,
-    DekurzProcedure,
     DekurzSupportingDocument,
 } from '@/types/dekurz'
 
@@ -29,18 +28,20 @@ import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import ReferenceDocumentDrawer from '@/components/ReferenceDocumentDrawer.vue'
 
 import DekurzDailyStep from './components/DekurzDailyStep.vue'
-import DekurzProcedureTextCard from './components/DekurzProcedureTextCard.vue'
-import DekurzReviewStep from './components/DekurzReviewStep.vue'
+
+import useModal from '@/composables/useModal'
+import DeleteDekurzEntryConfirmation
+    from './components/DeleteDekurzEntryConfirmation.vue'
 
 /* -------------------------------------------------------------------------- */
 /* Stores                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const toast =
-    useToast()
-
 const patientStore =
     usePatientStore()
+
+const router =
+    useRouter()
 
 patientStore.loadFromStorage?.()
 
@@ -53,6 +54,11 @@ const patientId =
                     0,
             ),
     )
+
+const {
+    openModal,
+} =
+    useModal()
 
 /* -------------------------------------------------------------------------- */
 /* Document identity                                                          */
@@ -102,36 +108,6 @@ const patientIdRef =
 /* Dekurz                                                                     */
 /* -------------------------------------------------------------------------- */
 
-const activeSection =
-    ref(0)
-
-const navigating =
-    ref(false)
-
-const sections = [
-    {
-        label:
-            'Výkony',
-
-        icon:
-            'bi bi-list-check',
-    },
-    {
-        label:
-            'Denné záznamy',
-
-        icon:
-            'bi bi-calendar3',
-    },
-    {
-        label:
-            'Kontrola',
-
-        icon:
-            'bi bi-check2-circle',
-    },
-]
-
 const {
     builder,
     macros,
@@ -139,31 +115,22 @@ const {
     initializing,
     finalizing,
     finalizationErrors,
+    draftInitializationError,
     error,
     saveStates,
     load,
     loadMacros,
     initializeDraft,
-    saveTemplate,
-    resetTemplate,
     saveEntry,
-    saveDay,
-    applyToUnedited,
+    deleteEntry,
+    createCustomTrack,
+    propagateEntry,
     finalizeDraft,
-    flushPendingSaves,
 } = useDekurzV2(
     patientIdRef,
     monthKey,
+    dekurzNumber,
 )
-
-const isCompleted =
-    computed(
-        () =>
-            builder.value
-                ?.draft
-                ?.status ===
-            'completed',
-    )
 
 /* -------------------------------------------------------------------------- */
 /* Preview                                                                    */
@@ -179,6 +146,12 @@ const previewError =
     ref<string | null>(
         null,
     )
+
+const previewPageCount =
+    ref(1)
+
+const isPreviewPaginationReady =
+    ref(false)
 
 let previewTimer:
     ReturnType<typeof setTimeout> |
@@ -212,6 +185,9 @@ async function loadPreview() {
     isPreviewLoading.value =
         true
 
+    isPreviewPaginationReady.value =
+        false
+
     previewError.value =
         null
 
@@ -236,16 +212,17 @@ async function loadPreview() {
                                 date:
                                     day.date,
 
-                                general_note:
-                                    day.note,
-
                                 entries:
-                                    day.entries.map(
-                                        entry => ({
-                                            text:
-                                                entry.text,
-                                        }),
-                                    ),
+                                    day.entries
+                                        .filter(entry => !entry.is_excluded)
+                                        .map(
+                                            entry => ({
+                                                text:
+                                                    entry.text,
+                                                is_excluded:
+                                                    entry.is_excluded,
+                                            }),
+                                        ),
                             }),
                         ),
                 },
@@ -316,6 +293,16 @@ function schedulePreview() {
             },
             350,
         )
+}
+
+function handlePreviewPageCountChange(
+    pageCount: number,
+) {
+    previewPageCount.value =
+        pageCount
+
+    isPreviewPaginationReady.value =
+        true
 }
 
 /* -------------------------------------------------------------------------- */
@@ -419,151 +406,29 @@ async function loadSupportingDocumentPreviews(
         nextUrls
 }
 
-async function downloadSupportingDocument(
-    document: DekurzSupportingDocument,
-) {
-    if (
-        !document.document
-            ?.download_url
-    ) {
-        return
-    }
-
-    try {
-        const blobUrl =
-            await fetchBlobUrl(
-                document.document
-                    .download_url,
-            )
-
-        const anchor =
-            window.document.createElement(
-                'a',
-            )
-
-        anchor.href =
-            blobUrl
-
-        anchor.download =
-            document.document
-                .name ||
-            `${document.label}.pdf`
-
-        anchor.click()
-
-        window.setTimeout(
-            () =>
-                URL.revokeObjectURL(
-                    blobUrl,
-                ),
-            1000,
-        )
-    } catch (downloadError) {
-        console.error(
-            'Failed to download supporting document:',
-            downloadError,
-        )
-
-        toast.add({
-            severity:
-                'error',
-
-            summary:
-                'Chyba',
-
-            detail:
-                'Dokument sa nepodarilo stiahnuť.',
-
-            life:
-                3000,
-        })
-    }
-}
-
-function formatDocumentDate(
-    value: string | null | undefined,
-): string {
-    if (!value) {
-        return 'Dátum nie je dostupný'
-    }
-
-    return new Date(
-        `${value.slice(0, 10)}T00:00:00`,
-    ).toLocaleDateString(
-        'sk-SK',
-    )
-}
-
 /* -------------------------------------------------------------------------- */
-/* Navigation                                                                 */
+/* Loading / initialization                                                   */
 /* -------------------------------------------------------------------------- */
 
-async function goToSection(
-    index: number,
-) {
-    if (
-        index ===
-            activeSection.value ||
-        navigating.value
-    ) {
+async function loadAndInitialize() {
+    await load()
+
+    if (!patientId.value || !monthKey.value) {
         return
     }
 
-    if (
-        isCompleted.value
-    ) {
-        activeSection.value =
-            2
-
-        return
+    // Create the one logical patient+month Dekurz automatically only when it
+    // does not exist yet. Merely viewing a completed month must not reopen it.
+    if (builder.value?.draft?.status !== 'completed') {
+        await initializeDraft()
     }
 
-    navigating.value =
-        true
-
-    try {
-        const savesSucceeded =
-            await flushPendingSaves()
-
-        if (!savesSucceeded) {
-            return
-        }
-
-        if (
-            index > 0 &&
-            !builder.value?.draft
-        ) {
-            const initialized =
-                await initializeDraft()
-
-            if (!initialized) {
-                return
-            }
-        }
-
-        activeSection.value =
-            index
-
-        schedulePreview()
-    } finally {
-        navigating.value =
-            false
-    }
+    schedulePreview()
 }
 
 /* -------------------------------------------------------------------------- */
 /* Mutations                                                                  */
 /* -------------------------------------------------------------------------- */
-
-function updateTemplateText(
-    procedure: DekurzProcedure,
-    text: string,
-) {
-    procedure.effective_text =
-        text
-
-    schedulePreview()
-}
 
 function updateEntryText(
     entry: DekurzEntry,
@@ -571,36 +436,6 @@ function updateEntryText(
 ) {
     entry.text =
         text
-
-    schedulePreview()
-}
-
-function updateDayNote(
-    day: DekurzDay,
-    note: string,
-) {
-    day.note =
-        note
-
-    schedulePreview()
-}
-
-async function handleSaveTemplate(
-    procedure: DekurzProcedure,
-) {
-    await saveTemplate(
-        procedure,
-    )
-
-    schedulePreview()
-}
-
-async function handleResetTemplate(
-    procedure: DekurzProcedure,
-) {
-    await resetTemplate(
-        procedure,
-    )
 
     schedulePreview()
 }
@@ -615,32 +450,89 @@ async function handleSaveEntry(
     schedulePreview()
 }
 
-async function handleSaveDay(
-    day: DekurzDay,
-) {
-    await saveDay(
-        day,
-    )
-
-    schedulePreview()
-}
-
-async function handleApplyToUnedited(
+async function handleDeleteEntry(
     entry: DekurzEntry,
 ) {
-    await applyToUnedited(
+    if (
+        entry.track_type !==
+        'custom'
+    ) {
+        return
+    }
+
+    const confirmed =
+        await openModal(
+            markRaw(
+                DeleteDekurzEntryConfirmation,
+            ),
+
+            {
+                title:
+                    'Odstrániť sekciu',
+
+                entry,
+            },
+
+            {
+                header:
+                    'Odstrániť sekciu',
+
+                style: {
+                    width:
+                        'min(440px, 94vw)',
+                },
+            },
+        )
+
+    if (
+        !confirmed
+    ) {
+        return
+    }
+
+    await deleteEntry(
         entry,
     )
 
     schedulePreview()
 }
 
-async function handleFinalize() {
-    await finalizeDraft()
-
-    await load()
-
+async function handlePropagate(payload: Parameters<typeof propagateEntry>[0]) {
+    await propagateEntry(payload)
     schedulePreview()
+}
+
+async function handleCreateSection(payload: { day: DekurzDay; name: string }) {
+    await createCustomTrack(payload.name, payload.day.date)
+    schedulePreview()
+}
+
+async function handleFinalize() {
+    const finalized = await finalizeDraft(
+        previewPageCount.value,
+    )
+
+    if (!finalized) {
+        return
+    }
+
+    const documentId =
+        builder.value
+            ?.draft
+            ?.final_document_id
+
+    if (!documentId) {
+        return
+    }
+
+    await router.push({
+        name:
+            'documents-dekurz',
+
+        params: {
+            documentId,
+        },
+    })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -648,9 +540,7 @@ async function handleFinalize() {
 /* -------------------------------------------------------------------------- */
 
 async function reloadDekurz() {
-    await load()
-
-    schedulePreview()
+    await loadAndInitialize()
 }
 
 /* -------------------------------------------------------------------------- */
@@ -660,21 +550,13 @@ async function reloadDekurz() {
 watch(
     monthKey,
     async () => {
-        activeSection.value =
-            0
-
-        await load()
-
-        schedulePreview()
+        await loadAndInitialize()
     },
 )
 
 watch(
     patientIdRef,
     async () => {
-        activeSection.value =
-            0
-
         dekurzNumber.value =
             String(
                 patientStore.current
@@ -682,9 +564,7 @@ watch(
                     '',
             )
 
-        await load()
-
-        schedulePreview()
+        await loadAndInitialize()
     },
 )
 
@@ -692,22 +572,6 @@ watch(
     dekurzNumber,
     () => {
         schedulePreview()
-    },
-)
-
-watch(
-    () =>
-        builder.value
-            ?.draft
-            ?.status,
-    status => {
-        if (
-            status ===
-            'completed'
-        ) {
-            activeSection.value =
-                2
-        }
     },
 )
 
@@ -734,11 +598,9 @@ watch(
 onMounted(
     async () => {
         await Promise.all([
-            load(),
+            loadAndInitialize(),
             loadMacros(),
         ])
-
-        schedulePreview()
     },
 )
 
@@ -770,76 +632,15 @@ onBeforeUnmount(() => {
         <div
             v-if="document.document"
             class="
-                flex
                 h-full
                 min-h-0
-                flex-col
-                gap-3
             "
         >
             <div
                 class="
-                    flex
-                    shrink-0
-                    items-center
-                    justify-between
-                    gap-3
-                "
-            >
-                <div
-                    class="
-                        min-w-0
-                    "
-                >
-                    <p
-                        class="
-                            truncate
-                            text-normal
-                            font-medium
-                            text-darkgrey
-                        "
-                    >
-                        {{
-                            document.document.name ||
-                            document.label
-                        }}
-                    </p>
-
-                    <p
-                        class="
-                            text-mini
-                            text-lightgrey
-                        "
-                    >
-                        {{
-                            formatDocumentDate(
-                                document.document.date,
-                            )
-                        }}
-                    </p>
-                </div>
-
-                <AppButton
-                    type="button"
-                    variant="text"
-                    icon="bi bi-download"
-                    label="Stiahnuť"
-                    class="shrink-0!"
-                    @click="
-                        downloadSupportingDocument(
-                            document,
-                        )
-                    "
-                />
-            </div>
-
-            <div
-                class="
                     relative
-                    min-h-0
-                    flex-1
+                    h-full
                     overflow-hidden
-                    rounded-md
                     bg-tag3
                 "
             >
@@ -950,12 +751,13 @@ onBeforeUnmount(() => {
                 <section
                     class="
                         flex
-                        h-full
                         min-h-0
                         flex-col
                         overflow-hidden
                         rounded-md
                         bg-tag3
+                        max-h-full
+
                     "
                 >
                     <div
@@ -1018,267 +820,101 @@ onBeforeUnmount(() => {
                                 gap-8
                             "
                         >
-                            <!-- Document identification -->
-
-                            <div
-                                class="
-                                    grid
-                                    grid-cols-12
-                                    gap-4
-                                "
-                            >
-                                <FormField
-                                    label="Číslo dekurzu"
-                                    class="
-                                        col-span-6
-                                    "
-                                >
-                                    <InputText
-                                        v-model="dekurzNumber"
-                                        class="
-                                            w-full
-                                            border-0!
-                                        "
-                                    />
-                                </FormField>
-
-                                <FormField
-                                    label="Mesiac dekurzu"
-                                    class="
-                                        col-span-6
-                                    "
-                                >
+                            <div class="grid grid-cols-12 gap-4">
+                                <FormField label="Mesiac dekurzu" class="col-span-6">
                                     <DatePicker
                                         v-model="selectedMonth"
                                         view="month"
                                         dateFormat="mm/yy"
                                         :showIcon="false"
-                                        class="
-                                            w-full
-                                        "
-                                        inputClass="
-                                            w-full!
-                                            cursor-pointer!
-                                            border-none!
-                                        "
+                                        class="w-full"
+                                        inputClass="w-full! cursor-pointer! border-none!"
+                                    />
+                                </FormField>
+
+                                <FormField label="Číslo dekurzu" class="col-span-6">
+                                    <InputText
+                                        v-model="dekurzNumber"
+                                        readonly
+                                        class="w-full cursor-default border-0! bg-tag3!"
                                     />
                                 </FormField>
                             </div>
 
-                            <!-- Section selector -->
-
                             <div
-                                class="
-                                    flex
-                                    flex-wrap
-                                    items-center
-                                    gap-2
-                                "
-                                aria-label="Sekcie Dekurzu"
+                                v-if="builder.draft?.final_document_id"
+                                class="flex items-center gap-3 rounded-md bg-danger p-2"
                             >
-                                <AppButton
-                                    v-for="(
-                                        section,
-                                        index
-                                    ) in sections"
-                                    :key="section.label"
-                                    type="button"
-                                    :variant="
-                                        activeSection ===
-                                        index
-                                            ? 'accent'
-                                            : 'text'
-                                    "
-                                    :icon="section.icon"
-                                    :label="section.label"
-                                    :disabled="
-                                        navigating ||
-                                        (isCompleted &&
-                                            index !== 2)
-                                    "
-                                    @click="
-                                        goToSection(
-                                            index,
-                                        )
-                                    "
-                                />
-                            </div>
-
-                            <!-- ==================================================== -->
-                            <!-- PROCEDURES                                           -->
-                            <!-- ==================================================== -->
-
-                            <section
-                                v-if="activeSection === 0"
-                                aria-labelledby="dekurz-procedures-heading"
-                                class="
-                                    flex
-                                    flex-col
-                                    gap-4
-                                "
-                            >
-                                <div>
-                                    <p
-                                        id="dekurz-procedures-heading"
-                                        class="
-                                            text-normal
-                                            text-accent
-                                        "
-                                    >
-                                        Texty výkonov
-                                    </p>
-
-                                    <p
-                                        class="
-                                            mt-1
-                                            text-mini
-                                            text-lightgrey
-                                        "
-                                    >
-                                        Upravte text, ktorý sa použije pri vytvorení denných záznamov.
+                                <i class="bi bi-file-earmark-check text-white" />
+                                <div class="min-w-0">
+                                    <p class="text-normal font-medium text-white">
+                                        Upravujete existujúci súbor.
                                     </p>
                                 </div>
+                            </div>
 
-                                <div
-                                    v-if="builder.procedures.length"
-                                    class="
-                                        grid
-                                        gap-3
-                                        xl:grid-cols-2
-                                    "
-                                >
-                                    <DekurzProcedureTextCard
-                                        v-for="procedure in builder.procedures"
-                                        :key="procedure.id"
-                                        :procedure="procedure"
-                                        :macros="macros"
-                                        :save-state="
-                                            saveStates[
-                                                `template-${procedure.id}`
-                                            ]
-                                        "
-                                        @save="
-                                            handleSaveTemplate
-                                        "
-                                        @reset="
-                                            handleResetTemplate
-                                        "
-                                        @update-text="
-                                            updateTemplateText
-                                        "
+                            <div
+                                v-if="!builder.draft"
+                                class="flex items-start gap-3 rounded-md bg-warning/10 p-4"
+                            >
+                                <i class="bi bi-clock-history mt-0.5 text-warning" />
+                                <div class="min-w-0 flex-1">
+                                    <p class="text-normal font-medium text-darkgrey">
+                                        {{ initializing ? 'Pripravujem Dekurz…' : 'Dekurz zatiaľ nie je možné upravovať.' }}
+                                    </p>
+                                    <p class="mt-1 text-mini text-lightgrey">
+                                        {{ draftInitializationError || 'Kontrolujem vypočítané časy návštev.' }}
+                                    </p>
+                                    <AppButton
+                                        v-if="draftInitializationError"
+                                        type="button"
+                                        variant="text"
+                                        icon="bi bi-arrow-clockwise"
+                                        label="Skontrolovať znova"
+                                        class="mt-2"
+                                        :loading="initializing"
+                                        @click="initializeDraft"
                                     />
                                 </div>
-
-                                <p
-                                    v-else
-                                    class="
-                                        text-normal
-                                        text-lightgrey
-                                    "
-                                >
-                                    V zvolenom mesiaci nie sú výkony určené pre Dekurz.
-                                </p>
-                            </section>
-
-                            <!-- ==================================================== -->
-                            <!-- DAILY                                                -->
-                            <!-- ==================================================== -->
-
-                            <DekurzDailyStep
-                                v-else-if="activeSection === 1"
-                                :days="builder.days"
-                                :macros="macros"
-                                :save-states="saveStates"
-                                @save-entry="
-                                    handleSaveEntry
-                                "
-                                @save-day="
-                                    handleSaveDay
-                                "
-                                @apply-to-unedited="
-                                    handleApplyToUnedited
-                                "
-                                @update-entry-text="
-                                    updateEntryText
-                                "
-                                @update-day-note="
-                                    updateDayNote
-                                "
-                            />
-
-                            <!-- ==================================================== -->
-                            <!-- REVIEW                                               -->
-                            <!-- ==================================================== -->
-
-                            <DekurzReviewStep
-                                v-else
-                                :days="builder.days"
-                                :procedures="builder.procedures"
-                                :documents="builder.supporting_documents"
-                                :scoring-changes="builder.scoring_changes"
-                                :completed="isCompleted"
-                                :finalizing="finalizing"
-                                :final-document-id="
-                                    builder.draft
-                                        ?.final_document_id ??
-                                    null
-                                "
-                                :finalization-errors="finalizationErrors"
-                                @finalize="
-                                    handleFinalize
-                                "
-                            />
-
-                            <!-- Navigation -->
-
-                            <div
-                                v-if="!isCompleted"
-                                class="
-                                    flex
-                                    items-center
-                                    justify-between
-                                    gap-3
-                                "
-                            >
-                                <AppButton
-                                    v-if="activeSection > 0"
-                                    type="button"
-                                    variant="text"
-                                    icon="bi bi-arrow-left"
-                                    label="Späť"
-                                    :disabled="navigating"
-                                    @click="
-                                        goToSection(
-                                            activeSection -
-                                                1,
-                                        )
-                                    "
-                                />
-
-                                <span
-                                    v-else
-                                />
-
-                                <AppButton
-                                    v-if="
-                                        activeSection <
-                                        sections.length -
-                                            1
-                                    "
-                                    type="button"
-                                    variant="accent"
-                                    icon="bi bi-arrow-right"
-                                    label="Pokračovať"
-                                    :loading="navigating"
-                                    class="ml-auto!"
-                                    @click="
-                                        goToSection(
-                                            activeSection +
-                                                1,
-                                        )
-                                    "
-                                />
                             </div>
+
+                            <template v-else>
+                                <DekurzDailyStep
+                                    :days="builder.days"
+                                    :macros="macros"
+                                    :save-states="saveStates"
+                                    @save-entry="handleSaveEntry"
+                                    @delete-entry="handleDeleteEntry"
+                                    @propagate="handlePropagate"
+                                    @create-section="handleCreateSection"
+                                    @update-entry-text="updateEntryText"
+                                />
+
+                                <div
+                                    v-if="finalizationErrors.length"
+                                    class="rounded-md bg-danger/5 p-4"
+                                >
+                                    <p class="text-normal font-medium text-danger">
+                                        Dekurz zatiaľ nie je možné vygenerovať.
+                                    </p>
+                                    <ul class="mt-2 list-disc space-y-1 pl-5 text-mini text-danger">
+                                        <li v-for="message in finalizationErrors" :key="message">
+                                            {{ message }}
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div class="flex justify-end">
+                                    <AppButton
+                                        type="button"
+                                        variant="accent"
+                                        :label="builder.draft.final_document_id ? 'Znovu vygenerovať dokument' : 'Generovať dokument'"
+                                        :loading="finalizing"
+                                        :disabled="isPreviewLoading || !isPreviewPaginationReady"
+                                        @click="handleFinalize"
+                                    />
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </section>
@@ -1303,8 +939,10 @@ onBeforeUnmount(() => {
                     :loading="isPreviewLoading"
                     :error="previewError"
                     title="Náhľad Dekurzu"
+                    @page-count-change="handlePreviewPageCountChange"
                 />
             </section>
         </div>
     </div>
+
 </template>

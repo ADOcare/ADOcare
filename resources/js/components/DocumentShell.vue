@@ -70,6 +70,7 @@ export interface Props {
 
     showPrintButton?: boolean
     showTitle?: boolean
+    paginatedPreview?: boolean
 }
 
 const props =
@@ -102,6 +103,9 @@ const props =
 
             showTitle:
                 true,
+
+            paginatedPreview:
+                false,
         },
     )
 
@@ -545,8 +549,11 @@ async function download(
 const previewWidthStyle =
     computed(
         () =>
-            props.previewWidth ||
-            '210mm',
+            props.paginatedPreview &&
+            props.previewWidth === '210mm'
+                ? 'calc(210mm + 3rem)'
+                : props.previewWidth ||
+                  '210mm',
     )
 
 watch(
@@ -558,6 +565,59 @@ watch(
             '850px'
     },
 )
+
+function injectScrollablePreviewStyles(
+    doc: Document,
+) {
+    if (!doc.head) {
+        return
+    }
+
+    const styleId =
+        'document-shell-scroll-preview-styles'
+
+    let style =
+        doc.getElementById(
+            styleId,
+        ) as HTMLStyleElement | null
+
+    if (!style) {
+        style =
+            doc.createElement(
+                'style',
+            )
+
+        style.id =
+            styleId
+
+        doc.head.appendChild(
+            style,
+        )
+    }
+
+    style.textContent = `
+        @media screen {
+            html,
+            body {
+                background: #e5e7eb !important;
+            }
+
+            body {
+                padding: 24px 0 !important;
+            }
+
+            [data-page],
+            .page,
+            .a4-page,
+            .document-page,
+            .print-page {
+                margin: 0 auto 24px !important;
+                background: #ffffff !important;
+                box-shadow: 0 3px 14px rgba(15, 23, 42, 0.2) !important;
+            }
+        }
+    `
+}
 
 function updateIframeHeight() {
     const iframe =
@@ -576,6 +636,17 @@ function updateIframeHeight() {
                 ?.document
 
         if (!doc) {
+            return
+        }
+
+        if (props.paginatedPreview) {
+            injectScrollablePreviewStyles(
+                doc,
+            )
+
+            iframeHeight.value =
+                'calc(100vh - 8rem)'
+
             return
         }
 
@@ -605,9 +676,13 @@ function updateIframeHeight() {
 }
 
 function onIframeLoad() {
-    nextTick(
-        updateIframeHeight,
-    )
+    nextTick(() => {
+        updateIframeHeight()
+
+        requestAnimationFrame(
+            updateIframeHeight,
+        )
+    })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -981,7 +1056,7 @@ function onActionClick(
                         Document preview
                     "
                     frameborder="0"
-                    scrolling="no"
+                    :scrolling="paginatedPreview ? 'auto' : 'no'"
                     class="
                         w-full
                         overflow-hidden
@@ -1168,6 +1243,9 @@ iframe {
 
     #document-shell-print
     iframe {
+        height:
+            auto !important;
+
         min-height:
             0 !important;
 

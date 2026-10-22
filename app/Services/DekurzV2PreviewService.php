@@ -25,6 +25,7 @@ class DekurzV2PreviewService
         $sourceDays = $previewDays ?? $builder['draft']['days'] ?? $builder['days'] ?? [];
         $dailyTexts = collect($sourceDays)->mapWithKeys(function (array $day): array {
             $parts = collect($day['entries'] ?? [])
+                ->reject(fn (array $entry): bool => (bool) ($entry['is_excluded'] ?? false))
                 ->pluck('text')
                 ->map(fn ($text): string => trim((string) $text))
                 ->filter()

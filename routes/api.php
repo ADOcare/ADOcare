@@ -475,7 +475,15 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware(['role:any', 'can:update,patient']);
     Route::patch('/patients/{patient}/dekurz-drafts/{draft}/entries/{entry}', [DekurzV2Controller::class, 'updateEntry'])
         ->middleware(['role:any', 'can:update,patient']);
-    Route::post('/patients/{patient}/dekurz-drafts/{draft}/entries/{entry}/apply-to-unedited', [DekurzV2Controller::class, 'applyEntryToUnedited'])
+    Route::delete('/patients/{patient}/dekurz-drafts/{draft}/entries/{entry}', [DekurzV2Controller::class, 'excludeEntry'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::post('/patients/{patient}/dekurz-drafts/{draft}/entries/{entry}/propagate', [DekurzV2Controller::class, 'propagateEntry'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::post('/patients/{patient}/dekurz-custom-tracks', [DekurzV2Controller::class, 'storeCustomTrack'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::patch('/patients/{patient}/dekurz-custom-tracks/{customTrack}', [DekurzV2Controller::class, 'updateCustomTrack'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::delete('/patients/{patient}/dekurz-custom-tracks/{customTrack}', [DekurzV2Controller::class, 'deleteCustomTrack'])
         ->middleware(['role:any', 'can:update,patient']);
 
     Route::documentRoutes('leave-documents', LeaveDocumentController::class);

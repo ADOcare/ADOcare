@@ -392,6 +392,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
 
     Route::post('/monthly-exports', [MonthlyExportController::class, 'store'])
         ->middleware('role:any');
+    Route::get('/monthly-exports', [MonthlyExportController::class, 'index'])
+        ->middleware('role:any');
     Route::get('/monthly-exports/{monthlyExportRun}', [MonthlyExportController::class, 'show'])
         ->middleware('role:any');
     Route::get('/monthly-exports/{monthlyExportRun}/download', [MonthlyExportController::class, 'download'])
@@ -486,10 +488,16 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::delete('/patients/{patient}/dekurz-custom-tracks/{customTrack}', [DekurzV2Controller::class, 'deleteCustomTrack'])
         ->middleware(['role:any', 'can:update,patient']);
 
+    Route::post('/leave-documents/draft-preview', [LeaveDocumentController::class, 'previewDraft'])
+        ->middleware('role:any')
+        ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('leave-documents', LeaveDocumentController::class);
     Route::get('/patients/{patient}/leave/latest', [LeaveDocumentController::class, 'latestByPatient'])
         ->middleware(['role:any', 'can:view,patient']);
 
+    Route::post('/records/draft-preview', [RecordDocumentController::class, 'previewDraft'])
+        ->middleware('role:any')
+        ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('records', RecordDocumentController::class);
     Route::get('/patients/{patient}/records/latest', [RecordDocumentController::class, 'latestByPatient'])
         ->middleware(['role:any', 'can:view,patient']);

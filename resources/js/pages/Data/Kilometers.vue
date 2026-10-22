@@ -11,6 +11,7 @@ import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
 import type { DataTableOptions } from '@/types/datatable'
 import useModal from '@/composables/useModal'
 import KilometersBatchPreviewModal from './KilometersBatchPreviewModal.vue'
+import AppButton from '@/components/AppButton.vue'
 
 const authStore = useAuthStore()
 const toast = useToast()
@@ -332,8 +333,8 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
             key: 'email',
             disabled: ({ selectedRows }: { selectedRows: DocRow[] }) => selectedRows.length === 0,
             icon: 'bi bi-send',
-            class: 'bg-accent!',
-            tooltip: 'Poslať vybrané dokumenty emailom',
+            variant: 'accent',
+            label: 'Poslať emailom',
             handler: async ({ selectedRows, remote }: { selectedRows: DocRow[]; remote: any }) => {
                 await openEmailDocumentsDialog({
                     documents: selectedRows,
@@ -345,7 +346,8 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
             key: 'delete',
             disabled: ({ selectedRows }: { selectedRows: DocRow[] }) => selectedRows.length === 0,
             icon: 'bi bi-eraser',
-            class: 'bg-danger!',
+            variant: 'danger',
+            label: 'Vymazať',
             confirm: 'Naozaj chcete zmazať vybrané dokumenty?',
             handler: async ({ selectedRows, remote }: { selectedRows: DocRow[]; remote: any }) => {
                 await api.delete('/v1/documents', {
@@ -412,20 +414,19 @@ const options = computed<DataTableOptions<DocRow>>(() => ({
                             Obdobie je povinné.
                         </small>
                     </div>
-
                 </div>
-            </section>
 
-            <div class="flex justify-end">
-                <Button
+                <AppButton
                     type="submit"
+                    variant="accent"
                     :disabled="busy"
                     :loading="busy"
-                    class="bg-accent! border-0! hover:bg-darkgrey! px-4! rounded-md! text-white! text-normal! h-7!"
+                    align="right"
                 >
-                    Zobraziť náhľad dávky
-                </Button>
-            </div>
+                    Náhľad dávky
+                </AppButton>
+            </section>
+
         </form>
 
         <section>

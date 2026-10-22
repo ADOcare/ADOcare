@@ -149,6 +149,34 @@ class DocumentationAuditServiceTest extends TestCase
         self::assertSame(0, DocumentationAuditIssue::query()->count());
     }
 
+    public function test_audit_skips_deceased_and_soft_deleted_patients(): void
+    {
+        DB::table('patients')->where('id', 1)->update(['death_date' => '2026-10-01']);
+
+        $deceased = $this->service()->run(
+            month: '2026-09',
+            dryRun: true,
+            today: CarbonImmutable::parse('2026-10-15'),
+        );
+
+        self::assertSame(0, $deceased['patients_checked']);
+        self::assertSame(0, $deceased['points_checked']);
+
+        DB::table('patients')->where('id', 1)->update([
+            'death_date' => null,
+            'deleted_at' => '2026-10-02 08:00:00',
+        ]);
+
+        $deleted = $this->service()->run(
+            month: '2026-09',
+            dryRun: true,
+            today: CarbonImmutable::parse('2026-10-15'),
+        );
+
+        self::assertSame(0, $deleted['patients_checked']);
+        self::assertSame(0, $deleted['points_checked']);
+    }
+
     public function test_multiple_open_issues_are_aggregated_into_one_patient_period_action(): void
     {
         DB::table('patient_points')->insert([
@@ -416,6 +444,7 @@ class DocumentationAuditServiceTest extends TestCase
             $table->string('last_name')->nullable();
             $table->unsignedInteger('branch_id')->nullable();
             $table->unsignedBigInteger('nurse_id')->nullable();
+            $table->date('death_date')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });

@@ -40,13 +40,9 @@ export function usePublicDocument<T = any>(props: PublicDocumentProps, options: 
     }
 
     onMounted(async () => {
-        console.log('Public document props and options:', props, options)
         if (props.isPublic && props.publicData) {
             data.value = props.publicData.payload as T
-            // If it's a PDF-based preview, we use the public HTML preview endpoint
-            // if (!options.privateDataUrl) {
-                loadPreview(getPublicLink({ format: 'html' }))
-            // }
+            loadPreview(getPublicLink({ format: 'html' }))
             return
         }
 

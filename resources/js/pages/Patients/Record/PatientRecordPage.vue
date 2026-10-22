@@ -1,10 +1,27 @@
 <script setup lang="ts">
-import { reactive, computed, watchEffect, ref } from 'vue'
+import { reactive, computed, watchEffect, watch, ref, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '@/services/api'
 import { useToast } from 'primevue/usetoast'
+
+import AutoComplete from 'primevue/autocomplete'
+import Checkbox from 'primevue/checkbox'
+import DatePicker from 'primevue/datepicker'
+import InputText from 'primevue/inputtext'
+import RadioButton from 'primevue/radiobutton'
+import Tab from 'primevue/tab'
+import TabList from 'primevue/tablist'
+import TabPanel from 'primevue/tabpanel'
+import TabPanels from 'primevue/tabpanels'
+import Tabs from 'primevue/tabs'
+import Textarea from 'primevue/textarea'
+
+import api from '@/services/api'
 import { usePatientStore } from '@/stores/patientStore'
 import { useAuthStore } from '@/stores/auth'
+
+import AppButton from '@/components/AppButton.vue'
+import FormField from '@/components/FormField.vue'
+import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
 
 type Option = { label: string; value: string }
 
@@ -1930,21 +1947,81 @@ watchEffect(() => {
   }
 })
 
+function buildRecordPayload() {
+  const admissionDate = toIso(getValue('admissionDate'))
+  const branchId = authStore.currentBranch?.id ?? patientStore.current?.branch_id ?? null
+
+  return {
+    patient_id: patientId.value,
+    branch_id: branchId,
+    date: admissionDate || null,
+    form_spec: defaultSpec,
+    record_data: {
+      ...answers,
+      admissionDate,
+    },
+  }
+}
+
+const previewHtml = ref('')
+const isPreviewLoading = ref(false)
+const previewError = ref<string | null>(null)
+
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+let previewRequestId = 0
+
+async function loadPreview() {
+  if (!patientId.value) {
+    previewRequestId++
+    previewHtml.value = ''
+    previewError.value = null
+    isPreviewLoading.value = false
+    return
+  }
+
+  const requestId = ++previewRequestId
+  isPreviewLoading.value = true
+  previewError.value = null
+
+  try {
+    const response = await api.post(
+      '/v1/records/draft-preview',
+      buildRecordPayload(),
+      {
+        headers: { Accept: 'text/html' },
+        responseType: 'text',
+      },
+    )
+
+    if (requestId !== previewRequestId) return
+
+    previewHtml.value = String(response.data ?? '')
+  } catch (error) {
+    if (requestId !== previewRequestId) return
+
+    console.error('Failed to load record preview:', error)
+    previewHtml.value = ''
+    previewError.value = 'Náhľad dokumentu sa nepodarilo načítať.'
+  } finally {
+    if (requestId === previewRequestId) {
+      isPreviewLoading.value = false
+    }
+  }
+}
+
+function schedulePreview() {
+  if (previewTimer) {
+    clearTimeout(previewTimer)
+  }
+
+  previewTimer = setTimeout(() => {
+    void loadPreview()
+  }, 300)
+}
+
 async function saveRecord() {
   try {
-    const admissionDate = toIso(getValue('admissionDate'))
-    const branchId = authStore.currentBranch?.id ?? patientStore.current?.branch_id ?? null
-
-    const payload = {
-      patient_id: patientId.value,
-      branch_id: branchId,
-      date: admissionDate || null,
-      form_spec: defaultSpec,
-      record_data: {
-        ...answers,
-        admissionDate,
-      },
-    }
+    const payload = buildRecordPayload()
 
     const res = await api.post('/v1/records', payload)
 
@@ -2006,6 +2083,53 @@ const setValue = (id: string, v: any) => {
   return props.setValue ? props.setValue(id, v) : answersSetValue(id, v)
 }
 const displaySpec = computed(() => props.spec ?? defaultSpec)
+
+type RecordTab = {
+  id: string
+  label: string
+  sectionIds: string[]
+}
+
+const activeTab = ref('admission')
+
+const recordTabs: RecordTab[] = [
+  { id: 'admission', label: 'Príjem a anamnéza', sectionIds: ['basic', 'allergies', 'abuses', 'family', 'social', 'healthPerception', 'nursingAssessment'] },
+  { id: 'vitals', label: 'Vitálne funkcie', sectionIds: ['consciousnessOrientation', 'circulation', 'breathing'] },
+  { id: 'nutrition', label: 'Výživa a vylučovanie', sectionIds: ['nutrition', 'elimination'] },
+  { id: 'physical', label: 'Telesný stav', sectionIds: ['sleep', 'mobility', 'movementSystem', 'skinMucosa', 'pain'] },
+  { id: 'psychosocial', label: 'Psychika a komunikácia', sectionIds: ['communication', 'learningPerception', 'psychosocialNeeds'] },
+  { id: 'postpartum', label: 'Šestonedelie', sectionIds: ['postpartum'] },
+  { id: 'final', label: 'Záver', sectionIds: ['careDeficits', 'patientInstruction', 'nursingDiagnoses'] },
+]
+
+const tabsWithSections = computed(() =>
+  recordTabs
+    .map((tab) => ({
+      ...tab,
+      sections: (displaySpec.value.sections ?? []).filter((section: Section) =>
+        tab.sectionIds.includes(section.id),
+      ),
+    }))
+    .filter((tab) => tab.sections.length > 0),
+)
+
+const activeTabIndex = computed(() =>
+  tabsWithSections.value.findIndex((tab) => tab.id === activeTab.value),
+)
+
+const isLastTab = computed(() =>
+  activeTabIndex.value === tabsWithSections.value.length - 1,
+)
+
+function goToNextTab() {
+  const nextTab = tabsWithSections.value[activeTabIndex.value + 1]
+
+  if (!nextTab) {
+    return
+  }
+
+  activeTab.value = nextTab.id
+}
 const dateFieldIds = computed(() => {
   const ids = new Set<string>()
   for (const s of displaySpec.value.sections ?? []) {
@@ -2086,162 +2210,305 @@ watchEffect(() => {
   }
 })
 
+watch(
+  [
+    () => patientId.value,
+    () => patientStore.current?.branch_id,
+    () => answers,
+  ],
+  schedulePreview,
+  {
+    deep: true,
+    immediate: true,
+  },
+)
+
+onBeforeUnmount(() => {
+  if (previewTimer) {
+    clearTimeout(previewTimer)
+  }
+
+  previewRequestId++
+})
+
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
-    <h2 class="text-xl font-semibold">{{ displaySpec.title }}</h2>
+  <div
+    class="-mx-8 -mb-8 -mt-8 h-[calc(100%+4rem)] min-h-0 w-[calc(100%+4rem)] overflow-hidden"
+  >
+    <div class="grid h-full min-h-0 grid-cols-2 gap-6 p-8">
+      <!-- ============================================================ -->
+      <!-- LEFT: TABBED FORM                                            -->
+      <!-- ============================================================ -->
 
-    <section
-      v-for="section in displaySpec.sections"
-      :key="section.id"
-      class="bg-tag3 p-6 rounded-md flex flex-col gap-6"
-    >
-      <h3 class="text-accent text-normal">{{ section.title }}</h3>
-
-      <div v-for="field in section.fields" :key="field.id" class="flex flex-col gap-2">
-        <!-- Hide label row if empty -->
-        <label v-if="field.label?.trim()" class="block text-normal">
-          {{ field.label }}
-          <span v-if="field.required" class="text-red-600">*</span>
-        </label>
-
-        <!-- text -->
-        <input
-          v-if="field.type === 'text'"
-          class="w-full rounded-md bg-white px-3 py-2 border-0 shadow-none outline-none focus:ring-0 focus:shadow-none text-normal"
-          :placeholder="field.placeholder"
-          :value="getValue(field.id) ?? ''"
-          @input="setValue(field.id, ($event.target as HTMLInputElement).value)"
-        />
-
-        <!-- textarea -->
-        <textarea
-          v-else-if="field.type === 'textarea'"
-          class="w-full rounded-md bg-white px-3 py-2 border-0 shadow-none outline-none focus:ring-0 focus:shadow-none text-normal"
-          rows="4"
-          :placeholder="field.placeholder"
-          :value="getValue(field.id) ?? ''"
-          @input="setValue(field.id, ($event.target as HTMLTextAreaElement).value)"
-        />
-
-        <!-- date -->
-        <DatePicker
-          v-else-if="field.type === 'date'"
-          v-model="dateProxy[field.id]"
-          dateFormat="dd.mm.yy"
-          :showIcon="false"
-          :maxDate="patientDeathDate || undefined"
-          class="w-full"
-          inputClass="!w-full !shadow-none !bg-white focus:!ring-0 focus:!shadow-none !border-0 text-normal"
-        />
-
-        <!-- autocomplete -->
-        <AutoComplete
-          v-else-if="field.type === 'autocomplete'"
-          v-model="answers.diagnosis"
-          :suggestions="filteredDiagnoses"
-          multiple
-          :minLength="1"
-          dropdown
-          completeOnFocus
-          optionLabel="code"
-          @complete="searchDiagnoses"
-          class="w-full"
-          inputClass="w-full! shadow-none! bg-white! focus:ring-0! focus:shadow-none! border-0! text-normal"
+      <aside class="h-full min-h-0 overflow-hidden">
+        <form
+          class="flex h-full min-h-0 flex-col overflow-hidden rounded-md bg-tag3"
+          @submit.prevent="saveRecord"
         >
-          <template #option="{ option }">
-            <div class="flex flex-col">
-              <span class="shrink-0 font-medium">{{ option.code }}</span>
-              <span>{{ option.description }}</span>
+          <Tabs v-model:value="activeTab" class="flex h-full min-h-0 flex-col bg-transparent!">
+            <div class="shrink-0 border-b border-darkgrey/10 px-8 pt-6">
+              <TabList class="bg-transparent!">
+                <Tab v-for="tab in tabsWithSections" :key="tab.id" :value="tab.id">
+                  {{ tab.label }}
+                </Tab>
+              </TabList>
             </div>
-          </template>
 
-          <template #chip="{ value }">
-            <div class="inline-flex items-center gap-2 bg-darkgrey text-lightgrey px-3 py-1 rounded-md text-normal">
-              <span class="whitespace-nowrap text-normal">{{ value.code }}</span>
-              <i
-                class="bi bi-x-lg cursor-pointer text-[0.6rem] sm:text-[0.7rem]"
-                @click.stop="removeDoctorDiagnosis(value)"
-              />
-            </div>
-          </template>
-        </AutoComplete>
+            <TabPanels class="min-h-0! flex-1! overflow-hidden! bg-transparent! p-0!">
+              <TabPanel
+                v-for="tab in tabsWithSections"
+                :key="tab.id"
+                :value="tab.id"
+                class="h-full! min-h-0! bg-transparent! p-0!"
+              >
+                <div class="h-full overflow-y-auto p-8">
+                  <div class="flex flex-col gap-8">
+                    <section
+                      v-for="section in tab.sections"
+                      :key="section.id"
+                      class="grid grid-cols-12 gap-4"
+                    >
+                      <div class="col-span-12">
+                        <p class="text-normal text-accent">{{ section.title }}</p>
+                      </div>
 
-        <AutoComplete
-          v-else-if="field.type === 'nursing-diagnoses-autocomplete'"
-          v-model="answers['nursingDiagnoses.list']"
-          :suggestions="filteredNurseDiagnoses"
-          multiple
-          :minLength="1"
-          dropdown
-          completeOnFocus
-          optionLabel="code"
-          @complete="searchNurseDiagnoses"
-          class="w-full"
-          inputClass="w-full! shadow-none! bg-white! focus:ring-0! focus:shadow-none! border-0! text-normal"
-        >
-          <template #option="{ option }">
-            <div class="flex flex-col">
-              <span class="shrink-0 font-medium">{{ option.code }}</span>
-              <span>{{ option.description }}</span>
-            </div>
-          </template>
+                      <div v-for="field in section.fields" :key="field.id" class="col-span-12">
+                        <FormField
+                          v-if="field.type === 'text'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                          :outlined="false"
+                        >
+                          <InputText
+                            :model-value="getValue(field.id) ?? ''"
+                            :placeholder="field.placeholder"
+                            class="w-full border-0! bg-white!"
+                            @update:model-value="setValue(field.id, $event)"
+                          />
+                        </FormField>
 
-          <template #chip="{ value }">
-            <div class="inline-flex items-center gap-2 bg-darkgrey text-lightgrey px-3 py-1 rounded-md text-normal">
-              <span class="whitespace-nowrap text-normal">{{ value.code }}</span>
-              <i
-                class="bi bi-x-lg cursor-pointer text-[0.6rem] sm:text-[0.7rem]"
-                @click.stop="removeNurseDiagnosis(value)"
-              />
-            </div>
-          </template>
-        </AutoComplete>
+                        <FormField
+                          v-else-if="field.type === 'textarea'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                          :outlined="false"
+                        >
+                          <Textarea
+                            :model-value="getValue(field.id) ?? ''"
+                            :placeholder="field.placeholder"
+                            rows="2"
+                            auto-resize
+                            class="w-full resize-none! border-0! bg-white!"
+                            @update:model-value="setValue(field.id, $event)"
+                          />
+                        </FormField>
 
+                        <FormField
+                          v-else-if="field.type === 'date'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                          :outlined="false"
+                        >
+                          <DatePicker
+                            v-model="dateProxy[field.id]"
+                            date-format="dd.mm.yy"
+                            :show-icon="false"
+                            :max-date="patientDeathDate ?? undefined"
+                            class="w-full"
+                            input-class="w-full! cursor-pointer! border-0! bg-white! shadow-none! focus:ring-0! focus:shadow-none!"
+                          />
+                        </FormField>
 
-        <!-- radio -->
-        <div v-else-if="field.type === 'radio'" class="flex flex-col gap-2">
-          <label v-for="opt in field.options" :key="opt.value" class="flex items-center gap-2 cursor-pointer text-normal">
-            <input
-              type="radio"
-              class="accent-accent"
-              :name="field.id"
-              :value="opt.value"
-              :checked="getValue(field.id) === opt.value"
-              @change="setValue(field.id, opt.value)"
+                        <FormField
+                          v-else-if="field.type === 'autocomplete'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                        >
+                          <AutoComplete
+                            v-model="answers.diagnosis"
+                            :suggestions="filteredDiagnoses"
+                            multiple
+                            :min-length="1"
+                            dropdown
+                            complete-on-focus
+                            option-label="code"
+                            class="w-full rounded-md!"
+                            input-class="w-full! border-0! bg-white! shadow-none! focus:ring-0! focus:shadow-none!"
+                            @complete="searchDiagnoses"
+                          >
+                            <template #option="{ option }">
+                              <div class="flex flex-col">
+                                <span class="font-medium">{{ option.code }}</span>
+                                <span>{{ option.description }}</span>
+                              </div>
+                            </template>
+
+                            <template #chip="{ value }">
+                              <div
+                                class="inline-flex items-center gap-2 rounded-md bg-darkgrey px-3 py-1 text-normal text-white"
+                              >
+                                <span class="whitespace-nowrap">{{ value.code }}</span>
+                                <i
+                                  class="bi bi-x-lg cursor-pointer text-[0.65rem] text-lightgrey"
+                                  @click.stop="removeDoctorDiagnosis(value)"
+                                />
+                              </div>
+                            </template>
+                          </AutoComplete>
+                        </FormField>
+
+                        <FormField
+                          v-else-if="field.type === 'nursing-diagnoses-autocomplete'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                        >
+                          <AutoComplete
+                            v-model="answers['nursingDiagnoses.list']"
+                            :suggestions="filteredNurseDiagnoses"
+                            multiple
+                            :min-length="1"
+                            dropdown
+                            complete-on-focus
+                            option-label="code"
+                            class="w-full rounded-md!"
+                            input-class="w-full! border-0! bg-white! shadow-none! focus:ring-0! focus:shadow-none!"
+                            @complete="searchNurseDiagnoses"
+                          >
+                            <template #option="{ option }">
+                              <div class="flex flex-col">
+                                <span class="font-medium">{{ option.code }}</span>
+                                <span>{{ option.description }}</span>
+                              </div>
+                            </template>
+
+                            <template #chip="{ value }">
+                              <div
+                                class="inline-flex items-center gap-2 rounded-md bg-darkgrey px-3 py-1 text-normal text-white"
+                              >
+                                <span class="whitespace-nowrap">{{ value.code }}</span>
+                                <i
+                                  class="bi bi-x-lg cursor-pointer text-[0.65rem] text-lightgrey"
+                                  @click.stop="removeNurseDiagnosis(value)"
+                                />
+                              </div>
+                            </template>
+                          </AutoComplete>
+                        </FormField>
+
+                        <FormField
+                          v-else-if="field.type === 'radio'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                        >
+                          <div class="flex flex-col gap-2">
+                            <label
+                              v-for="option in field.options"
+                              :key="option.value"
+                              class="flex cursor-pointer items-center gap-2 text-normal"
+                            >
+                              <RadioButton
+                                :model-value="getValue(field.id)"
+                                :name="field.id"
+                                :value="option.value"
+                                @update:model-value="setValue(field.id, $event)"
+                              />
+                              <span>{{ option.label }}</span>
+                            </label>
+                          </div>
+                        </FormField>
+
+                        <FormField
+                          v-else-if="field.type === 'checkbox-group'"
+                          :label="field.label"
+                          :required="field.required"
+                          :help="field.help"
+                          :error="props.submitted ? props.errors?.[field.id] : null"
+                        >
+                          <div class="flex flex-col gap-2">
+                            <label
+                              v-for="option in field.options"
+                              :key="option.value"
+                              class="flex cursor-pointer items-center gap-2 text-normal"
+                            >
+                              <Checkbox
+                                :model-value="(getValue(field.id) ?? []).includes(option.value)"
+                                binary
+                                @update:model-value="
+                                  toggleInArray(
+                                    field.id,
+                                    option.value,
+                                    Boolean($event),
+                                  )
+                                "
+                              />
+                              <span>{{ option.label }}</span>
+                            </label>
+                          </div>
+                        </FormField>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              </TabPanel>
+            </TabPanels>
+          </Tabs>
+
+          <div
+            class="flex shrink-0 items-center justify-between border-t border-darkgrey/10 px-8 py-4"
+          >
+            <span class="text-mini text-lightgrey">
+              {{ tabsWithSections.find((tab) => tab.id === activeTab)?.label }}
+            </span>
+
+            <AppButton
+              v-if="!isLastTab"
+              type="button"
+              variant="accent"
+              label="Ďalej"
+              icon="bi bi-arrow-right"
+              @click="goToNextTab"
             />
-            <span>{{ opt.label }}</span>
-          </label>
-        </div>
 
-        <!-- checkbox-group -->
-        <div v-else-if="field.type === 'checkbox-group'" class="flex flex-col gap-2">
-          <label v-for="opt in field.options" :key="opt.value" class="flex items-center gap-2 cursor-pointer text-normal">
-            <input
-              type="checkbox"
-              class="accent-accent"
-              :checked="(getValue(field.id) ?? []).includes(opt.value)"
-              @change="toggleInArray(field.id, opt.value, ($event.target as HTMLInputElement).checked)"
+            <AppButton
+              v-else
+              type="submit"
+              variant="accent"
+              label="Generovať dokument"
+              :disabled="!patientId"
             />
-            <span>{{ opt.label }}</span>
-          </label>
-        </div>
+          </div>
+        </form>
+      </aside>
 
-        <p v-if="field.help" class="text-sm opacity-70">
-          {{ field.help }}
-        </p>
-      </div>
-    </section>
+      <!-- ============================================================ -->
+      <!-- RIGHT: DOCUMENT PREVIEW                                      -->
+      <!-- ============================================================ -->
 
-    <div class="sticky bottom-0 z-20 flex justify-end">
-      <div class="flex items-center gap-2">
-        <Button @click="saveRecord"
-          class="bg-accent! border-0! hover:bg-darkgrey! px-4! rounded-md! text-white! text-normal! h-7!">
-          Generovať dokument
-        </Button>
-      </div>
+      <section
+        class="h-full min-h-0 min-w-0 overflow-hidden rounded-md"
+        aria-label="Náhľad dokumentu"
+      >
+        <DocumentPreviewViewer
+          :html="previewHtml"
+          :loading="isPreviewLoading"
+          :error="previewError"
+          title="Náhľad vstupného ošetrovateľského záznamu"
+        />
+      </section>
     </div>
-
   </div>
 </template>

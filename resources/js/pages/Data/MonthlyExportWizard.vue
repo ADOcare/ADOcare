@@ -2,14 +2,13 @@
 import {
     computed,
     onBeforeUnmount,
-    onMounted,
     ref,
     watch,
 } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'primevue/usetoast'
 
-import AdonisButton from '@/components/AdonisButton.vue'
+import AppButton from '@/components/AppButton.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 
@@ -90,6 +89,7 @@ const loadingRun = ref(false)
 const downloadingZip = ref(false)
 
 let pollTimer: number | null = null
+let runRequestId = 0
 
 /*
 |--------------------------------------------------------------------------
@@ -98,7 +98,7 @@ let pollTimer: number | null = null
 */
 
 function activeRunKey() {
-    return `${ACTIVE_RUN_KEY}:${authStore.currentBranch?.id ?? 'none'}`
+    return `${ACTIVE_RUN_KEY}:${authStore.currentBranch?.id ?? 'none'}:${monthValue(selectedMonth.value)}`
 }
 
 const isRunning = computed(() => {
@@ -296,12 +296,15 @@ async function startRun() {
         !branchId
         || !selectedMonth.value
         || starting.value
+        || loadingRun.value
         || isRunning.value
     ) {
         return
     }
 
     starting.value = true
+
+    runRequestId++
 
     stopPolling()
 
@@ -358,9 +361,13 @@ async function startRun() {
 */
 
 async function loadRun(id: number) {
-    if (loadingRun.value) {
-        return
-    }
+    const requestId =
+        ++runRequestId
+
+    const requestedMonth =
+        monthValue(
+            selectedMonth.value,
+        )
 
     loadingRun.value = true
 
@@ -372,6 +379,15 @@ async function loadRun(id: number) {
     >(
         `/monthly-exports/${id}`,
     )
+
+    if (
+        requestId !== runRequestId
+        || requestedMonth !== monthValue(
+            selectedMonth.value,
+        )
+    ) {
+        return
+    }
 
     loadingRun.value = false
 
@@ -385,6 +401,10 @@ async function loadRun(id: number) {
 
         stopPolling()
 
+        return
+    }
+
+    if (data.data.month !== requestedMonth) {
         return
     }
 
@@ -418,6 +438,85 @@ async function loadRun(id: number) {
             life: 6000,
         })
     }
+
+    schedulePoll()
+}
+
+async function refreshSelectedMonthRun() {
+    const branchId =
+        authStore.currentBranch?.id
+
+    const requestedMonth =
+        monthValue(
+            selectedMonth.value,
+        )
+
+    const requestId =
+        ++runRequestId
+
+    stopPolling()
+
+    run.value =
+        null
+
+    if (!branchId) {
+        loadingRun.value =
+            false
+
+        return
+    }
+
+    loadingRun.value =
+        true
+
+    const {
+        data,
+        error,
+    } = await get<
+        ApiResponse<MonthlyExportRun | null>
+    >(
+        '/monthly-exports',
+        {
+            month:
+                requestedMonth,
+
+            branch_id:
+                branchId,
+        },
+    )
+
+    if (
+        requestId !== runRequestId
+        || requestedMonth !== monthValue(
+            selectedMonth.value,
+        )
+    ) {
+        return
+    }
+
+    loadingRun.value =
+        false
+
+    if (
+        error
+        || !data?.data
+    ) {
+        localStorage.removeItem(
+            activeRunKey(),
+        )
+
+        return
+    }
+
+    run.value =
+        data.data
+
+    localStorage.setItem(
+        activeRunKey(),
+        String(
+            run.value.id,
+        ),
+    )
 
     schedulePoll()
 }
@@ -579,8 +678,7 @@ const documentTableOptions = computed<
             icon:
                 'bi bi-download',
 
-            class:
-                'bg-accent! text-white!',
+            variant: 'accent',
 
             disabled: () => {
                 return readyResults.value.length === 0
@@ -786,22 +884,21 @@ async function downloadZip() {
 |--------------------------------------------------------------------------
 */
 
-onMounted(() => {
-    const activeRunId =
-        Number(
-            localStorage.getItem(
-                activeRunKey(),
-            ),
-        )
-
-    if (
-        activeRunId > 0
-    ) {
-        void loadRun(
-            activeRunId,
-        )
-    }
-})
+watch(
+    [
+        () => monthValue(
+            selectedMonth.value,
+        ),
+        () => authStore.currentBranch?.id,
+    ],
+    () => {
+        void refreshSelectedMonthRun()
+    },
+    {
+        immediate:
+            true,
+    },
+)
 
 onBeforeUnmount(() => {
     stopPolling()
@@ -819,7 +916,7 @@ onBeforeUnmount(() => {
             @submit.prevent="startRun"
         >
             <section
-                class="bg-tag3 p-6 rounded-md"
+                class="bg-tag3 p-6 rounded-md flex flex-col gap-4"
             >
                 <div
                     class="grid grid-cols-12 gap-4 items-end"
@@ -847,25 +944,24 @@ onBeforeUnmount(() => {
                         />
                     </div>
                 </div>
-            </section>
 
-            <div
-                class="flex justify-end"
-            >
-                <AdonisButton
-                    expanded
-                    label="Spustiť"
+                <AppButton
+                    label="Vytvoriť dokumenty"
+                    variant="accent"
+                    align="right"
                     loading-label="Pripravujú sa dokumenty"
                     :loading="starting || isRunning"
                     :disabled="
                         !authStore.currentBranch
                             || !selectedMonth
                             || starting
+                            || loadingRun
                             || isRunning
                     "
                     @click="startRun"
                 />
-            </div>
+            </section>
+
         </form>
 
         <!-- ERROR -->
@@ -878,14 +974,13 @@ onBeforeUnmount(() => {
 
         <!-- DOCUMENTS -->
         <div
-            v-if="starting || isRunning || (run && visibleResults.length > 0)"
+            v-if="loadingRun || starting || isRunning || (run && visibleResults.length > 0)"
             class="relative min-h-[24rem]"
         >
             <!-- LOADING -->
             <LoadingOverlay
-                v-if="starting || isRunning"
+                v-if="loadingRun || starting || isRunning"
                 :show="true"
-                :text="loadingText"
                 contained
             />
 

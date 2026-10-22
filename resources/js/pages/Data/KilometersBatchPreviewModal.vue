@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import type { DataTableOptions } from '@/types/datatable'
+import AppButton from '@/components/AppButton.vue';
 
 type Change = { field: string; label: string; before: string; after: string }
 type Candidate = {
@@ -225,8 +226,16 @@ async function save() {
         </div>
 
         <div class="flex justify-end gap-2 mt-2">
-            <Button label="Zrušiť" text :disabled="saving" class="text-accent! px-3!" @click="close()" />
-            <Button label="Vytvoriť dávku" :loading="saving" :disabled="!canSave || saving" class="bg-accent! border-0! hover:bg-darkgrey! px-4! text-white!" @click="save" />
+            <AppButton 
+                label="Zrušiť" text :disabled="saving" 
+                variant="secondary" 
+                @click="close()" 
+            />
+            <AppButton 
+                label="Vytvoriť dávku" :loading="saving" :disabled="!canSave || saving" 
+                variant="accent" 
+                @click="save" 
+            />
         </div>
         </template>
     </div>

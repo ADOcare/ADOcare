@@ -1,92 +1,500 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import {
+    ref,
+    watch,
+} from 'vue'
+
 import { useToast } from 'primevue/usetoast'
+
 import api from '@/services/api'
-import type { Macro } from '@/types/models';
 
-const props = defineProps<{ macro?: Partial<Macro> | null; modalResolve?: (value?: any) => void }>()
-const emits = defineEmits(['save', 'close'])
+import AppButton from '@/components/AppButton.vue'
+import FormField from '@/components/FormField.vue'
 
-const toast = useToast()
+import type {
+    IModalContentProps,
+} from '@/types/ui'
 
-const local = ref<Partial<Macro>>(props.macro ? { ...props.macro } : { name: '', abbreviation: '', text: '' })
+import type {
+    Macro,
+} from '@/types/models'
+
+const props =
+    defineProps<
+        IModalContentProps & {
+            macro?:
+                | Partial<Macro>
+                | null
+        }
+    >()
+
+const emit =
+    defineEmits<{
+        save:
+            [
+                macro:
+                    Partial<Macro>,
+            ]
+
+        close:
+            []
+    }>()
+
+const toast =
+    useToast()
+
+/* -------------------------------------------------------------------------- */
+/* State                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const emptyMacro = (): Partial<Macro> => ({
+    name:
+        '',
+
+    abbreviation:
+        '',
+
+    text:
+        '',
+})
+
+const local =
+    ref<Partial<Macro>>(
+        props.macro
+            ? {
+                  ...props.macro,
+              }
+            : emptyMacro(),
+    )
+
+const saving =
+    ref(false)
+
+const errors =
+    ref<
+        Record<
+            string,
+            string
+        >
+    >({})
+
+const submitted =
+    ref(false)
+
+/* -------------------------------------------------------------------------- */
+/* Watch                                                                      */
+/* -------------------------------------------------------------------------- */
 
 watch(
-    () => props.macro,
-    (v) => {
-        local.value = v ? { ...v } : { name: '', abbreviation: '', text: '' }
+    () =>
+        props.macro,
+    value => {
+        local.value =
+            value
+                ? {
+                      ...value,
+                  }
+                : emptyMacro()
+
+        errors.value =
+            {}
+
+        submitted.value =
+            false
     },
-    { immediate: true }
+    {
+        immediate:
+            true,
+    },
 )
 
-const saving = ref(false)
+/* -------------------------------------------------------------------------- */
+/* Validation                                                                 */
+/* -------------------------------------------------------------------------- */
 
-function close() {
-    if (props.modalResolve) {
-        try { props.modalResolve(undefined) } catch { }
-    } else {
-        emits('close')
+function validate() {
+    const validationErrors:
+        Record<
+            string,
+            string
+        > = {}
+
+    if (
+        !local.value.name
+            ?.trim()
+    ) {
+        validationErrors.name =
+            'Názov je povinný.'
     }
+
+    if (
+        !local.value.abbreviation
+            ?.trim()
+    ) {
+        validationErrors.abbreviation =
+            'Skratka je povinná.'
+    }
+
+    if (
+        !local.value.text
+            ?.trim()
+    ) {
+        validationErrors.text =
+            'Text je povinný.'
+    }
+
+    errors.value =
+        validationErrors
+
+    return (
+        Object.keys(
+            validationErrors,
+        ).length ===
+        0
+    )
 }
 
+/* -------------------------------------------------------------------------- */
+/* Close                                                                      */
+/* -------------------------------------------------------------------------- */
+
+function close() {
+    if (
+        props.modalResolve
+    ) {
+        props.modalResolve(
+            undefined,
+        )
+
+        return
+    }
+
+    emit(
+        'close',
+    )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Save                                                                       */
+/* -------------------------------------------------------------------------- */
+
 async function save() {
-    saving.value = true
+    if (
+        saving.value
+    ) {
+        return
+    }
+
+    submitted.value =
+        true
+
+    if (
+        !validate()
+    ) {
+        return
+    }
+
+    saving.value =
+        true
+
     try {
         const payload = {
-            name: local.value.name ?? '',
-            abbreviation: local.value.abbreviation ?? '',
-            text: local.value.text ?? '',
+            name:
+                local.value.name
+                    ?.trim() ??
+                '',
+
+            abbreviation:
+                local.value.abbreviation
+                    ?.trim() ??
+                '',
+
+            text:
+                local.value.text
+                    ?.trim() ??
+                '',
         }
 
-        if (local.value.id) {
-            await api.put(`/v1/macros/${local.value.id}`, payload)
+        let response
+
+        if (
+            local.value.id
+        ) {
+            response =
+                await api.put(
+                    `/v1/macros/${local.value.id}`,
+                    payload,
+                )
         } else {
-            await api.post('/v1/macros', payload)
+            response =
+                await api.post(
+                    '/v1/macros',
+                    payload,
+                )
         }
 
-        toast.add({ severity: 'success', summary: 'Uložené', detail: 'Makro bolo uložené.', life: 3000 })
-        // If opened via modal provider, resolve the modal promise. Otherwise emit event.
-        if (props.modalResolve) {
-            props.modalResolve(local.value)
-        } else {
-            emits('save', local.value)
+        const savedMacro =
+            response.data
+                ?.data ??
+            response.data ??
+            {
+                ...local.value,
+                ...payload,
+            }
+
+        toast.add({
+            severity:
+                'success',
+
+            summary:
+                'Uložené',
+
+            detail:
+                local.value.id
+                    ? 'Makro bolo upravené.'
+                    : 'Makro bolo vytvorené.',
+
+            life:
+                3000,
+        })
+
+        if (
+            props.modalResolve
+        ) {
+            props.modalResolve(
+                savedMacro,
+            )
+
+            return
         }
-    } catch (err) {
-        console.error('Save macro failed', err)
-        toast.add({ severity: 'error', summary: 'Chyba', detail: 'Nepodarilo sa uložiť makro.', life: 4000 })
+
+        emit(
+            'save',
+            savedMacro,
+        )
+    } catch (error) {
+        console.error(
+            'Save macro failed:',
+            error,
+        )
+
+        toast.add({
+            severity:
+                'error',
+
+            summary:
+                'Chyba',
+
+            detail:
+                'Nepodarilo sa uložiť makro.',
+
+            life:
+                4000,
+        })
     } finally {
-        saving.value = false
+        saving.value =
+            false
     }
 }
 </script>
 
 <template>
-    <div class="grid grid-cols-12 gap-4 p-2">
-        <div class="col-span-12">
-            <label class="block text-normal mb-1">Názov</label>
-            <InputText v-model.trim="local.name" fluid />
+    <form
+        class="
+            flex
+            flex-col
+            gap-6
+        "
+        @submit.prevent="
+            save
+        "
+    >
+        <div
+            class="
+                grid
+                grid-cols-12
+                gap-4
+            "
+        >
+            <FormField
+                label="
+                    Názov
+                "
+                required
+                :error="
+                    submitted
+                        ? errors.name
+                        : null
+                "
+                class="
+                    col-span-12
+                "
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <InputText
+                    :id="
+                        id
+                    "
+                    v-model="
+                        local.name
+                    "
+                    class="
+                        w-full
+                    "
+                    :invalid="
+                        invalid
+                    "
+                    :aria-invalid="
+                        invalid ||
+                        undefined
+                    "
+                    :aria-describedby="
+                        describedBy
+                    "
+                    autocomplete="
+                        off
+                    "
+                />
+            </FormField>
+
+            <FormField
+                label="
+                    Skratka
+                "
+                required
+                :error="
+                    submitted
+                        ? errors.abbreviation
+                        : null
+                "
+                class="
+                    col-span-12
+                "
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+            >
+                <InputText
+                    :id="
+                        id
+                    "
+                    v-model="
+                        local.abbreviation
+                    "
+                    class="
+                        w-full
+                    "
+                    :invalid="
+                        invalid
+                    "
+                    :aria-invalid="
+                        invalid ||
+                        undefined
+                    "
+                    :aria-describedby="
+                        describedBy
+                    "
+                    autocomplete="
+                        off
+                    "
+                />
+            </FormField>
+
+            <FormField
+                label="
+                    Text
+                "
+                required
+                :error="
+                    submitted
+                        ? errors.text
+                        : null
+                "
+                class="
+                    col-span-12
+                "
+                v-slot="{
+                    id,
+                    describedBy,
+                    invalid,
+                }"
+                :outlined="true"
+            >
+                <Textarea
+                    :id="
+                        id
+                    "
+                    v-model="
+                        local.text
+                    "
+                    rows="
+                        3
+                    "
+                    autoResize
+                    class="
+                        w-full
+                        resize-none!
+                    "
+                    :invalid="
+                        invalid
+                    "
+                    :aria-invalid="
+                        invalid ||
+                        undefined
+                    "
+                    :aria-describedby="
+                        describedBy
+                    "
+                />
+            </FormField>
         </div>
 
-        <div class="col-span-12">
-            <label class="block text-normal mb-1">Skratka</label>
-            <InputText v-model.trim="local.abbreviation" fluid />
-        </div>
+        <div
+            class="
+                flex
+                items-center
+                justify-end
+                gap-2
+                pt-2
+            "
+        >
+            <AppButton
+                type="button"
+                label="
+                    Zrušiť
+                "
+                variant="secondary"
+                :disabled="
+                    saving
+                "
+                @click="
+                    close
+                "
+            />
 
-        <div class="col-span-12">
-            <label class="block text-normal mb-1">Text</label>
-            <Textarea v-model.trim="local.text" :rows="6" autoResize fluid />
+            <AppButton
+                type="submit"
+                variant="accent"
+                :label="
+                    local.id
+                        ? 'Upraviť'
+                        : 'Vytvoriť'
+                "
+                :loading="
+                    saving
+                "
+                :loading-label="
+                    local.id
+                        ? 'Upravujem'
+                        : 'Vytváram'
+                "
+            />
         </div>
-
-        <div class="col-span-12 mt-4 flex items-center justify-end gap-2">
-            <Button label="Zrušiť" text @click="close" class="text-accent! px-2!" />
-            <Button :label="local.id ? 'Upraviť' : 'Vytvoriť'" :loading="saving" @click="save"
-                class="bg-accent! border-accent! px-2! hover:bg-darkgrey! hover:border-darkgrey! text-white! " />
-        </div>
-    </div>
+    </form>
 </template>
-
-<style scoped>
-.p-e-0 {
-    padding-right: 0
-}
-</style>

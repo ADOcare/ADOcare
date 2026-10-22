@@ -8,10 +8,8 @@ use App\Http\Requests\SendDocumentsEmailRequest;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Models\User;
-use App\Services\DocumentService;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
-use App\Http\Controllers\Api\KilometersExportController;
-use App\Http\Controllers\Api\PointsExportController;
+use App\Services\DocumentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -22,16 +20,17 @@ class DocumentController extends Controller
     public function __construct(
         private DocumentService $service,
         private ImmediateDocumentationAuditService $immediateAudit,
-    ) {
-    }
+    ) {}
 
     /**
      * Create a company travel document (CP/DZC).
      *
      * @group Documents
+     *
      * @bodyParam type string required Document type (cp, dzc). Example: cp
      * @bodyParam branch_id int required Branch ID. Example: 1
      * @bodyParam period string required Period in YYYY-MM. Example: 2026-04
+     *
      * @response 201 {"data":{"document_id":1,"type":"cp"},"message":"Cestovný príkaz bol úspešne vytvorený"}
      */
     public function createCompanyTravelDocument(Request $request)
@@ -64,6 +63,7 @@ class DocumentController extends Controller
      * List travel documents for the authenticated user.
      *
      * @group Documents
+     *
      * @queryParam branch_id int optional Filter by branch ID. Example: 2
      * @queryParam period string optional Period in YYYY-MM. Example: 2026-04
      * @queryParam per_page int optional Items per page. Example: 25
@@ -89,6 +89,7 @@ class DocumentController extends Controller
      * List travel documents for a company (manager/superadmin).
      *
      * @group Documents
+     *
      * @queryParam branch_ids string|array optional Comma-separated branch IDs. Example: 1,2
      * @queryParam period string optional Period in YYYY-MM. Example: 2026-04
      * @queryParam per_page int optional Items per page. Example: 25
@@ -117,6 +118,7 @@ class DocumentController extends Controller
      * Display a listing of documents for a patient.
      *
      * @group Documents
+     *
      * @urlParam patientId int required Patient ID. Example: 1
      */
     public function index(Request $request, $patientId)
@@ -141,9 +143,12 @@ class DocumentController extends Controller
      * Store a newly created document.
      *
      * @group Documents
+     *
      * @urlParam patientId int required Patient ID. Example: 1
+     *
      * @bodyParam type string required Document type. Example: scan
      * @bodyParam file file required Uploaded file.
+     *
      * @response 201 {"data":{"document":{"id":1}},"message":"Dokument bol uložený"}
      */
     public function store(Request $request, $patientId)
@@ -175,6 +180,7 @@ class DocumentController extends Controller
      * Display the specified document.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function show(Document $document)
@@ -188,6 +194,7 @@ class DocumentController extends Controller
      * Download the specified document.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function download(Document $document)
@@ -203,13 +210,15 @@ class DocumentController extends Controller
      * Public, signed access to a document.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
+     *
      * @queryParam format string optional Set to html for preview. Example: html
      * @queryParam download int optional Set to 1 for file download. Example: 1
      */
     public function publicDocument(Request $request, Document $document)
     {
-        if (!Storage::disk('local')->exists($document->path)) {
+        if (! Storage::disk('local')->exists($document->path)) {
             abort(404, 'Dokument nebol nájdený');
         }
 
@@ -220,13 +229,13 @@ class DocumentController extends Controller
                 return app(DZCDocumentController::class)->exportCsv($document);
             }
 
-            if ($document->type === 'kilometers_batch') {
+            if ($format !== 'pdf' && $document->type === 'kilometers_batch') {
                 return app(\App\Services\KilometersBatchDocumentService::class)->downloadStored($document);
             }
 
-            if ($document->type === 'points_batch') {
+            if ($format !== 'pdf' && $document->type === 'points_batch') {
                 $payload = $this->service->buildBatchDownloadPayload($document);
-                if (!$payload) {
+                if (! $payload) {
                     abort(404, 'TXT súbor pre dávku nebol nájdený');
                 }
 
@@ -237,12 +246,12 @@ class DocumentController extends Controller
             }
 
             $pdfPath = $this->service->getTravelDocumentPdfPath($document);
-            if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
+            if (! $pdfPath || ! Storage::disk('local')->exists($pdfPath)) {
                 abort(500, 'Chyba pri generovaní PDF dokumentu');
             }
 
             $filePath = Storage::disk('local')->path($pdfPath);
-            $downloadName = pathinfo($document->name, PATHINFO_FILENAME) . '.pdf';
+            $downloadName = pathinfo($document->name, PATHINFO_FILENAME).'.pdf';
 
             return response()->download($filePath, $downloadName);
         }
@@ -261,7 +270,7 @@ class DocumentController extends Controller
         // Request expires is a string timestamp, convert to int for URL generation
         $expires = is_numeric($request->query('expires')) ? (int) $request->query('expires') : null;
 
-        if (!$expires) {
+        if (! $expires) {
             abort(400, 'Neplatný alebo chýbajúci parameter expires');
         }
 
@@ -277,7 +286,6 @@ class DocumentController extends Controller
             \Carbon\Carbon::createFromTimestamp($expires),
             ['document' => $document->id]
         );
-
 
         // Extract signatures from the generated URLs to pass to the SPA for subsequent requests
         $query = [];
@@ -295,14 +303,13 @@ class DocumentController extends Controller
         ]);
     }
 
-
     /**
      * Get data for a public document.
      */
     public function publicDocumentData(Document $document)
     {
         $preview = $this->service->getDocumentPreviewData($document);
-        if (!$preview) {
+        if (! $preview) {
             abort(404, 'Údaje dokumentu nie sú dostupné');
         }
 
@@ -313,11 +320,14 @@ class DocumentController extends Controller
             'payload' => $preview['data'],
         ]);
     }
+
     /**
      * Update the specified document.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
+     *
      * @bodyParam type string optional Document type. Example: scan
      * @bodyParam name string optional Document name. Example: dokument.pdf
      */
@@ -342,6 +352,7 @@ class DocumentController extends Controller
      * Delete the specified document.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function destroy(Document $document)
@@ -349,7 +360,7 @@ class DocumentController extends Controller
         $this->authorize('delete', $document);
 
         $deleted = $this->service->deleteDocumentWithAssets($document);
-        if (!$deleted) {
+        if (! $deleted) {
             \Log::error('Failed to delete document file', [
                 'document_id' => $document->id,
                 'path' => $document->path,
@@ -371,6 +382,7 @@ class DocumentController extends Controller
      * Delete multiple documents.
      *
      * @group Documents
+     *
      * @bodyParam ids integer[] required Document IDs. Example: [1,2,3]
      */
     public function destroyMany(Request $request)
@@ -393,15 +405,17 @@ class DocumentController extends Controller
      * Email document and invoice links.
      *
      * @group Documents
+     *
      * @bodyParam email string required Recipient email. Example: user@example.com
      * @bodyParam ids integer[] optional Document IDs. Example: [1,2,3]
      * @bodyParam invoice_ids integer[] optional Invoice IDs. Example: [10,11]
+     *
      * @response 200 {"data":{"documents_count":2,"invoices_count":1,"total_count":3},"message":"Email bol úspešne odoslaný"}
      */
     public function emailDocuments(SendDocumentsEmailRequest $request)
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return $this->error('Používateľ nie je autentifikovaný', 401);
         }
 
@@ -424,18 +438,18 @@ class DocumentController extends Controller
     }
 
     /**
-     * @param array<int, array<string, mixed>> $documents
+     * @param  array<int, array<string, mixed>>  $documents
      */
     private function sendDocumentsEmail(User $user, string $to, array $documents, string $subjectPrefix): void
     {
         $viewData = $this->buildDocumentsEmailViewData($user, $to, $documents);
-        $subject = $subjectPrefix . ' - ' . ($viewData['companyName'] ?: 'ADOcare');
+        $subject = $subjectPrefix.' - '.($viewData['companyName'] ?: 'ADOcare');
 
         $this->service->sendEmail($to, $subject, 'emails.document_links', $viewData);
     }
 
     /**
-     * @param array<int, array<string, mixed>> $documents
+     * @param  array<int, array<string, mixed>>  $documents
      * @return array<string, mixed>
      */
     private function buildDocumentsEmailViewData(User $user, string $to, array $documents): array
@@ -467,6 +481,7 @@ class DocumentController extends Controller
      * List documents for a patient by type.
      *
      * @group Documents
+     *
      * @urlParam patientId int required Patient ID. Example: 1
      * @urlParam type string required Document type. Example: proposal
      */
@@ -490,6 +505,7 @@ class DocumentController extends Controller
      * 2. User document: checks user_id, type, branch_id, and period
      *
      * @group Documents
+     *
      * @bodyParam type string required Document type. Example: proposal
      * @bodyParam date date required Document date. Example: 2026-04-01
      * @bodyParam patient_id int optional Patient ID. Example: 1
@@ -507,7 +523,7 @@ class DocumentController extends Controller
 
             return $this->success($this->service->documentExists($validated, Auth::id()));
         } catch (\Exception $e) {
-            \Log::error('Document checkExists error: ' . $e->getMessage(), [
+            \Log::error('Document checkExists error: '.$e->getMessage(), [
                 'request' => $request->all(),
                 'exception' => $e,
             ]);

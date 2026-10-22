@@ -50,6 +50,16 @@ class LeaveDocumentService
     }
 
     /**
+     * Build a leave document payload without persisting a document.
+     */
+    public function preview(array $data, User $user): array
+    {
+        $patient = Patient::findOrFail((int) $data['patient_id']);
+
+        return $this->buildPayload($data, null, $patient, $user);
+    }
+
+    /**
      * Find the latest leave document for a patient.
      */
     public function findLatestDocumentByPatientId(int $patientId): ?Document
@@ -87,7 +97,7 @@ class LeaveDocumentService
     /**
      * Build payload saved into the leave JSON file.
      */
-    private function buildPayload(array $data, Document $document, Patient $patient, User $user): array
+    private function buildPayload(array $data, ?Document $document, Patient $patient, User $user): array
     {
         return [
             'user_name' => $this->fullName($user->title, $user->first_name, $user->last_name),
@@ -101,7 +111,7 @@ class LeaveDocumentService
             'results' => $data['results'] ?? '',
             'education' => $data['education'] ?? '',
             'received' => $data['received'] ?? '',
-            'document_id' => $document->id,
+            'document_id' => $document?->id,
             'created_at' => now(),
         ];
     }

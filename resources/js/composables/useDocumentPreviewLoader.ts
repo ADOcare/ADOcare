@@ -1,7 +1,8 @@
 import { ref } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import { useUiOverlayStore } from '@/stores/uiOverlay'
-import { fetchBlobUrl } from '@/utils/blobUrl'
+import axios from 'axios'
+import api from '@/services/api'
 
 /**
  * Composable for loading document previews with loading state and error handling
@@ -19,7 +20,15 @@ export function useDocumentPreviewLoader() {
         uiOverlayStore.setContentLoading(true)
 
         try {
-            previewUrl.value = await fetchBlobUrl(endpoint)
+            const response = endpoint.startsWith('http')
+                ? await axios.get<string>(endpoint, {
+                    responseType: 'text',
+                })
+                : await api.get<string>(endpoint, {
+                    responseType: 'text',
+                })
+
+            previewUrl.value = response.data
         } catch (error) {
             console.error('Failed to load preview:', error)
             previewUrl.value = ''

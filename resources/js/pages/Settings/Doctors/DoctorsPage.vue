@@ -127,8 +127,8 @@ const options = ref<DataTableOptions<Doctor>>({
         {
             key: 'show_favourites_only',
             icon: () => (showFavouritesOnly.value ? 'bi bi-heart-fill' : 'bi bi-heart'),
-            class: 'bg-accent!',
-            tooltip: 'Zobraziť len obľúbených',
+            variant: 'accent',
+            label: 'Zobraziť len obľúbených',
             handler: async ({ remote }) => {
                 showFavouritesOnly.value = !showFavouritesOnly.value
                 remote.setExtraParam(

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="sk">
+<html lang="sk" class="{{ !empty($pdfMode) ? 'dompdf-render' : 'browser-render' }}">
 
 <head>
     <meta charset="utf-8">
@@ -20,7 +20,7 @@
             box-sizing: border-box;
         }
 
-        html {
+        html.dompdf-render {
             margin: 14mm;
         }
 
@@ -36,6 +36,23 @@
 
         .page {
             width: 100%;
+        }
+
+        html.browser-render .record-sheet {
+            width: 210mm;
+        }
+
+        html.browser-render .page {
+            width: 210mm;
+            height: 297mm;
+            padding: 14mm;
+            overflow: hidden;
+            background: #fff;
+            page-break-after: always;
+        }
+
+        html.browser-render .page:last-child {
+            page-break-after: auto;
         }
 
         .header {
@@ -177,7 +194,7 @@
 
 <body>
     <div class="record-sheet">
-        <div class="page">
+        <div class="page record-source">
             <div class="header">
                 <div class="header-title">OŠETROVATEĽSKÝ ZÁZNAM</div>
 
@@ -499,6 +516,135 @@
             </div>
         </div>
     </div>
+
+    @if (empty($pdfMode))
+        <script>
+            (() => {
+                const sheet = document.querySelector('.record-sheet');
+                const source = sheet?.querySelector('.record-source');
+
+                if (!sheet || !source) {
+                    return;
+                }
+
+                const header = source.querySelector(':scope > .header');
+                const content = source.querySelector(':scope > .content');
+                const footer = source.querySelector(':scope > .footer');
+                const contentBlocks = content ? Array.from(content.children) : [];
+
+                source.remove();
+
+                let pageIndex = 0;
+                let currentPage;
+                let currentContent;
+
+                const appendPage = () => {
+                    currentPage = document.createElement('div');
+                    currentPage.className = 'page';
+                    currentPage.dataset.page = String(++pageIndex);
+
+                    currentContent = document.createElement('div');
+                    currentContent.className = 'record-page-content';
+                    currentPage.appendChild(currentContent);
+                    sheet.appendChild(currentPage);
+                };
+
+                const pageOverflows = () => {
+                    if (!currentPage || !currentContent) {
+                        return false;
+                    }
+
+                    const style = getComputedStyle(currentPage);
+                    const contentBottom = currentPage.getBoundingClientRect().bottom -
+                        Number.parseFloat(style.paddingBottom || '0');
+
+                    return currentContent.getBoundingClientRect().bottom > contentBottom - 2;
+                };
+
+                const appendBlock = (block) => {
+                    currentContent.appendChild(block);
+
+                    if (pageOverflows() && block.previousElementSibling) {
+                        block.remove();
+                        appendPage();
+                        currentContent.appendChild(block);
+                    }
+                };
+
+                const createTableFragment = (table) => {
+                    const fragment = table.cloneNode(false);
+
+                    Array.from(table.children).forEach((child) => {
+                        if (child.tagName !== 'TBODY') {
+                            fragment.appendChild(child.cloneNode(true));
+                        }
+                    });
+
+                    const body = document.createElement('tbody');
+                    fragment.appendChild(body);
+                    currentContent.appendChild(fragment);
+
+                    if (pageOverflows() && fragment.previousElementSibling) {
+                        fragment.remove();
+                        appendPage();
+                        currentContent.appendChild(fragment);
+                    }
+
+                    return { fragment, body };
+                };
+
+                const appendTable = (table) => {
+                    const rows = Array.from(table.querySelectorAll(':scope > tbody > tr'));
+                    let { fragment, body } = createTableFragment(table);
+
+                    rows.forEach((row) => {
+                        body.appendChild(row);
+
+                        if (!pageOverflows()) {
+                            return;
+                        }
+
+                        if (body.children.length === 1 && fragment.previousElementSibling) {
+                            row.remove();
+                            fragment.remove();
+                            appendPage();
+                            ({ fragment, body } = createTableFragment(table));
+                            body.appendChild(row);
+                            return;
+                        }
+
+                        if (body.children.length > 1) {
+                            row.remove();
+                            appendPage();
+                            ({ fragment, body } = createTableFragment(table));
+                            body.appendChild(row);
+                        }
+                    });
+                };
+
+                appendPage();
+
+                if (header) {
+                    appendBlock(header);
+                }
+
+                contentBlocks.forEach((block) => {
+                    if (block.tagName === 'TABLE') {
+                        appendTable(block);
+                        return;
+                    }
+
+                    appendBlock(block);
+                });
+
+                if (footer) {
+                    appendBlock(footer);
+                }
+
+                document.documentElement.dataset.pageLayoutReady = 'true';
+            })();
+        </script>
+    @endif
 </body>
 
 </html>

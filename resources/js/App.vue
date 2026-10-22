@@ -101,7 +101,6 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-
     <div class="h-screen flex flex-col bg-darkgrey">
         <Navbar v-if="showNavbar" class="flex-none" :isSidebarOpen="isSidebarOpen"
             @toggle-sidebar="handleToggleSidebar" />

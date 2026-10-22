@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -15,6 +16,11 @@ class Patient extends Model
     protected $table = 'patients';
 
     protected $fillable = ['first_name', 'last_name', 'title', 'personal_number', 'sex', 'contact', 'country_code_phone', 'phone', 'doctor_id', 'insurance_company_id', 'address', 'city', 'zip', 'latitude', 'longitude', 'reference_date', 'dekurz_number', 'branch_id', 'nurse_id', 'death_date'];
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNull('death_date');
+    }
 
     public function nurse()
     {

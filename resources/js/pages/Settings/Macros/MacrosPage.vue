@@ -57,9 +57,9 @@ const options = ref<DataTableOptions<Macro>>({
     actions: [
         {
             key: 'delete',
-            label: '',
+            label: 'Vymazať',
             icon: 'bi bi-eraser',
-            class: 'bg-danger!',
+            variant: 'danger',
             tooltip: 'Vymazať vybrané makrá',
             disabled: ({ selectedRows }) => !selectedRows || selectedRows.length === 0,
             confirm: 'Naozaj vymazať vybrané makrá?',
@@ -77,10 +77,10 @@ const options = ref<DataTableOptions<Macro>>({
         },
         {
             key: 'add',
-            label: '',
+            label: 'Pridať nové makro',
             tooltip: 'Pridať nové makro',
-            icon: 'bi bi-plus',
-            class: 'bg-accent!',
+            icon: 'bi bi-plus-lg',
+            variant: 'accent',
             handler: async () => {
                 openCreate()
             },

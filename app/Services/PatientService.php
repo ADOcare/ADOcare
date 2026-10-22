@@ -347,7 +347,7 @@ class PatientService
             return;
         }
 
-        $query = Patient::query()
+        $query = Patient::withTrashed()
             ->with('branch')
             ->whereHas('branch', function (Builder $query) use ($companyId) {
                 $query->where('company_id', $companyId);
@@ -394,6 +394,18 @@ class PatientService
             ? collect([$branch->code, $branch->city, $branch->address])->filter()->join(' – ')
             : 'bez určenej pobočky';
         $patientName = trim($duplicate->first_name . ' ' . $duplicate->last_name);
+
+        if ($duplicate->trashed()) {
+            $message = "Pacient {$patientName} s týmto rodným číslom sa nachádza medzi odstránenými "
+                . "pacientmi spoločnosti u pracovníka {$workerName} na pobočke {$branchName}."
+                . ' Nového pacienta nie je možné vytvoriť. Obnovte existujúceho pacienta'
+                . ' v zozname odstránených pacientov.';
+
+            throw ValidationException::withMessages([
+                'personal_number' => [$message],
+            ]);
+        }
+
         $message = "Pacient {$patientName} s týmto rodným číslom je už v spoločnosti "
             . "evidovaný u pracovníka {$workerName} na pobočke {$branchName}."
             . ' Požiadajte manažéra, aby pacienta presunul alebo obnovil.';

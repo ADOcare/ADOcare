@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\Patient;
+use App\Models\User;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,7 @@ class RecordDocumentService
     {
     }
 
-    public function create(array $data, $user): Document
+    public function create(array $data, User $user): Document
     {
         $period = !empty($data['date']) ? date('Y-m', strtotime((string) $data['date'])) : null;
 
@@ -29,6 +30,22 @@ class RecordDocumentService
             'branch_id' => $data['branch_id'] ?? null,
         ]);
 
+        $recordData = $this->buildPayload($data, $user, $document->id);
+
+        $this->storeRecordFile($document->id, $recordData);
+
+        $this->immediateAudit->documentsChanged([$document]);
+
+        return $document;
+    }
+
+    public function preview(array $data, User $user): array
+    {
+        return $this->buildPayload($data, $user);
+    }
+
+    private function buildPayload(array $data, User $user, ?int $documentId = null): array
+    {
         $patient = Patient::findOrFail($data['patient_id']);
         $company = $user->company;
         $doctor = $patient->doctor;
@@ -52,7 +69,7 @@ class RecordDocumentService
         $processedRecordData['diagnosis'] = $diagnosis;
         $processedRecordData['nursingDiagnoses.list'] = $nurseDiagnoses;
 
-        $recordData = [
+        return [
             'company_address' => $companyAddress,
             'company_name' => $companyName,
             'company_id' => $company?->id,
@@ -66,15 +83,9 @@ class RecordDocumentService
             'insurance_code' => $insuranceCode,
             'form_data' => $processedRecordData,
             'form_spec' => $data['form_spec'] ?? null,
-            'document_id' => $document->id,
+            'document_id' => $documentId,
             'created_at' => now(),
         ];
-
-        $this->storeRecordFile($document->id, $recordData);
-
-        $this->immediateAudit->documentsChanged([$document]);
-
-        return $document;
     }
 
     protected function storeRecordFile(int $documentId, array $recordData): void

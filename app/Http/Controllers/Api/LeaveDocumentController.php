@@ -42,6 +42,26 @@ class LeaveDocumentController extends Controller
     }
 
     /**
+     * Preview a leave document from unsaved form data.
+     */
+    public function previewDraft(StoreLeaveDocumentRequest $request)
+    {
+        $user = $request->user();
+        if (!$user instanceof User) {
+            return $this->error('Používateľ nie je autentifikovaný', 401);
+        }
+
+        $leaveData = $this->service->preview($request->validated(), $user);
+        $documentService = app(DocumentService::class);
+
+        return response()->view('pdf.leave', [
+            'leaveData' => $leaveData,
+            'stampDataUri' => $documentService->getCompanyStampDataUri((int) ($leaveData['company_id'] ?? 0)),
+            'signatureDataUri' => $documentService->getUserSignatureDataUri((int) ($leaveData['user_id'] ?? 0)),
+        ])->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /**
      * Show leave document payload for the provided document id.
      */
     public function show(Document $document)

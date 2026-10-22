@@ -26,6 +26,7 @@ class CheckPatientStatuses extends Command
         $insuranceIssues = 0;
 
         $query = Patient::query()
+            ->active()
             ->whereNotNull('personal_number')
             ->with(['branch', 'latestCoverage.insuranceCompany']);
 

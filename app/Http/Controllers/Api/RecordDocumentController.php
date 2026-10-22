@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreRecordDocumentRequest;
 use App\Models\Document;
 use App\Models\Patient;
+use App\Models\User;
 use App\Services\RecordDocumentService;
 use App\Services\DocumentService;
 use Illuminate\Support\Facades\Auth;
@@ -29,6 +30,25 @@ class RecordDocumentController extends Controller
         return $this->success([
             'document_id' => $document->id,
         ], 'Ošetrovateľský záznam bol úspešne vytvorený', 201);
+    }
+
+    /**
+     * Preview a record document from unsaved form data.
+     */
+    public function previewDraft(StoreRecordDocumentRequest $request, RecordDocumentService $service)
+    {
+        $user = $request->user();
+        if (!$user instanceof User) {
+            return $this->error('Používateľ nie je autentifikovaný', 401);
+        }
+
+        $recordData = $service->preview($request->validated(), $user);
+        $signatureDataUri = app(DocumentService::class)->getUserSignatureDataUri((int) $user->id);
+
+        return response()->view('pdf.record', [
+            'recordData' => $recordData,
+            'signatureDataUri' => $signatureDataUri,
+        ])->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /**

@@ -139,8 +139,8 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
             key: 'email',
             disabled: ({ selectedRows }: { selectedRows: PatientDocument[] }) => selectedRows.length === 0,
             icon: 'bi bi-send',
-            class: 'bg-accent!',
-            tooltip: 'Poslať vybrané dokumenty emailom',
+            class: 'accent',
+            label: 'Poslať emailom',
             handler: async ({ selectedRows, remote }: { selectedRows: PatientDocument[]; remote: any }) => {
                 await openEmailDocumentsDialog({
                     documents: selectedRows,
@@ -152,7 +152,8 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
             key: 'delete',
             disabled: ({ selectedRows }: { selectedRows: PatientDocument[] }) => selectedRows.length === 0,
             icon: 'bi bi-eraser',
-            class: 'bg-danger!',
+            variant: 'danger',
+            label: 'Vymazať',
             confirm: 'Vymazať vybrané dokumenty?',
             handler: async ({ selectedRows, remote }: { selectedRows: PatientDocument[]; remote: any }) => {
                 try {

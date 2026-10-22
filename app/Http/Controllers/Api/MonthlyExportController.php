@@ -14,8 +14,40 @@ use Illuminate\Http\Request;
 
 class MonthlyExportController extends Controller
 {
-    public function __construct(private MonthlyExportArchiveService $archives)
+    public function __construct(private MonthlyExportArchiveService $archives) {}
+
+    public function index(Request $request): JsonResponse
     {
+        $data = $request->validate([
+            'month' => ['required', 'date_format:Y-m'],
+            'branch_id' => ['required', 'integer', 'exists:branches,id'],
+        ]);
+
+        $actor = $request->user();
+        $branch = Branch::findOrFail((int) $data['branch_id']);
+        abort_unless(
+            $actor
+            && $actor->isInBranch((int) $branch->id)
+            && ($actor->hasGlobalRole('nurse') || $actor->hasBranchRole((int) $branch->id, 'nurse')),
+            403,
+        );
+
+        $month = CarbonImmutable::createFromFormat('!Y-m', $data['month'])->startOfMonth();
+        $run = MonthlyExportRun::query()
+            ->where('user_id', $actor->id)
+            ->where('branch_id', $branch->id)
+            ->whereDate('month', $month->toDateString())
+            ->latest('id')
+            ->first();
+
+        if (! $run) {
+            return response()->json([
+                'success' => true,
+                'data' => null,
+            ]);
+        }
+
+        return $this->runResponse($run, 200);
     }
 
     public function store(Request $request): JsonResponse
@@ -35,7 +67,7 @@ class MonthlyExportController extends Controller
         );
 
         $month = CarbonImmutable::createFromFormat('!Y-m', $data['month'])->startOfMonth();
-        abort_if($month->isFuture() && !$month->isCurrentMonth(), 422, 'Budúci mesiac nie je možné uzavrieť.');
+        abort_if($month->isFuture() && ! $month->isCurrentMonth(), 422, 'Budúci mesiac nie je možné uzavrieť.');
 
         $activeRun = MonthlyExportRun::query()
             ->where('user_id', $actor->id)

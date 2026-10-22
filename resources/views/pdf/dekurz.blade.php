@@ -87,6 +87,16 @@
             width: 100%;
         }
 
+        body.dompdf-render .dekurz-page {
+            width: auto;
+            height: auto;
+            margin: 0;
+            padding: 0;
+            overflow: visible;
+            page-break-inside: auto;
+            break-inside: auto;
+        }
+
         .page-title {
             text-align: center;
             font-weight: 700;
@@ -188,7 +198,7 @@
     </style>
 </head>
 
-<body>
+<body class="{{ !empty($pdfMode) ? 'dompdf-render' : '' }}">
     @php
         $days = $dekurzData['days'] ?? [];
         $sortedDays = collect($days)->sortBy('date')->values()->toArray();

@@ -515,6 +515,8 @@ class DocumentService
             return null;
         }
 
+        $preview['data']['pdfMode'] = true;
+
         $pdf = Pdf::loadView($preview['view'], $preview['data'])->setPaper('a4', 'portrait');
         $numberedDekurzPages = null;
 

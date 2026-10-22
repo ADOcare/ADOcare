@@ -795,6 +795,43 @@ function getPageElements() {
     return []
 }
 
+function getRenderablePageElements() {
+    const document =
+        getIframeDocument()
+
+    if (!document) {
+        return []
+    }
+
+    const selectors = [
+        '[data-page]',
+        '.page',
+        '.a4-page',
+        '.document-page',
+        '.print-page',
+    ]
+
+    for (
+        const selector
+        of selectors
+    ) {
+        const elements =
+            Array.from(
+                document.querySelectorAll(
+                    selector,
+                ),
+            ) as HTMLElement[]
+
+        if (elements.length) {
+            return elements
+        }
+    }
+
+    return document.body
+        ? [document.body]
+        : []
+}
+
 function getDeclaredPageCount(
     html: string,
 ) {
@@ -953,6 +990,296 @@ function nextPage() {
             1,
     )
 }
+
+function printDocument() {
+    const document =
+        getIframeDocument()
+
+    const iframeWindow =
+        getIframeWindow()
+
+    if (
+        !document ||
+        !iframeWindow
+    ) {
+        return
+    }
+
+    const pageElements =
+        getPageElements()
+
+    const printStyle =
+        document.createElement(
+            'style',
+        )
+
+    printStyle.textContent = `
+        @media print {
+            @page {
+                size: A4 portrait;
+                margin: 0;
+            }
+
+            html.document-preview-printing,
+            html.document-preview-printing body {
+                width: auto !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+
+            html.document-preview-printing body {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+
+            .document-preview-print-page {
+                display: block !important;
+                margin: 0 !important;
+                break-after: page !important;
+                page-break-after: always !important;
+                box-shadow: none !important;
+            }
+
+            .document-preview-print-page-last {
+                break-after: auto !important;
+                page-break-after: auto !important;
+            }
+        }
+    `
+
+    document.head.appendChild(
+        printStyle,
+    )
+
+    document.documentElement
+        .classList.add(
+            'document-preview-printing',
+        )
+
+    pageElements.forEach(
+        (
+            element,
+            index,
+        ) => {
+            element.classList.add(
+                'document-preview-print-page',
+            )
+
+            element.classList.toggle(
+                'document-preview-print-page-last',
+                index ===
+                    pageCount.value -
+                        1,
+            )
+
+            element.style.setProperty(
+                'display',
+                index <
+                    pageCount.value
+                    ? 'block'
+                    : 'none',
+                'important',
+            )
+        },
+    )
+
+    const restorePage = () => {
+        printStyle.remove()
+
+        document.documentElement
+            .classList.remove(
+                'document-preview-printing',
+            )
+
+        pageElements.forEach(
+            (element) => {
+                element.classList.remove(
+                    'document-preview-print-page',
+                    'document-preview-print-page-last',
+                )
+            },
+        )
+
+        showPage(
+            currentPage.value,
+        )
+    }
+
+    iframeWindow.addEventListener(
+        'afterprint',
+        restorePage,
+        {
+            once: true,
+        },
+    )
+
+    iframeWindow.focus()
+    iframeWindow.print()
+}
+
+async function buildDocumentPdf() {
+    const document =
+        getIframeDocument()
+
+    if (!document) {
+        throw new Error(
+            'Document preview is not ready.',
+        )
+    }
+
+    const availablePages =
+        getRenderablePageElements()
+
+    if (!availablePages.length) {
+        throw new Error(
+            'Document pages were not found.',
+        )
+    }
+
+    const selectedPage =
+        currentPage.value
+
+    const [
+        {
+            default:
+                html2canvas,
+        },
+        {
+            jsPDF,
+        },
+    ] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+    ])
+
+    await document.fonts
+        ?.ready
+
+    await Promise.all(
+        Array.from(
+            document.images,
+        ).map(
+            (image) =>
+                image.complete
+                    ? Promise.resolve()
+                    : new Promise<void>(
+                        (resolve) => {
+                            image.addEventListener(
+                                'load',
+                                () => resolve(),
+                                {
+                                    once: true,
+                                },
+                            )
+
+                            image.addEventListener(
+                                'error',
+                                () => resolve(),
+                                {
+                                    once: true,
+                                },
+                            )
+                        },
+                    ),
+        ),
+    )
+
+    const pdf =
+        new jsPDF({
+            orientation:
+                'portrait',
+            unit:
+                'mm',
+            format:
+                'a4',
+            compress:
+                true,
+        })
+
+    try {
+        for (
+            let pageIndex = 0;
+            pageIndex < pageCount.value;
+            pageIndex += 1
+        ) {
+            showPage(
+                pageIndex,
+            )
+
+            await nextTick()
+
+            await new Promise<void>(
+                (resolve) => {
+                    requestAnimationFrame(
+                        () => resolve(),
+                    )
+                },
+            )
+
+            const pages =
+                getRenderablePageElements()
+
+            const page =
+                pages[pageIndex] ??
+                pages[0]
+
+            if (!page) {
+                throw new Error(
+                    `Document page ${pageIndex + 1} was not found.`,
+                )
+            }
+
+            const canvas =
+                await html2canvas(
+                    page,
+                    {
+                        backgroundColor:
+                            '#ffffff',
+                        logging:
+                            false,
+                        scale:
+                            2,
+                        useCORS:
+                            true,
+                    },
+                )
+
+            if (pageIndex > 0) {
+                pdf.addPage(
+                    'a4',
+                    'portrait',
+                )
+            }
+
+            pdf.addImage(
+                canvas.toDataURL(
+                    'image/jpeg',
+                    0.96,
+                ),
+                'JPEG',
+                0,
+                0,
+                210,
+                297,
+                undefined,
+                'FAST',
+            )
+        }
+
+        return pdf.output(
+            'blob',
+        )
+    } finally {
+        showPage(
+            selectedPage,
+        )
+    }
+}
+
+defineExpose({
+    buildDocumentPdf,
+    printDocument,
+})
 
 /* -------------------------------------------------------------------------- */
 /* Iframe load                                                                */

@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import {
     computed,
-    nextTick,
     ref,
-    watch,
 } from 'vue'
 
 import axios from 'axios'
@@ -11,6 +9,7 @@ import SplitButton from 'primevue/splitbutton'
 
 import AppButton from '@/components/AppButton.vue'
 import AdonisButton from '@/components/AdonisButton.vue'
+import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
 
 import api from '@/services/api'
 
@@ -105,7 +104,7 @@ const props =
                 true,
 
             paginatedPreview:
-                false,
+                true,
         },
     )
 
@@ -128,13 +127,11 @@ const downloadError =
         null,
     )
 
-const iframeRef =
-    ref<HTMLIFrameElement | null>(
-        null,
-    )
-
-const iframeHeight =
-    ref('850px')
+const previewViewerRef =
+    ref<{
+        buildDocumentPdf: () => Promise<Blob>
+        printDocument: () => void
+    } | null>(null)
 
 /* -------------------------------------------------------------------------- */
 /* Download options                                                           */
@@ -423,6 +420,52 @@ async function download(
         return
     }
 
+    const isPdf =
+        option.contentType ===
+            'application/pdf' ||
+        option.fileType
+            ?.toLowerCase() ===
+            'pdf'
+
+    if (
+        isPdf &&
+        previewViewerRef.value
+    ) {
+        isDownloading.value =
+            true
+
+        downloadError.value =
+            null
+
+        try {
+            const filename =
+                option.filename ??
+                `${props.title}.pdf`
+
+            const pdf =
+                await previewViewerRef.value
+                    .buildDocumentPdf()
+
+            triggerDownload(
+                pdf,
+                filename,
+            )
+        } catch (error) {
+            downloadError.value =
+                'Download failed.'
+
+            console.error(
+                'DocumentShell preview download failed',
+                error,
+            )
+        } finally {
+            isDownloading.value =
+                false
+        }
+
+        return
+    }
+
     const shouldFetch =
         option.method ===
             'post' ||
@@ -542,239 +585,9 @@ async function download(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Preview                                                                    */
-/* -------------------------------------------------------------------------- */
-
-const previewWidthStyle =
-    computed(
-        () =>
-            props.paginatedPreview &&
-            props.previewWidth === '210mm'
-                ? 'calc(210mm + 3rem)'
-                : props.previewWidth ||
-                  '210mm',
-    )
-
-watch(
-    () =>
-        props.previewUrl,
-
-    () => {
-        iframeHeight.value =
-            '850px'
-    },
-)
-
-function injectScrollablePreviewStyles(
-    doc: Document,
-) {
-    if (!doc.head) {
-        return
-    }
-
-    const styleId =
-        'document-shell-scroll-preview-styles'
-
-    let style =
-        doc.getElementById(
-            styleId,
-        ) as HTMLStyleElement | null
-
-    if (!style) {
-        style =
-            doc.createElement(
-                'style',
-            )
-
-        style.id =
-            styleId
-
-        doc.head.appendChild(
-            style,
-        )
-    }
-
-    style.textContent = `
-        @media screen {
-            html,
-            body {
-                background: #e5e7eb !important;
-            }
-
-            body {
-                padding: 24px 0 !important;
-            }
-
-            [data-page],
-            .page,
-            .a4-page,
-            .document-page,
-            .print-page {
-                margin: 0 auto 24px !important;
-                background: #ffffff !important;
-                box-shadow: 0 3px 14px rgba(15, 23, 42, 0.2) !important;
-            }
-        }
-    `
-}
-
-function updateIframeHeight() {
-    const iframe =
-        iframeRef.value
-
-    if (!iframe) {
-        return
-    }
-
-    try {
-        const doc =
-            iframe
-                .contentDocument ||
-            iframe
-                .contentWindow
-                ?.document
-
-        if (!doc) {
-            return
-        }
-
-        if (props.paginatedPreview) {
-            injectScrollablePreviewStyles(
-                doc,
-            )
-
-            iframeHeight.value =
-                'calc(100vh - 8rem)'
-
-            return
-        }
-
-        const height =
-            Math.max(
-                doc.body
-                    .scrollHeight,
-
-                doc.documentElement
-                    .scrollHeight,
-
-                doc.body
-                    .offsetHeight,
-
-                doc.documentElement
-                    .offsetHeight,
-            )
-
-        iframeHeight.value =
-            `${height}px`
-    } catch (error) {
-        console.warn(
-            'DocumentShell iframe resize failed',
-            error,
-        )
-    }
-}
-
-function onIframeLoad() {
-    nextTick(() => {
-        updateIframeHeight()
-
-        requestAnimationFrame(
-            updateIframeHeight,
-        )
-    })
-}
-
-/* -------------------------------------------------------------------------- */
-/* Print                                                                      */
-/* -------------------------------------------------------------------------- */
-
-function injectIframePrintStyles(
-    doc: Document,
-) {
-    if (
-        !doc ||
-        !doc.head
-    ) {
-        return
-    }
-
-    const styleId =
-        'document-shell-iframe-print-styles'
-
-    let style =
-        doc.getElementById(
-            styleId,
-        ) as
-            | HTMLStyleElement
-            | null
-
-    if (!style) {
-        style =
-            doc.createElement(
-                'style',
-            )
-
-        style.id =
-            styleId
-
-        doc.head.appendChild(
-            style,
-        )
-    }
-
-    style.textContent = `
-        @media print {
-            * {
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }
-        }
-    `
-}
-
 function printPage() {
-    const iframe =
-        iframeRef.value
-
-    if (
-        iframe?.contentWindow
-    ) {
-        try {
-            const doc =
-                iframe
-                    .contentDocument ||
-                iframe
-                    .contentWindow
-                    .document
-
-            if (doc) {
-                injectIframePrintStyles(
-                    doc,
-                )
-            }
-
-            iframe
-                .contentWindow
-                .focus()
-
-            iframe
-                .contentWindow
-                .print()
-
-            return
-        } catch (error) {
-            console.warn(
-                'DocumentShell iframe print failed',
-                error,
-            )
-        }
-    }
-
-    requestAnimationFrame(
-        () =>
-            window.print(),
-    )
+    previewViewerRef.value
+        ?.printDocument()
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1033,45 +846,20 @@ function onActionClick(
                 gap-4
             "
         >
-            <!-- Existing document preview -->
             <div
                 v-if="
                     props.previewUrl
                 "
-                id="
-                    document-shell-print
-                "
                 class="
-                    flex
                     w-full
-                    justify-center
+                    h-[calc(100vh-12rem)]
+                    min-h-[32rem]
                 "
             >
-                <iframe
-                    ref="iframeRef"
-                    :src="
-                        props.previewUrl
-                    "
-                    title="
-                        Document preview
-                    "
-                    frameborder="0"
-                    :scrolling="paginatedPreview ? 'auto' : 'no'"
-                    class="
-                        w-full
-                        overflow-hidden
-                        shadow-lg
-                    "
-                    :style="{
-                        maxWidth:
-                            previewWidthStyle,
-
-                        height:
-                            iframeHeight,
-                    }"
-                    @load="
-                        onIframeLoad
-                    "
+                <DocumentPreviewViewer
+                    ref="previewViewerRef"
+                    :html="props.previewUrl"
+                    :title="props.title"
                 />
             </div>
 
@@ -1102,12 +890,6 @@ function onActionClick(
 </template>
 
 <style scoped lang="scss">
-iframe {
-    box-shadow:
-        0 0 8px
-        #00000026;
-}
-
 /* -------------------------------------------------------------------------- */
 /* PrimeVue SplitButton                                                       */
 /* -------------------------------------------------------------------------- */

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import type { DataTableOptions } from '@/types/datatable'
+import AppButton from '@/components/AppButton.vue'
 
 type PointCandidate = {
     point_id: number
@@ -169,16 +170,15 @@ function createBatch() {
         </div>
 
         <div class="flex justify-end gap-2 pt-2">
-            <Button
+            <AppButton
                 label="Zrušiť"
-                text
-                class="text-accent! px-3!"
+                variant="secondary"
                 @click="close"
             />
-            <Button
+            <AppButton
                 label="Vytvoriť dávku"
                 :disabled="selectedPointIds.length === 0"
-                class="bg-accent! border-0! hover:bg-darkgrey! px-4! text-white!"
+                variant="accent"
                 @click="createBatch"
             />
         </div>

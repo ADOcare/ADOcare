@@ -17,6 +17,7 @@ import { useApi } from '@/composables/useApi'
 import api from '@/services/api'
 
 import type { DataTableOptions } from '@/types/datatable'
+import { documentUrlForNewTab } from '@/utils/documentWindow'
 
 type RunStatus =
     | 'pending'
@@ -548,13 +549,13 @@ function documentRoute(
             'documents-cp',
     }[result.type]
 
-    return router.resolve({
+    return documentUrlForNewTab(router.resolve({
         name: routeName,
         params: {
             documentId:
                 result.document_id,
         },
-    }).href
+    }).href)
 }
 
 function resultTitle(

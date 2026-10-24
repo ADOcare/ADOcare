@@ -99,7 +99,7 @@ const actions = computed(() => [
         id: 'download-batch',
         label: 'Stiahnuť dáta dávky',
         icon: 'bi bi-download',
-        variant: 'dark',
+        variant: 'dark' as const,
     },
 ])
 

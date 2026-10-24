@@ -1,9 +1,10 @@
 <?php
+
 namespace App\Services;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
 
 /**
  * Encapsulates business logic related to visit calculations.
@@ -15,11 +16,10 @@ class VisitsService
     /**
      * Queue a monthly timeline calculation and record the request in the database.
      *
-     * @param array $data  Validated request data.
-     *                     Keys: month, branch_id, user_id?, procedure_codes?, patients?, persist?
-     * @return void
+     * @param  array  $data  Validated request data.
+     *                       Keys: month, branch_id, user_id?, procedure_codes?, patients?, persist?
      */
-    public function requestTimeline(array $data): void
+    public function requestTimeline(array $data): string
     {
         // ensure user id is set, defaulting to currently authenticated user
         if (empty($data['user_id'])) {
@@ -27,6 +27,7 @@ class VisitsService
         }
 
         $month = Carbon::parse($data['month'])->startOfMonth()->toDateString();
+        $requestedAt = now();
 
         DB::table('visit_calculations')->updateOrInsert(
             [
@@ -36,21 +37,20 @@ class VisitsService
             ],
             [
                 'status' => 'pending',
+                'completed_at' => null,
                 'error_message' => null,
+                'updated_at' => $requestedAt,
             ]
         );
 
         // dispatch job exactly as previous controller did
         \App\Jobs\CalculateVisitsTimeline::dispatch($data);
+
+        return $requestedAt->toISOString();
     }
 
     /**
      * Return the status row stored for a given calculation request.
-     *
-     * @param string $monthYmd
-     * @param int $branchId
-     * @param int|null $userId
-     * @return array
      */
     public function checkCalculationStatus(string $monthYmd, int $branchId, ?int $userId = null): array
     {
@@ -66,13 +66,15 @@ class VisitsService
             ->where('month', $month)
             ->first();
 
-        if (!$calc) {
+        if (! $calc) {
             return ['status' => 'not_found'];
         }
 
         return [
             'status' => $calc->status,
-            'completed_at' => $calc->completed_at,
+            'completed_at' => $calc->completed_at
+                ? Carbon::parse($calc->completed_at)->toISOString()
+                : null,
             'error_message' => $calc->error_message,
         ];
     }
@@ -80,11 +82,7 @@ class VisitsService
     /**
      * Compute day totals for visits, returning the aggregated fields used by the API.
      *
-     * @param string $date   Y-m-d
-     * @param int $branchId
-     * @param int|null $userId
-     * @param bool $includeOnLocation
-     * @return array
+     * @param  string  $date  Y-m-d
      */
     public function getDayTotals(string $date, int $branchId, ?int $userId = null, bool $includeOnLocation = true): array
     {
@@ -125,12 +123,6 @@ class VisitsService
 
     /**
      * Compute month totals for visits, similar output to getDayTotals but aggregated over a month.
-     *
-     * @param string $monthAnyDate
-     * @param int $branchId
-     * @param int|null $userId
-     * @param bool $includeOnLocation
-     * @return array
      */
     public function getMonthTotals(string $monthAnyDate, int $branchId, ?int $userId = null, bool $includeOnLocation = true): array
     {

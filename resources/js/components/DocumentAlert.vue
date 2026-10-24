@@ -7,6 +7,7 @@ import { useToast } from 'primevue/usetoast'
 import AppButton from '@/components/AppButton.vue'
 
 import api from '@/services/api'
+import { openDocumentInNewTab } from '@/utils/documentWindow'
 
 interface Props {
     visible: boolean
@@ -57,9 +58,8 @@ function viewDocument() {
             props.documentId.toString(),
         )
 
-    window.open(
+    openDocumentInNewTab(
         url,
-        '_blank',
     )
 }
 

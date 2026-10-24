@@ -53,8 +53,11 @@ useInsuranceCheck({
 })
 
 const isLoggedIn = computed(() => auth.isAuthenticated)
-const showNavbar = computed(() => route.meta.shownavbar !== false)
-const showFooter = computed(() => route.meta.showfooter !== false)
+const isStandaloneDocument = computed(() => {
+    return route.path.startsWith('/documents/') && route.query.standalone === '1'
+})
+const showNavbar = computed(() => route.meta.shownavbar !== false && !isStandaloneDocument.value)
+const showFooter = computed(() => route.meta.showfooter !== false && !isStandaloneDocument.value)
 const usePagePadding = computed(() => route.meta.pagePadding !== false)
 const showSecondaryNavbar = computed(() => route.meta.secondaryNavbar === true)
 const hasQuartalNavbar = computed(() => route.meta.quartalNavbar === true)
@@ -126,8 +129,8 @@ onBeforeUnmount(() => {
                 >
                     <LoadingOverlay :show="contentLoading" text="" />
 
-                    <AccessReadOnlyBanner v-if="isLoggedIn" class="mb-5" />
-                    <AccessPaymentWarningBanner v-if="isLoggedIn" class="mb-5" />
+                    <AccessReadOnlyBanner v-if="isLoggedIn && !isStandaloneDocument" class="mb-5" />
+                    <AccessPaymentWarningBanner v-if="isLoggedIn && !isStandaloneDocument" class="mb-5" />
 
                     <AccessError v-if="navigationAccessError" />
                     <router-view v-else :key="pageContextKey" />
@@ -135,7 +138,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div
-                v-if="isLoggedIn"
+                v-if="isLoggedIn && !isStandaloneDocument"
                 class="flex-none overflow-hidden transition-[width] duration-300 ease-in-out motion-reduce:transition-none"
                 :class="isSidebarOpen ? 'w-64' : 'w-0'"
                 :aria-hidden="!isSidebarOpen"

@@ -8,6 +8,7 @@ import {
     watch,
 } from 'vue'
 import { useRouter } from 'vue-router'
+import { useToast } from 'primevue/usetoast'
 
 import api from '@/services/api'
 import { fetchBlobUrl } from '@/utils/blobUrl'
@@ -42,6 +43,9 @@ const patientStore =
 
 const router =
     useRouter()
+
+const toast =
+    useToast()
 
 patientStore.loadFromStorage?.()
 
@@ -513,6 +517,23 @@ async function handleFinalize() {
     )
 
     if (!finalized) {
+        toast.add({
+            severity:
+                'error',
+
+            summary:
+                'Dekurz zatiaľ nie je možné vygenerovať.',
+
+            detail:
+                finalizationErrors.value.join(
+                    ' ',
+                ) ||
+                'Skontrolujte zadané údaje a skúste to znova.',
+
+            life:
+                6000,
+        })
+
         return
     }
 
@@ -855,26 +876,16 @@ onBeforeUnmount(() => {
 
                             <div
                                 v-if="!builder.draft"
-                                class="flex items-start gap-3 rounded-md bg-warning/10 p-4"
+                                class="flex items-start gap-3 rounded-md bg-danger p-4"
                             >
-                                <i class="bi bi-clock-history mt-0.5 text-warning" />
+                                <i class="bi bi-clock-history mt-0.5 text-white" />
                                 <div class="min-w-0 flex-1">
-                                    <p class="text-normal font-medium text-darkgrey">
+                                    <p class="text-normal font-medium text-white">
                                         {{ initializing ? 'Pripravujem Dekurz…' : 'Dekurz zatiaľ nie je možné upravovať.' }}
                                     </p>
-                                    <p class="mt-1 text-mini text-lightgrey">
+                                    <p class="mt-1 text-mini text-white">
                                         {{ draftInitializationError || 'Kontrolujem vypočítané časy návštev.' }}
                                     </p>
-                                    <AppButton
-                                        v-if="draftInitializationError"
-                                        type="button"
-                                        variant="text"
-                                        icon="bi bi-arrow-clockwise"
-                                        label="Skontrolovať znova"
-                                        class="mt-2"
-                                        :loading="initializing"
-                                        @click="initializeDraft"
-                                    />
                                 </div>
                             </div>
 
@@ -889,20 +900,6 @@ onBeforeUnmount(() => {
                                     @create-section="handleCreateSection"
                                     @update-entry-text="updateEntryText"
                                 />
-
-                                <div
-                                    v-if="finalizationErrors.length"
-                                    class="rounded-md bg-danger/5 p-4"
-                                >
-                                    <p class="text-normal font-medium text-danger">
-                                        Dekurz zatiaľ nie je možné vygenerovať.
-                                    </p>
-                                    <ul class="mt-2 list-disc space-y-1 pl-5 text-mini text-danger">
-                                        <li v-for="message in finalizationErrors" :key="message">
-                                            {{ message }}
-                                        </li>
-                                    </ul>
-                                </div>
 
                                 <div class="flex justify-end">
                                     <AppButton

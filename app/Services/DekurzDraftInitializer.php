@@ -43,7 +43,7 @@ class DekurzDraftInitializer
                 ->values();
 
             if (! $draft) {
-                $this->timelineReadiness->assertReady($lockedPatient, $actor, $points);
+                $this->timelineReadiness->assertReady($lockedPatient, $actor, $points, $month);
 
                 $draft = DekurzDraft::query()->create([
                     'patient_id' => $lockedPatient->id,

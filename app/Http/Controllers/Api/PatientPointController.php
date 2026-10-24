@@ -4,16 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Filters\ApiQuery;
-use App\Http\Resources\BaseCollection;
 use App\Http\Requests\DestroyManyPatientPointRequest;
-use App\Services\BulkDeletionService;
-use App\Services\BulkDeletionResponder;
-use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
-use App\Jobs\ProcessBulkDeletionJob;
-use Illuminate\Support\Facades\Log;
 use App\Http\Requests\StorePatientPointRequest;
 use App\Http\Requests\UpdatePatientPointRequest;
+use App\Http\Resources\BaseCollection;
+use App\Jobs\ProcessBulkDeletionJob;
 use App\Models\PatientPoint;
+use App\Services\BulkDeletionResponder;
+use App\Services\BulkDeletionService;
+use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
+use App\Services\VisitTimelineFreshnessService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -22,25 +22,29 @@ use Illuminate\Support\Facades\DB;
 class PatientPointController extends Controller
 {
     private BulkDeletionService $bulkDeletionService;
+
     private BulkDeletionResponder $bulkDeletionResponder;
+
     private ImmediateDocumentationAuditService $immediateAudit;
+
+    private VisitTimelineFreshnessService $timelineFreshness;
 
     public function __construct(
         BulkDeletionService $bulkDeletionService,
         BulkDeletionResponder $bulkDeletionResponder,
         ImmediateDocumentationAuditService $immediateAudit,
-    )
-    {
+        VisitTimelineFreshnessService $timelineFreshness,
+    ) {
         $this->bulkDeletionService = $bulkDeletionService;
         $this->bulkDeletionResponder = $bulkDeletionResponder;
         $this->immediateAudit = $immediateAudit;
+        $this->timelineFreshness = $timelineFreshness;
     }
     // No controller-level middleware: auth is enforced at the routes/v1 group.
 
     /**
      * Display a listing of patient points.
      *
-     * @param  Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
@@ -91,7 +95,7 @@ class PatientPointController extends Controller
         }
 
         // Look up procedure_id from procedure_code if not provided
-        if (!isset($validated['procedure_id']) || !$validated['procedure_id']) {
+        if (! isset($validated['procedure_id']) || ! $validated['procedure_id']) {
             $procedureId = DB::table('procedures')
                 ->where('code', $validated['procedure_code'])
                 ->value('id');
@@ -102,7 +106,7 @@ class PatientPointController extends Controller
         }
 
         // Look up diagnosis_id from diagnosis_code if not provided
-        if (!isset($validated['diagnosis_id']) || !$validated['diagnosis_id']) {
+        if (! isset($validated['diagnosis_id']) || ! $validated['diagnosis_id']) {
             $diagnosisId = DB::table('diagnoses')
                 ->where('code', $validated['diagnosis_code'])
                 ->value('id');
@@ -114,6 +118,7 @@ class PatientPointController extends Controller
 
         $point = PatientPoint::create($validated);
 
+        $this->timelineFreshness->invalidatePoint($point);
         $this->immediateAudit->patientPointChanged($point);
 
         // (Optional) make consistent with macros:
@@ -125,7 +130,6 @@ class PatientPointController extends Controller
      *
      * GET /v1/patient-points/{patient_point}
      *
-     * @param  PatientPoint  $patientPoint
      * @return \Illuminate\Http\JsonResponse
      */
     public function show(PatientPoint $patientPoint)
@@ -141,17 +145,17 @@ class PatientPointController extends Controller
      * PUT/PATCH /v1/patient-points/{patient_point}
      *
      * @param  Request  $request
-     * @param  PatientPoint  $patientPoint
      * @return \Illuminate\Http\JsonResponse
      */
     public function update(UpdatePatientPointRequest $request, PatientPoint $patientPoint)
     {
         $this->authorize('update', $patientPoint);
         $validated = $request->validated();
-        $previous = $patientPoint->only(['patient_id', 'date']);
+        $previous = $patientPoint->only(['patient_id', 'date', 'user_id', 'branch_id']);
 
         $patientPoint->update($validated);
 
+        $this->timelineFreshness->invalidatePoint($patientPoint, $previous);
         $this->immediateAudit->patientPointChanged($patientPoint, $previous);
 
         // (Optional) make consistent with macros:
@@ -163,7 +167,6 @@ class PatientPointController extends Controller
      *
      * DELETE /v1/patient-points/{patient_point}
      *
-     * @param  PatientPoint  $patientPoint
      * @return \Illuminate\Http\Response
      */
     public function destroy(PatientPoint $patientPoint)
@@ -172,6 +175,7 @@ class PatientPointController extends Controller
 
         $patientPoint->delete();
 
+        $this->timelineFreshness->invalidatePoint($patientPoint);
         $this->immediateAudit->patientPointChanged($patientPoint);
 
         // Return proper 204 No Content with no body
@@ -183,7 +187,6 @@ class PatientPointController extends Controller
      *
      * DELETE /v1/patient-points (bulk)
      *
-     * @param  DestroyManyPatientPointRequest  $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function destroyMany(DestroyManyPatientPointRequest $request)
@@ -195,9 +198,10 @@ class PatientPointController extends Controller
         // the duplicate pre-authorization step to avoid double-fetch.
         $result = $this->bulkDeletionService->handleBulkDelete($request->user(), PatientPoint::class, $ids, true);
 
-        if (!empty($result['queued'])) {
+        if (! empty($result['queued'])) {
             ProcessBulkDeletionJob::dispatch(PatientPoint::class, $ids, $request->user()?->id);
         } elseif (empty($result['error'])) {
+            $this->timelineFreshness->invalidatePoints($points);
             $this->immediateAudit->patientPointsChanged($points);
         }
 

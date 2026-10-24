@@ -8,6 +8,7 @@ import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import ActionButtons from '@/components/table-columns/ActionButtons.vue'
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
 import type { DataTableOptions } from '@/types/datatable'
+import { openDocumentInNewTab as openDocumentWindow } from '@/utils/documentWindow'
 
 type Document = {
     id: number
@@ -74,7 +75,7 @@ const openDocumentInNewTab = (doc: Document) => {
         console.warn('Unknown document type:', doc.type)
         return
     }
-    window.open(url, '_blank', 'noopener,noreferrer')
+    openDocumentWindow(url)
 }
 
 const formatDocumentType = (type?: string) => {

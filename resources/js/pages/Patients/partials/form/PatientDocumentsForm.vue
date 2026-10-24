@@ -5,6 +5,7 @@ import UniversalDataTable from '@/components/UniversalDataTable.vue';
 import ActionButtons from '@/components/table-columns/ActionButtons.vue';
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog';
 import type { DataTableOptions, RemoteTableReturn } from '@/types/datatable'
+import { openDocumentInNewTab } from '@/utils/documentWindow'
 
 
 const props = defineProps<{ patientId: number }>();
@@ -45,20 +46,20 @@ const openDocument = (doc: PatientDocument) => {
     }
 
     if (doc.type === 'proposal') {
-        window.open(`/documents/proposal/${doc.id}`, '_blank');
+        openDocumentInNewTab(`/documents/proposal/${doc.id}`);
     } else if (doc.type === 'agreement') {
-        window.open(`/documents/agreement/${doc.id}`, '_blank');
+        openDocumentInNewTab(`/documents/agreement/${doc.id}`);
     } else if (doc.type === 'dekurz') {
-        window.open(`/documents/dekurz/${doc.id}`, '_blank');
+        openDocumentInNewTab(`/documents/dekurz/${doc.id}`);
     } else if (doc.type === 'leave') {
-        window.open(`/documents/leave/${doc.id}`, '_blank');
+        openDocumentInNewTab(`/documents/leave/${doc.id}`);
     } else if (doc.type === 'record') {
-        window.open(`/documents/record/${doc.id}`, '_blank');
+        openDocumentInNewTab(`/documents/record/${doc.id}`);
     } else if (doc.type === 'scan') {
-        window.open(`/documents/scan/${doc.id}`, '_blank');
+        openDocumentInNewTab(`/documents/scan/${doc.id}`);
     } else {
         const target = doc.url || doc.path;
-        if (target) window.open(target, '_blank');
+        if (target) window.open(target, '_blank', 'noopener,noreferrer');
     }
 };
 

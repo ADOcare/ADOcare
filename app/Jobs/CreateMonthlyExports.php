@@ -28,11 +28,10 @@ class CreateMonthlyExports implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $timeout = 1200;
+
     public int $tries = 1;
 
-    public function __construct(public int $runId)
-    {
-    }
+    public function __construct(public int $runId) {}
 
     public function handle(
         PointClaimSelectionService $pointSelection,
@@ -64,6 +63,14 @@ class CreateMonthlyExports implements ShouldQueue
         try {
             $reset->reset($actor->id, $branch->id, $month->format('Y-m'));
 
+            $this->setStep($run, 'Počítam časovú os návštev', $results);
+            CalculateVisitsTimeline::dispatchSync([
+                'month' => $month->toDateString(),
+                'branch_id' => $branch->id,
+                'user_id' => $actor->id,
+                'persist' => true,
+            ]);
+
             $insurances = InsuranceCompany::query()->orderBy('id')->get(['id', 'name']);
             $regimes = [
                 'N' => 'tuzemskí poistenci',
@@ -79,9 +86,9 @@ class CreateMonthlyExports implements ShouldQueue
                         'branch' => ['id' => (int) $branch->id],
                         'period' => $period,
                     ];
-                    $scopeLabel = $insurance->name . ' - ' . $regimeLabel;
+                    $scopeLabel = $insurance->name.' - '.$regimeLabel;
 
-                    $this->setStep($run, 'Výkonová dávka: ' . $scopeLabel, $results);
+                    $this->setStep($run, 'Výkonová dávka: '.$scopeLabel, $results);
                     try {
                         $candidates = $pointSelection->candidates([
                             'batch_type' => $batchType,
@@ -111,7 +118,7 @@ class CreateMonthlyExports implements ShouldQueue
                     }
                     $run->update(['results' => $results]);
 
-                    $this->setStep($run, 'Dopravná dávka: ' . $scopeLabel, $results);
+                    $this->setStep($run, 'Dopravná dávka: '.$scopeLabel, $results);
                     try {
                         $existing = Document::query()
                             ->where('type', 'kilometers_batch')

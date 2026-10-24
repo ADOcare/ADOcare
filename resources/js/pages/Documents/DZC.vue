@@ -654,9 +654,6 @@ function closeExportDialog() {
                     label="
                         Stiahnuť XLSX
                     "
-                    icon="
-                        bi bi-download
-                    "
                     :loading="
                         busy
                     "

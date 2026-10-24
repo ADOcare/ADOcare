@@ -176,13 +176,13 @@ watch(
     <aside class="flex h-full w-64 flex-col bg-darkgrey! p-4 py-2 text-tag2! border-y border-l border-tag2!">
         <div class="flex-1 space-y-4 overflow-y-auto">
             <RouterLink v-if="auth.currentRole === 'nurse'" :to="{ name: 'patients' }"
-                class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-tag2 hover:!text-white text-normal">
+                class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-white hover:text-darkgrey! text-normal">
                 Pacienti
                 <i class="bi bi-chevron-right"></i>
             </RouterLink>
 
             <RouterLink v-if="auth.currentRole === 'nurse'" to="/data/monthly-export"
-                class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-tag2 hover:!text-white text-normal">
+                class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-white hover:text-darkgrey! text-normal">
                 Mesačná uzávierka
                 <i class="bi bi-chevron-right"></i>
             </RouterLink>
@@ -198,7 +198,7 @@ watch(
 
                     <ul v-show="isOpen(item.key)" class="mt-1 space-y-1 text-mini">
                         <li v-for="child in item.children" :key="child.key">
-                            <RouterLink :to="child.path" class="block px-3 py-1 rounded-md text-white hover:bg-tag2">
+                            <RouterLink :to="child.path" class="block px-3 py-1 rounded-md text-white hover:bg-white hover:text-darkgrey!">
                                 {{ child.label }}
                             </RouterLink>
                         </li>
@@ -212,7 +212,7 @@ watch(
             <button
                 v-if="company"
                 type="button"
-                class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white hover:bg-tag2 cursor-pointer text-normal"
+                class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white hover:bg-white hover:text-darkgrey! cursor-pointer text-normal"
                 @click="toggleCompanyPopover"
             >
                 <span class="truncate">
@@ -249,7 +249,7 @@ watch(
                     <li>
                         <button
                             type="button"
-                            class="block w-full px-3 py-1 rounded-md text-left text-white cursor-pointer hover:bg-tag2"
+                            class="block w-full px-3 py-1 rounded-md text-left text-white cursor-pointer hover:bg-white hover:text-darkgrey!"
                             @click="personalData"
                         >
                             Osobné údaje
@@ -259,7 +259,7 @@ watch(
                     <li>
                         <button
                             type="button"
-                            class="block w-full px-3 py-1 rounded-md text-left text-white cursor-pointer hover:bg-tag2"
+                            class="block w-full px-3 py-1 rounded-md text-left text-white cursor-pointer hover:bg-white hover:text-darkgrey!"
                             @click="changePassword"
                         >
                             Zmeniť heslo
@@ -269,7 +269,7 @@ watch(
                     <li>
                         <button
                             type="button"
-                            class="block w-full px-3 py-1 rounded-md text-left text-white cursor-pointer hover:bg-tag2"
+                            class="block w-full px-3 py-1 rounded-md text-left text-white cursor-pointer hover:bg-white hover:text-darkgrey!"
                             @click="logout"
                         >
                             Odhlásiť sa

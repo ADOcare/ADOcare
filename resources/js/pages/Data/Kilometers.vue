@@ -12,6 +12,7 @@ import type { DataTableOptions } from '@/types/datatable'
 import useModal from '@/composables/useModal'
 import KilometersBatchPreviewModal from './KilometersBatchPreviewModal.vue'
 import AppButton from '@/components/AppButton.vue'
+import { openDocumentInNewTab } from '@/utils/documentWindow'
 
 const authStore = useAuthStore()
 const toast = useToast()
@@ -249,7 +250,7 @@ const formatDateWithTime = (dateStr?: string) => {
 
 const openKilometersDoc = (doc: DocRow) => {
     const url = router.resolve(`/documents/kilometers/${doc.id}`).href
-    window.open(url, '_blank', 'noopener,noreferrer')
+    openDocumentInNewTab(url)
 }
 
 const options = computed<DataTableOptions<DocRow>>(() => ({

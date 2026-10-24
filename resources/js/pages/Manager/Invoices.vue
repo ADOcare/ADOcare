@@ -10,6 +10,7 @@ import InvoiceBulkCreateForm from './InvoiceBulkCreateForm.vue'
 import useModal from '@/composables/useModal'
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog'
 import type { DataTableOptions } from '@/types/datatable'
+import { openDocumentInNewTab } from '@/utils/documentWindow'
 
 type InvoiceRow = {
   id: number
@@ -51,7 +52,7 @@ const getInvoiceUrl = (invoice: { id: number }) => {
 const openInvoiceInNewTab = (invoice: InvoiceRow) => {
   const url = getInvoiceUrl(invoice)
   if (!url) return
-  window.open(url, '_blank', 'noopener,noreferrer')
+  openDocumentInNewTab(url)
 }
 
 const formatDateWithTime = (dateStr?: string) => {

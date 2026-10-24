@@ -14,6 +14,7 @@ import useModal from '@/composables/useModal'
 import PointsBatchPreviewModal from './PointsBatchPreviewModal.vue'
 import type { DataTableOptions } from '@/types/datatable'
 import AppButton from '@/components/AppButton.vue'
+import { openDocumentInNewTab } from '@/utils/documentWindow'
 
 const authStore = useAuthStore()
 const uiOverlayStore = useUiOverlayStore()
@@ -134,7 +135,10 @@ async function loadInsurances() {
     }
 }
 
-async function pollCalculationStatus(periodFrom: Date) {
+async function pollCalculationStatus(
+    periodFrom: Date,
+    requestedAt: string,
+) {
     const maxAttempts = 120
     let attempts = 0
 
@@ -157,8 +161,12 @@ async function pollCalculationStatus(periodFrom: Date) {
             })
 
             const status = res.data?.data?.status
+            const completedAt = res.data?.data?.completed_at
+            const isCurrentCompletion =
+                typeof completedAt === 'string' &&
+                new Date(completedAt).getTime() >= new Date(requestedAt).getTime()
 
-            if (status === 'completed') {
+            if (status === 'completed' && isCurrentCompletion) {
                 clearInterval(interval)
                 toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
                 toast.add({
@@ -365,7 +373,13 @@ async function onSubmit() {
             user_id: authStore.user?.id,
             persist: true,
         })
-            .then(() => {
+            .then((response) => {
+                const requestedAt = response.data?.data?.requested_at
+
+                if (typeof requestedAt !== 'string') {
+                    throw new Error('Timeline request timestamp is missing.')
+                }
+
                 toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
                 toast.add({
                     group: TIMELINE_CALC_TOAST_GROUP,
@@ -376,7 +390,10 @@ async function onSubmit() {
                     closable: false,
                 })
 
-                pollCalculationStatus(period.periodFrom)
+                pollCalculationStatus(
+                    period.periodFrom,
+                    requestedAt,
+                )
             })
             .catch((error) => {
                 console.error('Background calculation failed:', error)
@@ -501,7 +518,7 @@ const formatDateWithTime = (dateStr?: string) => {
 
 const openPointsDoc = (doc: DocRow) => {
     const url = router.resolve(`/documents/points/${doc.id}`).href
-    window.open(url, '_blank', 'noopener,noreferrer')
+    openDocumentInNewTab(url)
 }
 
 const options = computed<DataTableOptions<DocRow>>(() => ({

@@ -93,29 +93,23 @@ class DzcExportService
 
     public function sheets(array $payload, array $calculation, ?object $previous): array
     {
-        $rows = [['Poradie', 'Dátum', 'Vodič', 'EČV', 'Odchod – vypočítaný', 'Príchod – vypočítaný', 'Odkiaľ', 'Kam', 'Účel', 'Km – vypočítané', 'Tachometer začiatok – dopočítaný', 'Tachometer koniec', 'Pôvod koncového stavu']];
+        $rows = [['Poradie', 'Dátum', 'Vodič', 'EČV', 'Odchod', 'Príchod', 'Odkiaľ', 'Kam', 'Účel', 'Počet km', 'Stav tachometera pred jazdou', 'Stav tachometera po jazde']];
         foreach ($calculation['legs'] as $index => $leg) {
             $rows[] = [$index + 1, $leg['service_date'], $payload['user_name'], $payload['car_license_plate'],
                 $leg['departure_time'], $leg['arrival_time'],
                 $leg['origin']['address'] . ', ' . $leg['origin']['city'],
                 $leg['destination']['address'] . ', ' . $leg['destination']['city'],
                 $leg['purpose'], $leg['distance_m'] / 1000, $leg['odometer_start_km'], $leg['odometer_end_km'],
-                $leg['odometer_end_source'] === 'user_entered' ? 'Zadal používateľ' : 'Dopočítaný'];
+            ];
         }
         $metadata = [
             ['Údaj', 'Hodnota'], ['Spoločnosť', $payload['company_name']], ['IČO', $payload['company_ico']],
             ['Vozidlo', $payload['car_model']], ['EČV', $payload['car_license_plate']], ['VIN', $payload['car_vin']],
             ['Obdobie od', $payload['start_date']], ['Obdobie do', $payload['end_date']],
-            ['Zadaný konečný stav km', $calculation['end_km']], ['Konečný stav patrí k poslednej jazde dňa', $payload['last_journey_date']],
-            ['Dopočítaný počiatočný stav km', $calculation['start_km']],
-            ['Predchádzajúci zadaný stav km', $previous ? (float) $previous->end_km : null],
-            ['Dátum predchádzajúceho údaja', $previous?->period_end],
-            ['Rozdiel oproti predchádzajúcemu údaju km', $calculation['difference_km']],
-            ['Poznámka', 'Trasa, časy, vzdialenosti a priebežné stavy kilometrov sú vypočítané podľa evidovaných návštev. Koncový stav tachometra zadal používateľ.'],
-            ['Rozdiel kilometrov', 'Rozdiel nebol rozpočítaný medzi pacientov. Môže zahŕňať iné jazdy, medzeru medzi obdobiami alebo odchýlku výpočtu.'],
-            ['Prevádzkové nákupy', 'Výdavky na prevádzku vozidla sa dokladajú samostatnou účtovnou evidenciou.'],
+            ['Konečný stav tachometra', $calculation['end_km']], ['Konečný stav patrí k poslednej jazde dňa', $payload['last_journey_date']],
+            ['Počiatočný stav tachometra', $calculation['start_km']],
         ];
-        $daily = [['Dátum', 'Počet zastávok', 'Km vrátane návratu – vypočítané', 'Trvanie – vypočítané']];
+        $daily = [['Dátum', 'Počet zastávok', 'Km', 'Trvanie']];
         foreach ($payload['day_totals'] as $day) {
             $daily[] = [$day['date'], $day['stops'], $day['distance_km'], $day['total_time']];
         }

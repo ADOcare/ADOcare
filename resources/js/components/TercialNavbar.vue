@@ -343,8 +343,6 @@ watch(
             flex
             items-center
             justify-between
-            border-b!
-            border-darkgrey!
             bg-tag2!
             px-3!
             py-2

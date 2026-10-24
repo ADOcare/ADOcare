@@ -27,6 +27,7 @@ use App\Services\DekurzV2PreviewService;
 use App\Services\DekurzV2SnapshotBuilder;
 use App\Services\DocumentService;
 use App\Services\PatientProcedureDekurzTemplateService;
+use App\Services\VisitTimelineFreshnessService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
@@ -72,6 +73,7 @@ class DekurzV2BuilderTest extends TestCase
         DB::statement('PRAGMA foreign_keys = ON');
 
         $this->createExistingTables();
+        (require __DIR__.'/../../database/migrations/2026_01_18_create_visit_calculations_table.php')->up();
         (require __DIR__.'/../../database/migrations/2026_10_15_000000_create_dekurz_v2_foundation_tables.php')->up();
         (require __DIR__.'/../../database/migrations/2026_10_15_010000_add_dekurz_builder_fields.php')->up();
         (require __DIR__.'/../../database/migrations/2026_10_19_000000_add_sequential_tracks_to_dekurz.php')->up();
@@ -206,6 +208,44 @@ class DekurzV2BuilderTest extends TestCase
         }
 
         self::assertSame(0, DB::table('dekurz_drafts')->count());
+    }
+
+    public function test_new_draft_requires_a_calculated_visit_duration(): void
+    {
+        DB::table('visits')
+            ->where('patient_id', 1)
+            ->where('date', '2026-10-05')
+            ->update(['time_on_location' => null]);
+
+        try {
+            $this->initializer()->initialize(
+                Patient::findOrFail(1),
+                '2026-10',
+                User::findOrFail(1),
+            );
+            self::fail('ValidationException was not thrown.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            self::assertArrayHasKey('timeline', $exception->errors());
+            self::assertStringContainsString('Časy návštev', $exception->errors()['timeline'][0]);
+        }
+
+        self::assertSame(0, DB::table('dekurz_drafts')->count());
+    }
+
+    public function test_patient_point_changes_invalidate_the_month_visit_timeline(): void
+    {
+        $point = PatientPoint::findOrFail(100);
+
+        (new VisitTimelineFreshnessService)->invalidatePoint($point);
+
+        $calculation = DB::table('visit_calculations')
+            ->where('user_id', 1)
+            ->where('branch_id', 1)
+            ->where('month', '2026-10-01')
+            ->first();
+
+        self::assertSame('pending', $calculation->status);
+        self::assertNull($calculation->completed_at);
     }
 
     public function test_v1_patient_text_is_materialized_as_an_editable_custom_section(): void
@@ -467,6 +507,29 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame([], $storage->files);
     }
 
+    public function test_finalization_rejects_a_stale_visit_timeline_before_creating_a_document(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        $draft->days->flatMap->entries->each(fn ($entry) => $entry->update(['text' => 'Finálny text.']));
+        DB::table('patient_points')->where('id', 100)->update(['updated_at' => '2100-01-01 00:00:00']);
+        $this->useInMemoryStorage();
+        $documentService = $this->createMock(DocumentService::class);
+        $documentService->expects(self::never())->method('getTravelDocumentPdfPath');
+
+        try {
+            $this->finalizer($documentService)->finalize($patient, $draft, $actor);
+            self::fail('ValidationException was not thrown.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            self::assertArrayHasKey('timeline', $exception->errors());
+            self::assertStringContainsString('aktuálne', $exception->errors()['timeline'][0]);
+        }
+
+        self::assertSame(0, Document::count());
+        self::assertSame('draft', $draft->fresh()->status);
+    }
+
     public function test_inaccessible_patient_is_rejected_for_read_and_draft_initialization(): void
     {
         $patient = Patient::findOrFail(1);
@@ -510,6 +573,7 @@ class DekurzV2BuilderTest extends TestCase
         return new DekurzFinalizationValidator(
             new DekurzScoringService($classifier),
             new DekurzScoringConsistencyService,
+            new DekurzTimelineReadinessService,
         );
     }
 
@@ -660,6 +724,7 @@ class DekurzV2BuilderTest extends TestCase
             $table->date('date');
             $table->time('terrain_time')->nullable();
             $table->time('administrative_time')->nullable();
+            $table->unsignedInteger('time_on_location')->nullable();
         });
     }
 
@@ -714,7 +779,28 @@ class DekurzV2BuilderTest extends TestCase
             'date' => $date,
             'terrain_time' => '08:00:00',
             'administrative_time' => '14:00:00',
+            'time_on_location' => 900,
         ])->all());
+        DB::table('visit_calculations')->insert([
+            [
+                'user_id' => 1,
+                'branch_id' => 1,
+                'month' => '2026-09-01',
+                'status' => 'completed',
+                'completed_at' => '2099-01-01 00:00:00',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'user_id' => 1,
+                'branch_id' => 1,
+                'month' => '2026-10-01',
+                'status' => 'completed',
+                'completed_at' => '2099-01-01 00:00:00',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
     }
 
     private function pointAttributes(int $id, string $code, int $procedureId, string $date, int $quantity): array

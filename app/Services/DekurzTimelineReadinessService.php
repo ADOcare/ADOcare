@@ -13,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 class DekurzTimelineReadinessService
 {
     /** @param Collection<int, PatientPoint> $points */
-    public function assertReady(Patient $patient, User $actor, Collection $points): void
+    public function assertReady(Patient $patient, User $actor, Collection $points, string $month): void
     {
         $requiredDates = $points
             ->pluck('date')
@@ -26,6 +26,26 @@ class DekurzTimelineReadinessService
         }
 
         $nurseId = (int) ($patient->nurse_id ?: $actor->id);
+        $calculation = DB::table('visit_calculations')
+            ->where('user_id', $nurseId)
+            ->where('branch_id', $patient->branch_id)
+            ->whereDate('month', Carbon::parse($month)->startOfMonth()->toDateString())
+            ->first();
+        $latestPointUpdate = DB::table('patient_points')
+            ->whereIn('id', $points->modelKeys())
+            ->max('updated_at');
+
+        if (
+            ! $calculation
+            || $calculation->status !== 'completed'
+            || ! $calculation->completed_at
+            || ($latestPointUpdate && Carbon::parse($calculation->completed_at)->lt(Carbon::parse($latestPointUpdate)))
+        ) {
+            throw ValidationException::withMessages([
+                'timeline' => 'Časy návštev pre tento mesiac nie sú vypočítané alebo aktuálne. Je nutné pripraviť výkonové dávky.',
+            ]);
+        }
+
         $calculatedDates = DB::table('visits')
             ->where('patient_id', $patient->id)
             ->where('user_id', $nurseId)
@@ -33,6 +53,7 @@ class DekurzTimelineReadinessService
             ->whereIn('date', $requiredDates->all())
             ->whereNotNull('terrain_time')
             ->whereNotNull('administrative_time')
+            ->whereNotNull('time_on_location')
             ->pluck('date')
             ->map(fn ($date): string => Carbon::parse($date)->toDateString())
             ->unique();

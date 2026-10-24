@@ -16,6 +16,7 @@ class DekurzFinalizationValidator
     public function __construct(
         private DekurzScoringService $scoring,
         private DekurzScoringConsistencyService $consistency,
+        private DekurzTimelineReadinessService $timelineReadiness,
     ) {}
 
     /** @return Collection<int, PatientPoint> */
@@ -37,6 +38,7 @@ class DekurzFinalizationValidator
 
         $month = Carbon::parse($draft->period)->format('Y-m');
         $points = $this->scoring->documentableForMonth($patient, $month);
+        $this->timelineReadiness->assertReady($patient, $actor, $points, $month);
         $pointsById = $points->keyBy('id');
         $usedPointIds = collect();
         $patientTemplates = PatientProcedureDekurzTemplate::query()
@@ -88,12 +90,14 @@ class DekurzFinalizationValidator
                     if (! $entry->is_excluded && (int) $entry->customTrack?->patient_id !== (int) $patient->id) {
                         $errors[$key][] = 'Vlastný záznam patrí inému pacientovi.';
                     }
+
                     continue;
                 }
 
                 $ids = collect($entry->patient_point_snapshot_ids ?? [])->map(fn ($id): int => (int) $id)->filter();
                 if ($ids->isEmpty()) {
                     $errors[$key][] = 'Výkon nemá zdrojové bodovanie.';
+
                     continue;
                 }
 
@@ -106,6 +110,7 @@ class DekurzFinalizationValidator
                     $point = $pointsById->get($id);
                     if (! $point) {
                         $errors[$key][] = "Zdrojové bodovanie {$id} už neexistuje alebo nepatrí do Dekurzu.";
+
                         continue;
                     }
                     if ((int) $point->procedure_id !== (int) $entry->procedure_id) {

@@ -72,7 +72,7 @@ function linkClass(key: string) {
       justify-between
       bg-tag2!
       border-y!
-      border-tag2!
+      border-darkgrey!
       px-3!
       py-3!
     "

@@ -21,6 +21,8 @@ type InsuranceCompanyOption = {
 type InvoicePayload = {
     id?: number
     insurance_company_id: number | null
+    patient_category: 'domestic' | 'eu' | 'special'
+    batch_mode: 'combined' | 'regular' | 'corrective' | 'additive'
     period: Date | null
     type: string | null
     total?: number
@@ -36,6 +38,9 @@ type RelatedInvoiceOption = {
     invoice_number: string
     period: string | null
     insurance_company_id: number | null
+    patient_category: 'domestic' | 'eu' | 'special'
+    batch_mode: 'combined' | 'regular' | 'corrective' | 'additive'
+    purpose: string
 }
 
 const invoiceTypes = [
@@ -43,6 +48,18 @@ const invoiceTypes = [
     { id: 'transport', name: 'Dopravná' },
     { id: 'credit_note', name: 'Dobropis' },
     { id: 'debit_note', name: 'Ťarchopis' },
+]
+
+const patientCategories = [
+    { id: 'domestic', name: 'Tuzemskí poistenci' },
+    { id: 'eu', name: 'Poistenci EÚ/EHP/Švajčiarska' },
+    { id: 'special', name: 'Ostatní poistenci' },
+]
+
+const batchModes = [
+    { id: 'regular', name: 'Riadna faktúra' },
+    { id: 'corrective', name: 'Opravná faktúra' },
+    { id: 'additive', name: 'Aditívna faktúra' },
 ]
 
 const props = defineProps<{ invoice?: Partial<InvoicePayload> | null; modalResolve?: (value?: any) => void }>()
@@ -59,6 +76,8 @@ const todayDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(
 
 const local = ref<InvoicePayload>({
     insurance_company_id: null,
+    patient_category: 'domestic',
+    batch_mode: 'regular',
     period: null,
     type: null,
     amount: null,
@@ -97,6 +116,8 @@ watch(
         local.value = {
             id: v?.id,
             insurance_company_id: v?.insurance_company_id ?? null,
+            patient_category: v?.patient_category ?? 'domestic',
+            batch_mode: v?.batch_mode ?? 'regular',
             period: v?.period ? parsePeriod(v.period) : null,
             type: v?.type ?? null,
             amount: typeof v?.total === 'number' ? Math.abs(v.total) : null,
@@ -167,6 +188,9 @@ async function loadRelatedInvoices() {
                 invoice_number: item.invoice_number ?? `#${item.id}`,
                 period: item.period ?? null,
                 insurance_company_id: item.insurance_company_id ?? null,
+                patient_category: item.patient_category ?? 'domestic',
+                batch_mode: item.batch_mode ?? 'combined',
+                purpose: item.purpose ?? '',
             }))
     } catch (err) {
         console.error('Failed to load related invoices', err)
@@ -226,6 +250,8 @@ watch(
         if (!related?.insurance_company_id) return
 
         local.value.insurance_company_id = related.insurance_company_id
+        local.value.patient_category = related.patient_category
+        local.value.batch_mode = related.batch_mode
     }
 )
 
@@ -259,6 +285,16 @@ async function save() {
             severity: 'error',
             summary: 'Chyba',
             detail: 'Vyberte obdobie.',
+            life: 3500,
+        })
+        return
+    }
+
+    if (isMonthlyService.value && !local.value.insurance_company_id) {
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail: 'Vyberte poisťovňu.',
             life: 3500,
         })
         return
@@ -318,6 +354,8 @@ async function save() {
         const payload: Record<string, unknown> = {
             period,
             type: local.value.type,
+            patient_category: local.value.patient_category,
+            batch_mode: local.value.batch_mode,
             issued_at: toApiDate(local.value.issued_at),
             sent_at: toApiDate(local.value.sent_at),
             due_date: toApiDate(local.value.due_date),
@@ -396,6 +434,30 @@ async function save() {
                 optionLabel="name"
                 optionValue="id"
                 :loading="loadingOptions"
+                fluid
+                dropdownIcon="bi bi-chevron-down"
+            />
+        </div>
+
+        <div v-if="isMonthlyService" class="col-span-12">
+            <label class="block text-normal mb-1">Pacienti faktúry</label>
+            <Select
+                v-model="local.patient_category"
+                :options="patientCategories"
+                optionLabel="name"
+                optionValue="id"
+                fluid
+                dropdownIcon="bi bi-chevron-down"
+            />
+        </div>
+
+        <div v-if="isMonthlyService" class="col-span-12">
+            <label class="block text-normal mb-1">Režim faktúry</label>
+            <Select
+                v-model="local.batch_mode"
+                :options="batchModes"
+                optionLabel="name"
+                optionValue="id"
                 fluid
                 dropdownIcon="bi bi-chevron-down"
             />
@@ -495,6 +557,9 @@ async function save() {
                 fluid
                 dropdownIcon="bi bi-chevron-down"
             />
+            <small v-if="selectedRelatedInvoice?.purpose" class="text-muted">
+                {{ selectedRelatedInvoice.purpose }}
+            </small>
             <small v-if="!selectedPeriodStr" class="text-muted">
                 Najprv vyberte obdobie.
             </small>

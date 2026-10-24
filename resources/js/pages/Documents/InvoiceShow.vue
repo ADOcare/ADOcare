@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import api from '@/services/api'
 import { useUiOverlayStore } from '@/stores/uiOverlay'
 import { usePublicDocument, type PublicDocumentProps } from '@/composables/usePublicDocument'
 
@@ -42,6 +41,11 @@ type InvoicePayload = {
     insurance_company_register: string | null
     period: string
     type: string
+    patient_category: 'domestic' | 'eu' | 'special'
+    patient_category_label: string
+    batch_mode: 'combined' | 'regular' | 'corrective' | 'additive'
+    batch_mode_label: string
+    invoice_purpose: string
     total: number
     related_invoice_id: number | null
     related_invoice_number: string | null
@@ -61,7 +65,6 @@ const { data, loading } = usePublicDocument(props, {
 })
 
 const invoice = computed(() => data.value as InvoicePayload | null)
-const documentId = computed(() => Number(route.params.documentId))
 
 const formattedTotal = computed(() => {
     const value = Number(invoice.value?.total ?? 0)
@@ -96,11 +99,11 @@ const invoiceText = computed(() => {
     }
 
     if (invoice.value?.type === 'transport') {
-        return `Fakturujeme Vám za poskytnutie nákladov na dopravu pre Vašich poistencov za obdobie ${periodLabel.value} na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.`
+        return `Fakturujeme Vám za: ${invoice.value.invoice_purpose} za obdobie ${periodLabel.value} na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.`
     }
 
     if (invoice.value?.type === 'procedures') {
-        return `Fakturujeme Vám za poskytnutie ošetrovateľskej starostlivosti pre Vašich poistencov za obdobie ${periodLabel.value} na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.`
+        return `Fakturujeme Vám za: ${invoice.value.invoice_purpose} za obdobie ${periodLabel.value} na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.`
     }
 
     return 'Faktúra'
@@ -144,10 +147,6 @@ function formatCurrency(value: number) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
     }) + ' €'
-}
-
-async function loadInvoice() {
-    // Handled by composable
 }
 
 function printPage() {
@@ -200,6 +199,9 @@ watchEffect(() => {
                                 </div>
                                 <div class=" mb-1">
                                     Faktúra číslo: <strong>{{ invoice.invoice_number || '' }}</strong>
+                                </div>
+                                <div v-if="invoice.invoice_purpose" class="mb-1 text-sm">
+                                    Určenie faktúry: <strong>{{ invoice.invoice_purpose }}</strong>
                                 </div>
                                 <div v-if="invoice.related_invoice_number" class="mb-1 text-sm">
                                     K faktúre: <strong>{{ invoice.related_invoice_number }}</strong>

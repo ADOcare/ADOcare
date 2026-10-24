@@ -759,6 +759,8 @@ export interface Invoice {
   issued_at: string | null
   sent_at: string | null
   due_date: string | null
+  patient_category: InvoicePatientCategory
+  batch_mode: InvoiceBatchMode
   // relations
   user: User
   insurance_company: InsuranceCompany
@@ -1183,3 +1185,20 @@ const RoleScope = {
 } as const;
 
 export type RoleScope = typeof RoleScope[keyof typeof RoleScope]
+
+const InvoicePatientCategory = {
+  DOMESTIC: 'domestic',
+  EU: 'eu',
+  SPECIAL: 'special',
+} as const;
+
+export type InvoicePatientCategory = typeof InvoicePatientCategory[keyof typeof InvoicePatientCategory]
+
+const InvoiceBatchMode = {
+  COMBINED: 'combined',
+  REGULAR: 'regular',
+  CORRECTIVE: 'corrective',
+  ADDITIVE: 'additive',
+} as const;
+
+export type InvoiceBatchMode = typeof InvoiceBatchMode[keyof typeof InvoiceBatchMode]

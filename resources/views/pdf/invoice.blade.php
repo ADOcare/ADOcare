@@ -141,6 +141,7 @@
             $period = $invoiceData['period'] ?? '';
             [$year, $month] = explode('-', $period) + [0, 0];
             $periodLabel = $month && $year ? "$month.$year" : $period;
+            $invoicePurpose = $invoiceData['invoice_purpose'] ?? '';
 
             function formatDate($dateStr)
             {
@@ -165,9 +166,9 @@
             } elseif ($type === 'debit_note') {
                 $invoiceText = 'Ťarchopis k faktúre č. ' . ($invoiceData['related_invoice_number'] ?? '') . '.';
             } elseif ($type === 'transport') {
-                $invoiceText = "Fakturujeme Vám za poskytnutie nákladov na dopravu pre Vašich poistencov za obdobie $periodLabel na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.";
+                $invoiceText = "Fakturujeme Vám za: $invoicePurpose za obdobie $periodLabel na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.";
             } elseif ($type === 'procedures') {
-                $invoiceText = "Fakturujeme Vám za poskytnutie ošetrovateľskej starostlivosti pre Vašich poistencov za obdobie $periodLabel na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.";
+                $invoiceText = "Fakturujeme Vám za: $invoicePurpose za obdobie $periodLabel na základe Zmluvy o poskytovaní a úhrade zdravotnej starostlivosti.";
             }
 
             $attachmentsText = '';
@@ -197,6 +198,11 @@
                 <div class="invoice-info">
                     Faktúra číslo: <strong>{{ $invoiceData['invoice_number'] ?? '' }}</strong>
                 </div>
+                @if ($invoicePurpose)
+                    <div class="invoice-info" style="font-size: 11px;">
+                        Určenie faktúry: <strong>{{ $invoicePurpose }}</strong>
+                    </div>
+                @endif
                 @if ($invoiceData['related_invoice_number'] ?? null)
                     <div class="invoice-info" style="font-size: 11px;">
                         K faktúre: <strong>{{ $invoiceData['related_invoice_number'] }}</strong>

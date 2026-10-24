@@ -27,6 +27,11 @@ type InvoiceRow = {
   sent_at?: string | null
   due_date?: string | null
   type?: string
+  patient_category?: 'domestic' | 'eu' | 'special'
+  patient_category_label?: string
+  batch_mode?: 'combined' | 'regular' | 'corrective' | 'additive'
+  batch_mode_label?: string
+  purpose?: string
   related_invoice_number?: string
 }
 
@@ -164,6 +169,11 @@ const options = computed<DataTableOptions<InvoiceRow>>(() => ({
       header: 'Typ',
       sortable: true,
       render: (v: string | undefined) => formatInvoiceType(v),
+    },
+    {
+      field: 'purpose',
+      header: 'Určenie faktúry',
+      render: (v: string | undefined) => v || '-',
     },
     {
       field: 'insurance_company_name',

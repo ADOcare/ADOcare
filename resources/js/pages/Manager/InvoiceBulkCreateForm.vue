@@ -17,6 +17,9 @@ type InsuranceCompanyOption = {
   name: string
 }
 
+type PatientCategory = 'domestic' | 'eu' | 'special'
+type BatchMode = 'regular' | 'corrective' | 'additive'
+
 const props = defineProps<{ initialPeriod?: Date | null; modalResolve?: (value?: any) => void }>()
 
 const toast = useToast()
@@ -122,6 +125,8 @@ async function submit() {
 
   try {
     const invoiceTypes: Array<'procedures' | 'transport'> = ['procedures', 'transport']
+    const patientCategories: PatientCategory[] = ['domestic', 'eu', 'special']
+    const batchModes: BatchMode[] = ['regular', 'corrective', 'additive']
     let successCount = 0
     let failedCount = 0
     let firstErrorMessage = ''
@@ -129,38 +134,54 @@ async function submit() {
 
     for (const company of insuranceCompanies.value) {
       for (const type of invoiceTypes) {
-        try {
-          await api.post('/v1/invoices', {
-            insurance_company_id: company.id,
-            period: periodValue,
-            type,
-            issued_at: toApiDate(issuedAt.value),
-            sent_at: toApiDate(sentAt.value),
-            due_date: toApiDate(dueDate.value),
-          })
+        for (const patientCategory of patientCategories) {
+          for (const batchMode of batchModes) {
+            try {
+              await api.post('/v1/invoices', {
+                insurance_company_id: company.id,
+                patient_category: patientCategory,
+                batch_mode: batchMode,
+                period: periodValue,
+                type,
+                issued_at: toApiDate(issuedAt.value),
+                sent_at: toApiDate(sentAt.value),
+                due_date: toApiDate(dueDate.value),
+              })
 
-          successCount += 1
-        } catch (error: any) {
-          failedCount += 1
+              successCount += 1
+            } catch (error: any) {
+              failedCount += 1
 
-          const responseData = error?.response?.data
-          const validationErrors = responseData?.errors
-          const validationMessage = validationErrors && typeof validationErrors === 'object'
-            ? Object.values(validationErrors).flat().map(String)[0]
-            : null
+              const responseData = error?.response?.data
+              const validationErrors = responseData?.errors
+              const validationMessage = validationErrors && typeof validationErrors === 'object'
+                ? Object.values(validationErrors).flat().map(String)[0]
+                : null
 
-          firstErrorMessage = validationMessage
-            ?? responseData?.message
-            ?? 'Nepodarilo sa vytvoriť faktúru.'
+              firstErrorMessage = validationMessage
+                ?? responseData?.message
+                ?? 'Nepodarilo sa vytvoriť faktúru.'
 
-          console.error('Bulk invoice create failed', {
-            companyId: company.id,
-            type,
-            status: error?.response?.status,
-            response: responseData,
-          })
+              console.error('Bulk invoice create failed', {
+                companyId: company.id,
+                type,
+                patientCategory,
+                batchMode,
+                status: error?.response?.status,
+                response: responseData,
+              })
 
-          stoppedEarly = true
+              stoppedEarly = true
+              break
+            }
+          }
+
+          if (stoppedEarly) {
+            break
+          }
+        }
+
+        if (stoppedEarly) {
           break
         }
       }

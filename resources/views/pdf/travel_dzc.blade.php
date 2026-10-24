@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="sk">
+<html lang="sk" class="{{ !empty($pdfMode) ? 'dompdf-render' : 'browser-render' }}">
 <head>
     <meta charset="utf-8">
     <style>
@@ -21,7 +21,7 @@
             box-sizing: border-box;
         }
 
-        html{
+        html.dompdf-render {
             margin: 14mm;
         }
 
@@ -34,6 +34,24 @@
             max-width: none;
             margin: 0 auto;
             box-sizing: border-box;
+        }
+
+        html.browser-render .document-pages {
+            width: 210mm;
+            margin: 0 auto;
+        }
+
+        html.browser-render .page {
+            width: 210mm;
+            height: 297mm;
+            padding: 14mm;
+            overflow: hidden;
+            background: #fff;
+            page-break-after: always;
+        }
+
+        html.browser-render .page:last-child {
+            page-break-after: auto;
         }
 
         .title {
@@ -94,6 +112,8 @@
     </style>
 </head>
 <body>
+    <div class="document-pages">
+    <div class="page dzc-source">
     <div class="document-content">
         <div class="title">DENNÝ ZÁZNAM CIEST</div>
         @if(!empty($dzcData['calculation_note']))
@@ -167,10 +187,10 @@
                 $duration = $dayTotals[$date]['total_time'] ?? '-';
             @endphp
 
-            <div class="day-block">
+            <div class="day-block" data-day-block>
                 <table>
                     <tbody>
-                        <tr>
+                        <tr data-day-summary>
                             <td style="width: 25%;">
                                 <strong>Dátum</strong><br>
                                 {{ !empty($date) ? \Carbon\Carbon::parse($date)->format('d.m.Y') : '' }}
@@ -212,7 +232,7 @@
                                                     }
                                                 }
                                             @endphp
-                                            <tr>
+                                            <tr data-route-row>
                                                 <td class="center"><strong>{{ $idx + 1 }}.</strong></td>
                                                 <td>{{ $addr['address'] ?? '' }}</td>
                                                 <td class="center">{{ $arrivalText }}</td>
@@ -228,5 +248,113 @@
             </div>
         @endforeach
     </div>
+    </div>
+    </div>
+
+    @if (empty($pdfMode))
+        <script>
+            (() => {
+                const pagesRoot = document.querySelector('.document-pages');
+                const sourcePage = pagesRoot?.querySelector('.dzc-source');
+                const sourceContent = sourcePage?.querySelector('.document-content');
+
+                if (!pagesRoot || !sourcePage || !sourceContent) {
+                    return;
+                }
+
+                const blocks = Array.from(sourceContent.children);
+                sourcePage.remove();
+
+                let pageIndex = 0;
+                let currentPage;
+                let currentContent;
+
+                const appendPage = () => {
+                    currentPage = document.createElement('div');
+                    currentPage.className = 'page';
+                    currentPage.dataset.page = String(++pageIndex);
+
+                    currentContent = document.createElement('div');
+                    currentContent.className = 'document-content';
+                    currentPage.appendChild(currentContent);
+                    pagesRoot.appendChild(currentPage);
+                };
+
+                const pageOverflows = () => {
+                    if (!currentPage || !currentContent) {
+                        return false;
+                    }
+
+                    const style = getComputedStyle(currentPage);
+                    const contentBottom = currentPage.getBoundingClientRect().bottom -
+                        Number.parseFloat(style.paddingBottom || '0');
+
+                    return currentContent.getBoundingClientRect().bottom > contentBottom - 2;
+                };
+
+                const appendBlock = (block) => {
+                    currentContent.appendChild(block);
+
+                    if (pageOverflows() && block.previousElementSibling) {
+                        block.remove();
+                        appendPage();
+                        currentContent.appendChild(block);
+                    }
+                };
+
+                const createDayFragment = (dayBlock) => {
+                    const fragment = dayBlock.cloneNode(true);
+                    fragment.querySelectorAll('[data-route-row]').forEach((row) => row.remove());
+                    currentContent.appendChild(fragment);
+
+                    if (pageOverflows() && fragment.previousElementSibling) {
+                        fragment.remove();
+                        appendPage();
+                        currentContent.appendChild(fragment);
+                    }
+
+                    return {
+                        fragment,
+                        body: fragment.querySelector('.route-table tbody'),
+                    };
+                };
+
+                const appendDayBlock = (dayBlock) => {
+                    const rows = Array.from(dayBlock.querySelectorAll('[data-route-row]'));
+                    let { fragment, body } = createDayFragment(dayBlock);
+
+                    if (!body || rows.length === 0) {
+                        return;
+                    }
+
+                    rows.forEach((row) => {
+                        body.appendChild(row);
+
+                        if (!pageOverflows() || body.children.length === 1) {
+                            return;
+                        }
+
+                        row.remove();
+                        appendPage();
+                        ({ fragment, body } = createDayFragment(dayBlock));
+                        body.appendChild(row);
+                    });
+                };
+
+                appendPage();
+
+                blocks.forEach((block) => {
+                    if (block.matches('[data-day-block]')) {
+                        appendDayBlock(block);
+                        return;
+                    }
+
+                    appendBlock(block);
+                });
+
+                document.documentElement.dataset.pageLayoutReady = 'true';
+            })();
+        </script>
+    @endif
 </body>
 </html>

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\InvoiceBatchMode;
+use App\Enums\InvoicePatientCategory;
 use App\Http\Controllers\Controller;
 use App\Http\Filters\ApiQuery;
 use App\Http\Requests\DestroyManyInvoiceRequest;
@@ -34,7 +36,7 @@ class InvoiceController extends Controller
             ->with([
                 'insuranceCompany:id,name',
                 'user:id,title,first_name,last_name,company_id',
-                'relatedInvoice:id,invoice_number',
+                'relatedInvoice:id,invoice_number,type,patient_category,batch_mode',
             ])
             ->whereHas('user', fn($q) => $q->where('company_id', $actor->company_id))
             ->when($request->filled('period'), fn($q) => $q->where('period', $request->string('period')->toString()));
@@ -72,7 +74,7 @@ class InvoiceController extends Controller
                     throw new \RuntimeException('Spoločnosť pre vystavenie faktúry nebola nájdená.');
                 }
 
-                // Guard: keep only one invoice per (type, period, insurance company) within actor's company.
+                // Guard: keep one invoice per service, period, insurer and patient category.
                 if (!$this->isNoteType((string) $validated['type'])) {
                     $this->deletePreviousScopedInvoices($actor, $validated);
                 }
@@ -91,6 +93,8 @@ class InvoiceController extends Controller
                     'insurance_company_id' => $validated['insurance_company_id'] ?? null,
                     'period' => $validated['period'],
                     'type' => $validated['type'],
+                    'patient_category' => $validated['patient_category'],
+                    'batch_mode' => $validated['batch_mode'],
                     'total' => 0,
                     'invoice_number' => null,
                     'issued_at' => $validated['issued_at'],
@@ -112,6 +116,8 @@ class InvoiceController extends Controller
                     $invoice->update([
                         'total' => (float) ($validated['amount'] ?? 0),
                         'insurance_company_id' => $validated['insurance_company_id'] ?? $relatedInvoice->insurance_company_id,
+                        'patient_category' => $relatedInvoice->patient_category,
+                        'batch_mode' => $relatedInvoice->batch_mode,
                     ]);
                 } else {
                     $association = $this->getAssociatedDocumentsAndTotal($invoice, (int) $actor->company_id);
@@ -141,13 +147,7 @@ class InvoiceController extends Controller
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
-        $payload = $this->readDocumentJson($invoice->path);
-
-        if (!$this->hasCurrentInvoicePayload($payload)) {
-            $payload = $this->buildInvoicePayload($invoice, $actor);
-            Storage::disk('local')->put($invoice->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            $this->invalidateInvoicePdf($invoice);
-        }
+        $payload = $this->currentInvoicePayload($invoice);
 
         return $this->success($payload, 'Faktúra bola načítaná');
     }
@@ -162,13 +162,7 @@ class InvoiceController extends Controller
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
-        $payload = $this->readDocumentJson($invoice->path);
-
-        if (!$this->hasCurrentInvoicePayload($payload)) {
-            $payload = $this->buildInvoicePayload($invoice, $actor);
-            Storage::disk('local')->put($invoice->path, json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            $this->invalidateInvoicePdf($invoice);
-        }
+        $payload = $this->currentInvoicePayload($invoice);
 
         return response()->view('pdf.invoice', [
             'invoiceData' => $payload,
@@ -185,6 +179,7 @@ class InvoiceController extends Controller
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
+        $this->currentInvoicePayload($invoice);
         $pdfPath = app(DocumentService::class)->getInvoicePdfPath($invoice);
         if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
             return $this->error('PDF faktúry sa nenašlo', 500);
@@ -208,6 +203,7 @@ class InvoiceController extends Controller
     public function publicInvoice(Request $request, Invoice $invoice)
     {
         if ($request->query('download') === '1') {
+            $this->currentInvoicePayload($invoice);
             $pdfPath = app(DocumentService::class)->getInvoicePdfPath($invoice);
             if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
                 abort(500, 'Chyba pri generovaní PDF faktúry');
@@ -220,7 +216,7 @@ class InvoiceController extends Controller
         }
 
         if ($request->query('format') === 'html') {
-            $payload = $this->readDocumentJson($invoice->path);
+            $payload = $this->currentInvoicePayload($invoice);
             if (!is_array($payload)) {
                 abort(404, 'Náhľad faktúry nie je dostupný');
             }
@@ -272,7 +268,7 @@ class InvoiceController extends Controller
      */
     public function publicInvoiceData(Invoice $invoice)
     {
-        $payload = $this->readDocumentJson($invoice->path);
+        $payload = $this->currentInvoicePayload($invoice);
         if (!is_array($payload)) {
             abort(404, 'Údaje faktúry nie sú dostupné');
         }
@@ -360,11 +356,16 @@ class InvoiceController extends Controller
                 if (!$relatedInvoice || !$this->canAccess($actor, $relatedInvoice)) {
                     return $this->forbidden('Nemáte oprávnenie použiť zvolenú súvisiacu faktúru');
                 }
+
+                $invoice->patient_category = $relatedInvoice->patient_category;
+                $invoice->batch_mode = $relatedInvoice->batch_mode;
             }
 
             $invoice->update([
                 'total' => $manualAmount ?? (float) $invoice->total,
                 'insurance_company_id' => $invoice->insurance_company_id ?? $invoice->relatedInvoice?->insurance_company_id,
+                'patient_category' => $invoice->patient_category,
+                'batch_mode' => $invoice->batch_mode,
             ]);
         } else {
             $association = $this->getAssociatedDocumentsAndTotal($invoice, (int) $actor->company_id);
@@ -468,7 +469,34 @@ class InvoiceController extends Controller
     private function hasCurrentInvoicePayload(mixed $payload): bool
     {
         return is_array($payload)
-            && ($payload['invoice_payload_version'] ?? null) === 2;
+            && ($payload['invoice_payload_version'] ?? null) === 4;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function currentInvoicePayload(Invoice $invoice): ?array
+    {
+        $payload = $this->readDocumentJson($invoice->path);
+
+        if ($this->hasCurrentInvoicePayload($payload)) {
+            return $payload;
+        }
+
+        $actor = $invoice->user;
+
+        if (!$actor instanceof User) {
+            return $payload;
+        }
+
+        $payload = $this->buildInvoicePayload($invoice, $actor);
+        Storage::disk('local')->put(
+            $invoice->path,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        );
+        $this->invalidateInvoicePdf($invoice);
+
+        return $payload;
     }
 
     /**
@@ -480,7 +508,7 @@ class InvoiceController extends Controller
             'insuranceCompany:id,name,address,city,psc,ico,dic,ic_dph,register',
             'user:id,title,first_name,last_name,company_id',
             'user.company:id,name,address,city,psc,ico,dic,ic_dph,iban,bic,register',
-            'relatedInvoice:id,invoice_number',
+            'relatedInvoice:id,invoice_number,type,patient_category,batch_mode',
         ]);
         $association = $this->getAssociatedDocumentsAndTotal($invoice, (int) ($actor->company_id ?? 0));
         $servicesDeliveredAt = InvoiceDates::appliesToMonthlyService((string) $invoice->type)
@@ -488,7 +516,7 @@ class InvoiceController extends Controller
             : null;
 
         return [
-            'invoice_payload_version' => 2,
+            'invoice_payload_version' => 4,
             'company_name' => $invoice->user?->company?->name,
             'company_address' => $invoice->user?->company?->address,
             'company_city' => $invoice->user?->company?->city,
@@ -521,6 +549,11 @@ class InvoiceController extends Controller
 
             'period' => $invoice->period,
             'type' => $invoice->type,
+            'patient_category' => $invoice->patient_category->value,
+            'patient_category_label' => $invoice->patient_category->label(),
+            'batch_mode' => $invoice->batch_mode->value,
+            'batch_mode_label' => $invoice->batch_mode->label(),
+            'invoice_purpose' => $this->invoicePurpose($invoice),
             'total' => (float) $association['total'],
             'related_invoice_id' => $invoice->related_invoice_id,
             'related_invoice_number' => $invoice->relatedInvoice?->invoice_number,
@@ -558,6 +591,19 @@ class InvoiceController extends Controller
         if ($invoice->insurance_company_id) {
             $documentsQuery->where('insurance_company_id', $invoice->insurance_company_id);
         }
+
+        $subtypes = $invoice->batch_mode->batchSubtypes($invoice->patient_category);
+
+        $documentsQuery->where(function ($query) use ($invoice, $subtypes) {
+            $query->whereIn('subtype', $subtypes);
+
+            if (
+                $invoice->patient_category === InvoicePatientCategory::DOMESTIC
+                && in_array($invoice->batch_mode, [InvoiceBatchMode::COMBINED, InvoiceBatchMode::REGULAR], true)
+            ) {
+                $query->orWhereNull('subtype');
+            }
+        });
 
         $documents = $documentsQuery->orderBy('created_at')->get();
 
@@ -605,6 +651,8 @@ class InvoiceController extends Controller
         $query = Invoice::query()
             ->where('type', (string) $validated['type'])
             ->where('period', (string) $validated['period'])
+            ->where('patient_category', (string) $validated['patient_category'])
+            ->where('batch_mode', (string) $validated['batch_mode'])
             ->whereHas('user', fn($q) => $q->where('company_id', $actor->company_id));
 
         if (array_key_exists('insurance_company_id', $validated) && $validated['insurance_company_id']) {
@@ -648,6 +696,11 @@ class InvoiceController extends Controller
             'insurance_company_name' => $invoice->insuranceCompany?->name,
             'period' => $invoice->period,
             'type' => $invoice->type,
+            'patient_category' => $invoice->patient_category->value,
+            'patient_category_label' => $invoice->patient_category->label(),
+            'batch_mode' => $invoice->batch_mode->value,
+            'batch_mode_label' => $invoice->batch_mode->label(),
+            'purpose' => $this->invoicePurpose($invoice),
             'total' => (float) $invoice->total,
             'invoice_number' => $invoice->invoice_number,
             'issued_at' => $invoice->issued_at?->toDateString(),
@@ -659,5 +712,19 @@ class InvoiceController extends Controller
             'updated_at' => $invoice->updated_at?->toDateTimeString(),
             'created_by_user' => implode(' ', $nameParts) ?: 'Neznámy',
         ];
+    }
+
+    private function invoicePurpose(Invoice $invoice): string
+    {
+        if ($invoice->type === 'credit_note') {
+            return 'Dobropis k faktúre č. '.($invoice->relatedInvoice?->invoice_number ?? '');
+        }
+
+        if ($invoice->type === 'debit_note') {
+            return 'Ťarchopis k faktúre č. '.($invoice->relatedInvoice?->invoice_number ?? '');
+        }
+
+        return $invoice->batch_mode->label().' – '
+            .$invoice->patient_category->purpose((string) $invoice->type);
     }
 }

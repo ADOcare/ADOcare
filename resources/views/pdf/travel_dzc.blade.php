@@ -156,7 +156,7 @@
                 </tr>
                 <tr>
                     <td>
-                        Celkový počet km:<br>
+                        Celkový počet km za mesiac:<br>
                         <strong>{{ $monthTotalKm }}</strong>
                     </td>
                     <td>

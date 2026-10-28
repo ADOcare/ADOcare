@@ -6,6 +6,14 @@ IMPORTANT: Developers and automated agents should read `STYLE_GUIDE.md` in the r
 
 The guide contains functional (architectural) and stylistic rules in a single, unified document. See `STYLE_GUIDE.md` for details.
 
+## Document preview PDF downloads
+
+The preview viewer captures its HTML pages with html2canvas and assembles the
+download with jsPDF. This is separate from server-side Dompdf generation.
+During capture, the viewer temporarily restores inline image display in the host
+document so Tailwind's image reset does not distort html2canvas's font baseline
+measurements. The override is removed on success or failure.
+
 ## Vertex monthly retraining (Dekurz)
 
 The Dekurz retraining pipeline is built to fail safe.

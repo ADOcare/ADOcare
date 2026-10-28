@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Patient;
 use App\Models\Procedure;
+use App\Services\AdosProcedureRuleResolver;
 use App\Services\AdosProposalValidationService;
 use App\Support\ClinicalFrequency;
 use Illuminate\Config\Repository;
@@ -63,7 +64,7 @@ class AdosProposalValidationServiceTest extends TestCase
         });
 
         $this->patient = Patient::query()->create(['first_name' => 'Anna', 'last_name' => 'Testová']);
-        $this->service = new AdosProposalValidationService;
+        $this->service = new AdosProposalValidationService(new AdosProcedureRuleResolver);
     }
 
     protected function tearDown(): void
@@ -204,7 +205,7 @@ class AdosProposalValidationServiceTest extends TestCase
         self::assertCount(1, $this->validate([$this->entry('3394', 'twice_monthly')])['errors']);
     }
 
-    public function test_all_forbidden_pairs_emit_one_error_and_mark_both_rows(): void
+    public function test_scoring_forbidden_pairs_do_not_block_proposal_selections(): void
     {
         $pairs = [
             ['3390', '3394'],
@@ -224,9 +225,29 @@ class AdosProposalValidationServiceTest extends TestCase
                 'patient_mobility' => ['I'],
             ]);
 
-            self::assertCount(1, $result['errors'], "{$first}+{$second}");
-            self::assertArrayHasKey($first, $result['per_procedure']);
-            self::assertArrayHasKey($second, $result['per_procedure']);
+            self::assertSame([], $result['errors'], "{$first}+{$second}");
+        }
+    }
+
+    public function test_ados_episode_procedure_combinations_are_valid_proposal_selections(): void
+    {
+        $combinations = [
+            ['3390', '3393'],
+            ['3390', '3394'],
+            ['3390', '3395'],
+            ['3393', '3394'],
+            ['3393', '3395'],
+            ['3394', '3395'],
+            ['3390', '3393', '3394', '3395'],
+            ['3439', '3440'],
+        ];
+
+        foreach ($combinations as $codes) {
+            $result = $this->validate(array_map(fn (string $code): array => $this->entry($code), $codes), [
+                'patient_mobility' => ['I'],
+            ]);
+
+            self::assertSame([], $result['errors'], implode('+', $codes));
         }
     }
 
@@ -303,7 +324,7 @@ class AdosProposalValidationServiceTest extends TestCase
         )));
     }
 
-    public function test_3440_frequency_choices_are_non_blocking_and_return_schedule_info(): void
+    public function test_3440_frequency_choices_are_non_blocking_and_keep_documentation_hint(): void
     {
         foreach (['daily', 'weekends', 'three_times_weekly'] as $frequency) {
             $result = $this->validate([$this->entry('3440', $frequency)]);
@@ -311,9 +332,25 @@ class AdosProposalValidationServiceTest extends TestCase
             self::assertSame([], $result['errors'], $frequency);
             self::assertNotEmpty(array_filter(
                 $result['info'],
-                fn (array $issue): bool => $issue['type'] === 'schedule_context',
+                fn (array $issue): bool => $issue['type'] === 'documentation_hint',
             ));
         }
+    }
+
+    public function test_rule_resolver_exposes_each_scope_without_leaking_scoring_into_proposal_rules(): void
+    {
+        $resolver = new AdosProcedureRuleResolver;
+
+        self::assertSame('start', $resolver->episode('3390')['role']);
+        self::assertSame(['new', 'restart'], $resolver->episode('3390')['allowed_when']);
+        self::assertSame(['3394'], $resolver->scoring('3390')['forbidden_with']);
+        self::assertArrayNotHasKey('forbidden_with', $resolver->proposal('3390'));
+        self::assertSame([
+            'outside_regular_working_hours' => true,
+            'weekday_time_from' => '19:00',
+            'weekday_time_to' => '07:00',
+            'allowed_days' => ['saturday', 'sunday', 'holiday'],
+        ], $resolver->scoring('3440')['schedule']);
     }
 
     public function test_documentation_schedule_and_episode_hints_never_block(): void
@@ -353,7 +390,7 @@ class AdosProposalValidationServiceTest extends TestCase
     {
         $result = $this->validate([]);
 
-        self::assertSame('1.0', $result['version']);
+        self::assertSame('1.1', $result['version']);
         self::assertSame('ADOS', $result['care_type']);
         self::assertArrayNotHasKey('insurer', $result);
         self::assertArrayNotHasKey('rule_set', $result);

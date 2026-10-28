@@ -1196,6 +1196,13 @@ async function buildDocumentPdf() {
                 true,
         })
 
+    // html2canvas measures font baselines in the host document, not the preview
+    // iframe. Tailwind's block images move its inline measurement image down.
+    const fontMetricsStyle =
+        window.document.createElement('style')
+    fontMetricsStyle.textContent = 'img { display: inline-block !important; }'
+    window.document.head.appendChild(fontMetricsStyle)
+
     try {
         for (
             let pageIndex = 0;
@@ -1270,6 +1277,8 @@ async function buildDocumentPdf() {
             'blob',
         )
     } finally {
+        fontMetricsStyle.remove()
+
         showPage(
             selectedPage,
         )

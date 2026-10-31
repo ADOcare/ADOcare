@@ -37,8 +37,17 @@ class ApiQuery
      * - `all` => default for returning all records
      * - `with` => default relations to eager load (comma-separated string)
      * - `scope` => default scope parameters (e.g. ['company' => 4])
+     *
+     * @param  bool  $allowTrashed  Whether deletion flags may bypass SoftDeletes.
      */
-    public static function apply(Request $request, Builder|\Illuminate\Database\Query\Builder $query, array|string $searchable = [], array|string $allowedFilters = 'all', array $defaults = [])
+    public static function apply(
+        Request $request,
+        Builder|\Illuminate\Database\Query\Builder $query,
+        array|string $searchable = [],
+        array|string $allowedFilters = 'all',
+        array $defaults = [],
+        bool $allowTrashed = true,
+    )
     {
 
         // Validate inputs
@@ -61,7 +70,7 @@ class ApiQuery
         // Apply modular parts
         static::applyWith($request, $query, $defaults);
         static::applyCount($request, $query, $defaults);
-        static::applyFilters($request, $query, $allowedFilters, $defaults);
+        static::applyFilters($request, $query, $allowedFilters, $defaults, $allowTrashed);
         static::applySearch($request, $query, $searchable, $defaults);
         static::applySort($request, $query, $defaults);
 
@@ -135,14 +144,22 @@ class ApiQuery
     }
 
     /**
-     * Apply simple filters
+     * Apply simple filters.
+     *
+     * @param  bool  $allowTrashed  Whether deletion flags may bypass SoftDeletes.
      */
-    protected static function applyFilters(Request $request, Builder $query, array|string $allowedFilters = 'all', array $defaults = []): void
+    protected static function applyFilters(
+        Request $request,
+        Builder $query,
+        array|string $allowedFilters = 'all',
+        array $defaults = [],
+        bool $allowTrashed = true,
+    ): void
     {
 
         // handle trashed/deleted filtering globally
         $model = $query->getModel();
-        if (method_exists($model, 'trashed')) {
+        if ($allowTrashed && method_exists($model, 'trashed')) {
             if ($request->boolean('only_deleted')) {
                 $query->onlyTrashed();
             } elseif ($request->boolean('with_deleted')) {

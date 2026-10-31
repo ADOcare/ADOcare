@@ -994,12 +994,15 @@ export interface Patient {
   dekurz_drafts: DekurzDraft[]
   insurance_company: InsuranceCompany
   coverages: PatientCoverage[]
+  patient_audit_issues: PatientAuditIssue[]
   latest_coverage: PatientCoverage
   // counts
   visits_count: number
   dekurz_procedure_templates_count: number
   dekurz_drafts_count: number
   coverages_count: number
+  patient_audit_issues_count: number
+  open_patient_audit_issues_count?: number
   // exists
   nurse_exists: boolean
   branch_exists: boolean
@@ -1009,6 +1012,7 @@ export interface Patient {
   dekurz_drafts_exists: boolean
   insurance_company_exists: boolean
   coverages_exists: boolean
+  patient_audit_issues_exists: boolean
   latest_coverage_exists: boolean
 }
 
@@ -1137,6 +1141,27 @@ export interface Plan {
   // counts
   // exists
   company_exists: boolean
+}
+
+export interface PatientAuditIssue {
+  // columns
+  id: number
+  patient_id: number
+  code: string
+  severity: string
+  fingerprint: string
+  message: string
+  metadata: Array<unknown> | null
+  status: string
+  detected_at: string
+  resolved_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  patient: Patient
+  // counts
+  // exists
+  patient_exists: boolean
 }
 
 export interface Macro {

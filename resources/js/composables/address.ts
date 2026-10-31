@@ -56,6 +56,32 @@ const CITY_COMPONENT_TYPES = [
 ]
 
 /**
+ * Calculate straight-line distance in kilometres, or null for unavailable coordinates.
+ */
+export function addressDistanceKm(
+    latitude: number | null | undefined,
+    longitude: number | null | undefined,
+    branchLatitude: number | null | undefined,
+    branchLongitude: number | null | undefined,
+): number | null {
+    const validLatitude = (value: unknown): value is number =>
+        typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 90
+    const validLongitude = (value: unknown): value is number =>
+        typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 180
+
+    if (!validLatitude(latitude) || !validLongitude(longitude)
+        || !validLatitude(branchLatitude) || !validLongitude(branchLongitude)) {
+        return null
+    }
+
+    const radians = (degrees: number) => degrees * Math.PI / 180
+    const a = Math.sin(radians(branchLatitude - latitude) / 2) ** 2
+        + Math.cos(radians(latitude)) * Math.cos(radians(branchLatitude))
+        * Math.sin(radians(branchLongitude - longitude) / 2) ** 2
+    return 6371 * 2 * Math.asin(Math.sqrt(Math.min(1, Math.max(0, a))))
+}
+
+/**
  * Query the server for autocomplete predictions for a partial address.
  *
  * Returns an array of suggestion objects ({ label, place_id }) or an empty array

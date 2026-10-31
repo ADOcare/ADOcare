@@ -75,7 +75,7 @@ class DocumentationAuditService
                     ->orderBy('id')
                     ->get();
                 $stats['points_checked'] += $points->count();
-                $patients = Patient::query()->active()->whereKey($ids)->with('branch')->get()->keyBy('id');
+                $patients = Patient::query()->living()->whereKey($ids)->with('branch')->get()->keyBy('id');
                 $documents = Document::query()
                     ->whereIn('patient_id', $ids)
                     ->whereIn('type', ['dekurz', 'agreement', 'record', 'proposal', 'leave', 'scan'])
@@ -211,7 +211,7 @@ class DocumentationAuditService
         return PatientPoint::query()
             ->whereBetween('date', [$start, $end])
             ->whereNotNull('patient_id')
-            ->whereHas('patient', fn (Builder $patient): Builder => $patient->active())
+            ->whereHas('patient', fn (Builder $patient): Builder => $patient->living())
             ->when($patientId, fn (Builder $query): Builder => $query->where('patient_id', $patientId))
             ->when($companyId, fn (Builder $query): Builder => $query->whereHas(
                 'branch',

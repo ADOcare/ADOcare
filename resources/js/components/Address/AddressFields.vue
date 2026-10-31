@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
 import AddressAutocomplete from './AddressAutocomplete.vue'
 import MapSelector from './MapSelector.vue'
-import { useAddressForm } from '@/composables/address'
+import { addressDistanceKm, useAddressForm } from '@/composables/address'
+import { useAuthStore } from '@/stores/auth'
 
 const INSUFFICIENT_ADDRESS_MESSAGE = 'Vyberte inú adresu, pretože táto adresa nie je dostatočná na uloženie.'
 
@@ -52,6 +54,18 @@ const emit = defineEmits<{
 }>()
 
 const localAddressError = ref('')
+const authStore = useAuthStore()
+const branchDistanceKm = computed(() => addressDistanceKm(
+    props.latitude,
+    props.longitude,
+    authStore.currentBranch?.latitude,
+    authStore.currentBranch?.longitude,
+))
+const distanceWarning = computed(() => {
+    const distance = branchDistanceKm.value
+    if (distance === null || distance <= 30) return ''
+    return `Adresa je vzdialená viac ako 30 km od aktuálnej prevádzky.`
+})
 const addressEntity = ref<Record<string, unknown> | null>(null)
 const { addressQuery, init: initAddressForm, onMapClick: addressOnMapClick } = useAddressForm(addressEntity)
 
@@ -231,6 +245,8 @@ async function onMapAddressUpdate(geo: { lat: number | null; lon: number | null 
             <small v-if="localAddressError" class="text-danger">{{ localAddressError }}</small>
             <small v-else-if="submitted && errors.address" class="text-danger">{{ errors.address }}</small>
             <small v-else-if="submitted && !address" class="text-danger">Vyberte adresu zo zoznamu.</small>
+            <small v-if="distanceWarning" class="text-warning">{{ distanceWarning }}</small>
+
         </div>
 
         <div class="col-span-4">

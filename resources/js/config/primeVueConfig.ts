@@ -352,6 +352,13 @@ export default {
         },
 
 
+        tag: {
+            root: {
+                class: 'rounded-md! text-white! px-2! flex items-center gap-1! h-7! text-normal!'
+            }
+        }
+
+
     },
 
 } as PrimeVueConfiguration;

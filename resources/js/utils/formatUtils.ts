@@ -22,7 +22,11 @@ export function formatUserFullName(user: User): string {
 
 export function formatBranchFullName(branch: Branch): string {
     if (!branch) return '-';
-    return branch.address + ", " + branch.city || branch.identificator || branch.code || ''
+    const address = [branch.address, branch.city]
+        .map((part) => part?.trim())
+        .filter(Boolean)
+        .join(', ');
+    return address || branch.identificator || branch.code || '-';
 }
 
 export function mergeAddressParts(street?: string | null, city?: string | null, psc?: string | null) {

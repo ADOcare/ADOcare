@@ -19,6 +19,7 @@ class PatientService
     public function queryForUserBranch(User $nurse, Branch $branch): Builder
     {
         return Patient::with(['doctor', 'visits', 'insuranceCompany', 'latestCoverage.insuranceCompany'])
+            ->withCount('openPatientAuditIssues')
             ->where('nurse_id', $nurse->id)
             ->where('branch_id', $branch->id);
     }

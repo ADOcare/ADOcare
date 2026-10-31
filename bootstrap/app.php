@@ -1,7 +1,7 @@
 <?php
 
-use App\Console\Commands\SoftDeleteInactivePatients;
 use App\Console\Commands\CheckPatientStatuses;
+use App\Console\Commands\RunPatientAudit;
 use App\Console\Commands\SendCarMaintenanceNotifications;
 use App\Console\Commands\SendSubscriptionNotifications;
 use App\Console\Commands\SendTrialNotifications;
@@ -40,8 +40,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $schedule->command(CheckPatientStatuses::class)
             ->dailyAt('02:00')
             ->withoutOverlapping();
-        $schedule->command(SoftDeleteInactivePatients::class)
-            ->dailyAt('03:00')
+        $schedule->command(RunPatientAudit::class)
+            ->dailyAt('02:45')
             ->withoutOverlapping();
         $schedule->command(SendCarMaintenanceNotifications::class)->dailyAt('6:00');
         $schedule->command(SendSubscriptionNotifications::class)->dailyAt('6:15');

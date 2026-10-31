@@ -14,6 +14,7 @@ class DatabaseSeeder extends Seeder
             Static\CountrySeeder::class,
             Static\InsuranceCompanySeeder::class,
             Static\UserSeeder::class,
+            AdosEpisodeConfigurationSeeder::class,
         ]);
 
     }

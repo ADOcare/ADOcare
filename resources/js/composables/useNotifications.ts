@@ -91,6 +91,7 @@ export function useNotifications() {
                 'patient_insurance_issue',
                 'patient_insurance_changed',
                 'documentation_audit_issue',
+                'patient_audit_issue',
             ].includes(notification.type) && Number.isInteger(patientId)
             const persistent = notification.data?.persistent === true
             const targetRoute = notification.data?.target_route

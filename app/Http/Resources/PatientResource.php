@@ -71,6 +71,7 @@ class PatientResource extends JsonResource
 
             // counts + exists flags
             'visits_count' => $this->whenCounted('visits'),
+            'open_patient_audit_issues_count' => $this->whenCounted('openPatientAuditIssues'),
             'doctor_exists' => $this->when($this->relationLoaded('doctor') ?: $this->doctor()->exists(), true),
             'visits_exists' => $this->when($this->relationLoaded('visits') ?: $this->visits()->exists(), true),
             'insurance_company_exists' => $this->when($this->relationLoaded('insuranceCompany') ?: $this->insuranceCompany()->exists(), true),

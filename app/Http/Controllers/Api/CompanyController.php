@@ -239,22 +239,9 @@ class CompanyController extends Controller
      */
     public function patients(Request $request, Company $company)
     {
-        $query = Patient::query()->whereHas('branch', function ($q) use ($company) {
+        $query = Patient::query()->withCount('openPatientAuditIssues')->whereHas('branch', function ($q) use ($company) {
             $q->where('company_id', $company->id);
         });
-
-        if ($request->boolean('only_dead')) {
-            $query->withTrashed()->whereNotNull('patients.death_date');
-        } elseif ($request->boolean('only_deleted')) {
-            $query->withTrashed()->whereNotNull('patients.deleted_at');
-        } elseif ($request->boolean('dead_or_deleted')) {
-            $query->withTrashed()->where(function ($q) {
-                $q->whereNotNull('patients.deleted_at')
-                    ->orWhereNotNull('patients.death_date');
-            });
-        } else {
-            $query->whereNull('patients.death_date');
-        }
 
         $results = ApiQuery::apply(
             $request,
@@ -265,7 +252,8 @@ class CompanyController extends Controller
                 'personal_number',
             ],
             allowedFilters: ['sex', 'nurse_id'],
-            defaults: ['sort' => 'last_name']
+            defaults: ['sort' => 'last_name'],
+            allowTrashed: false,
         );
         return $this->success(new BaseCollection(resource: $results), 'Patients retrieved');
     }

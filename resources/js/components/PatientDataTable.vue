@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import {
     computed,
+    defineComponent,
+    h,
     markRaw,
     ref,
+    type PropType,
     watch,
 } from 'vue'
 
 import Select from 'primevue/select'
+import Tag from 'primevue/tag'
 
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import ActionButtons from '@/components/table-columns/ActionButtons.vue'
@@ -29,13 +33,9 @@ import {
     formatUserFullName,
 } from '@/utils/formatUtils'
 
-import api from '@/services/api'
 import router from '@/router'
 
-import { useToast } from 'primevue/usetoast'
-
 import type {
-    Doctor,
     Patient,
     User,
 } from '@/types/models'
@@ -56,12 +56,38 @@ interface PatientsPrintPayload {
     params?: Record<string, any>
 }
 
-type PatientViewMode =
-    | 'active'
-    | 'deleted'
-    | 'dead'
-
 const props = defineProps<Props>()
+
+const PatientStatusBadges = defineComponent({
+    inheritAttrs: false,
+    props: {
+        row: {
+            type: Object as PropType<Patient>,
+            required: true,
+        },
+        value: {
+            type: String as PropType<string | null>,
+            default: null,
+        },
+    },
+    setup(props) {
+        return () => h('div', { class: 'flex flex-wrap gap-1' }, [
+            props.row.death_date
+                ? h(Tag, {
+                    value: 'Exitus',
+                    class: 'bg-danger!',
+                })
+                : null,
+            (props.row.open_patient_audit_issues_count ?? 0) > 0
+                ? h(Tag, {
+                    value: 'Problém',
+                    severity: 'warn',
+                    title: `Nevyriešené problémy: ${props.row.open_patient_audit_issues_count}`,
+                })
+                : null,
+        ])
+    },
+})
 
 const endpointUrl = computed(
     () => props.endpointUrl,
@@ -76,9 +102,6 @@ const authStore =
 const { openModal } =
     useModal()
 
-const toast =
-    useToast()
-
 const actionRemote =
     ref<RemoteTableReturn>(
         {} as RemoteTableReturn,
@@ -86,9 +109,6 @@ const actionRemote =
 
 const selectedNurseId =
     ref<number | null>(null)
-
-const viewMode =
-    ref<PatientViewMode>('active')
 
 const canDeletePatients =
     computed(
@@ -102,24 +122,10 @@ const branchId =
             null,
     )
 
-const showDeleted =
-    computed(
-        () =>
-            viewMode.value ===
-            'deleted',
-    )
-
-const showDead =
-    computed(
-        () =>
-            viewMode.value ===
-            'dead',
-    )
-
 const tableKey =
     computed(
         () =>
-            `patients-${branchId.value ?? 'none'}-${viewMode.value}`,
+            `patients-${branchId.value ?? 'none'}`,
     )
 
 /* -------------------------------------------------------------------------- */
@@ -229,14 +235,6 @@ watch(
     },
 )
 
-watch(
-    viewMode,
-    () => {
-        selectedNurseId.value =
-            null
-    },
-)
-
 /* -------------------------------------------------------------------------- */
 /* Patient print                                                              */
 /* -------------------------------------------------------------------------- */
@@ -323,80 +321,6 @@ async function deletePatients(
     )
 }
 
-async function restorePatients(
-    rows: Patient[],
-    remote?: RemoteTableReturn,
-) {
-    const ids =
-        rows
-            .filter(
-                (row) =>
-                    row.deleted_at,
-            )
-            .map(
-                (row) =>
-                    row.id,
-            )
-
-    if (!ids.length) {
-        return
-    }
-
-    try {
-        await api.post(
-            '/v1/patients/restore',
-            {
-                ids,
-            },
-        )
-
-        toast.add({
-            severity:
-                'success',
-
-            summary:
-                'Pacienti boli obnovení',
-
-            detail:
-                'Vybraní pacienti boli úspešne obnovení.',
-
-            life: 4000,
-        })
-
-        remote?.reload?.()
-    } catch (error: any) {
-        const personalNumberError =
-            error
-                ?.response
-                ?.data
-                ?.errors
-                ?.personal_number
-                ?.[0]
-
-        toast.add({
-            severity: 'error',
-
-            summary:
-                personalNumberError
-                    ? 'Pacienta nemožno obnoviť'
-                    : 'Obnovenie sa nepodarilo',
-
-            detail:
-                personalNumberError ??
-                error
-                    ?.response
-                    ?.data
-                    ?.message ??
-                'Vybraných pacientov sa nepodarilo obnoviť.',
-
-            life:
-                personalNumberError
-                    ? 10000
-                    : 6000,
-        })
-    }
-}
-
 /* -------------------------------------------------------------------------- */
 /* Table                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -417,30 +341,6 @@ const options =
 
                     sortable:
                         true,
-
-                    render:
-                        (
-                            value,
-                            row,
-                        ) => {
-                            if (!row) {
-                                return value
-                            }
-
-                            if (
-                                row.deleted_at
-                            ) {
-                                return `<s>${value}</s>`
-                            }
-
-                            if (
-                                row.death_date
-                            ) {
-                                return `${value} †`
-                            }
-
-                            return value
-                        },
                 },
 
                 {
@@ -452,24 +352,6 @@ const options =
 
                     sortable:
                         true,
-
-                    render:
-                        (
-                            value,
-                            row,
-                        ) => {
-                            if (!row) {
-                                return value
-                            }
-
-                            if (
-                                row.deleted_at
-                            ) {
-                                return `<s>${value}</s>`
-                            }
-
-                            return value
-                        },
                 },
 
                 {
@@ -489,139 +371,16 @@ const options =
 
                 {
                     field:
-                        'doctor',
-
-                    header:
-                        'Ošetrujúci lekár',
-
-                    sortable:
-                        false,
-
-                    render:
-                        (
-                            value:
-                                Doctor,
-                        ) =>
-                            value
-                                ? `${value.title ?? ''} ${value.first_name ?? ''} ${value.last_name ?? ''}`.trim()
-                                : '',
-                },
-            ]
-
-        /* ------------------------------------------------------------------ */
-        /* Mode-specific columns                                              */
-        /* ------------------------------------------------------------------ */
-
-        if (showDead.value) {
-            baseColumns.splice(
-                3,
-                0,
-                {
-                    field:
                         'death_date',
 
                     header:
-                        'Dátum úmrtia',
+                        '',
 
-                    sortable:
-                        true,
-
-                    render:
-                        (value) =>
-                            value
-                                ? new Date(
-                                    value,
-                                ).toLocaleDateString(
-                                    'sk-SK',
-                                )
-                                : '',
-                },
-            )
-        }
-
-        if (
-            showDeleted.value
-        ) {
-            baseColumns.splice(
-                3,
-                0,
-                {
-                    field:
-                        'deleted_at',
-
-                    header:
-                        'Dátum zmazania',
-
-                    sortable:
-                        true,
-
-                    render:
-                        (value) =>
-                            value
-                                ? new Date(
-                                    value,
-                                ).toLocaleDateString(
-                                    'sk-SK',
-                                )
-                                : '',
-                },
-            )
-        }
-
-        if (
-            !showDeleted.value &&
-            !showDead.value
-        ) {
-            baseColumns.splice(
-                3,
-                0,
-
-                {
-                    field:
-                        'address',
-
-                    header:
-                        'Adresa',
-
-                    render:
-                        (
-                            _value,
-                            row,
-                        ) => {
-                            if (!row) {
-                                return ''
-                            }
-
-                            const address =
-                                String(
-                                    row.address ??
-                                    '',
-                                ).trim()
-
-                            return (
-                                address.length >
-                                50
-                                    ? `${address.substring(
-                                        0,
-                                        40,
-                                    )}...`
-                                    : address
-                            )
-                        },
+                    component:
+                        markRaw(PatientStatusBadges),
                 },
 
-                {
-                    field:
-                        'city',
-
-                    header:
-                        'Mesto',
-
-                    sortable:
-                        true,
-                },
-            )
-        }
+            ]
 
         /* ------------------------------------------------------------------ */
         /* Row actions                                                        */
@@ -667,10 +426,7 @@ const options =
                 ],
         })
 
-        if (
-            !showDeleted.value
-        ) {
-            baseColumns.push({
+        baseColumns.push({
                 field:
                     'pin',
 
@@ -722,14 +478,9 @@ const options =
                                 },
                         },
                     ],
-            })
-        }
+        })
 
-        if (
-            !showDeleted.value &&
-            !showDead.value
-        ) {
-            baseColumns.push({
+        baseColumns.push({
                 field:
                     'edit',
 
@@ -767,8 +518,7 @@ const options =
                                 },
                         },
                     ],
-            })
-        }
+        })
 
         /* ------------------------------------------------------------------ */
         /* Base table options                                                 */
@@ -835,26 +585,6 @@ const options =
                     ),
 
                     ...(
-                        showDeleted
-                            .value
-                            ? {
-                                only_deleted:
-                                    1,
-                            }
-                            : {}
-                    ),
-
-                    ...(
-                        showDead
-                            .value
-                            ? {
-                                only_dead:
-                                    1,
-                            }
-                            : {}
-                    ),
-
-                    ...(
                         authStore
                             .isManager &&
                         selectedNurseId
@@ -872,138 +602,15 @@ const options =
                 columns:
                     baseColumns,
 
-                actions: [
-                    {
-                        key:
-                            'show-active',
-
-                        label:
-                            'Aktívni',
-
-                        icon:
-                            'bi bi-people',
-
-                        variant:
-                            viewMode.value ===
-                            'active'
-                                ? 'dark'
-                                : 'secondary',
-
-                        position:
-                            'start',
-
-                        tooltip:
-                            'Zobraziť aktívnych pacientov',
-
-                        handler:
-                            async ({
-                                remote,
-                            }) => {
-                                if (
-                                    viewMode.value ===
-                                    'active'
-                                ) {
-                                    return
-                                }
-
-                                viewMode.value =
-                                    'active'
-
-                                remote.reload()
-                            },
-                    },
-
-                    {
-                        key:
-                            'show-deleted',
-
-                        label:
-                            'Zmazaní',
-
-                        icon:
-                            'bi bi-person-x',
-
-                        variant:
-                            viewMode.value ===
-                            'deleted'
-                                ? 'dark'
-                                : 'secondary',
-
-                        position:
-                            'start',
-
-                        tooltip:
-                            'Zobraziť zmazaných pacientov',
-
-                        handler:
-                            async ({
-                                remote,
-                            }) => {
-                                if (
-                                    viewMode.value ===
-                                    'deleted'
-                                ) {
-                                    return
-                                }
-
-                                viewMode.value =
-                                    'deleted'
-
-                                remote.reload()
-                            },
-                    },
-
-                    {
-                        key:
-                            'show-dead',
-
-                        label:
-                            'Zosnulí',
-
-                        icon:
-                            'bi bi-person-exclamation',
-
-                        variant:
-                            viewMode.value ===
-                            'dead'
-                                ? 'dark'
-                                : 'secondary',
-
-                        position:
-                            'start',
-
-                        tooltip:
-                            'Zobraziť zosnulých pacientov',
-
-                        handler:
-                            async ({
-                                remote,
-                            }) => {
-                                if (
-                                    viewMode.value ===
-                                    'dead'
-                                ) {
-                                    return
-                                }
-
-                                viewMode.value =
-                                    'dead'
-
-                                remote.reload()
-                            },
-                    },
-                ],
+                actions: [],
             }
 
         /* ------------------------------------------------------------------ */
-        /* Active patient actions                                             */
+        /* Patient actions                                                    */
         /* ------------------------------------------------------------------ */
 
-        if (
-            !showDeleted.value &&
-            !showDead.value
-        ) {
-            const activeActions:
+        {
+            const patientActions:
                 NonNullable<
                     typeof tableOptions.actions
                 > = [
@@ -1085,7 +692,7 @@ const options =
             if (
                 canDeletePatients.value
             ) {
-                activeActions.splice(
+                patientActions.splice(
                     1,
                     0,
                     {
@@ -1122,62 +729,9 @@ const options =
             }
 
             tableOptions.actions
-                ?.push(
-                    ...activeActions,
-                )
-        }
-
-        /* ------------------------------------------------------------------ */
-        /* Deleted patient actions                                            */
-        /* ------------------------------------------------------------------ */
-
-        if (
-            showDeleted.value
-        ) {
-            tableOptions.actions
-                ?.push({
-                    key:
-                        'restore',
-
-                    label:
-                        'Obnoviť',
-
-                    icon:
-                        'bi bi-arrow-counterclockwise',
-
-                    variant:
-                        'accent',
-
-                    disabled:
-                        ({
-                            selectedRows,
-                        }) => {
-                            const rows =
-                                (
-                                    selectedRows ??
-                                    []
-                                ) as Patient[]
-
-                            return (
-                                !rows.length ||
-                                rows.some(
-                                    (row) =>
-                                        !row.deleted_at,
-                                )
-                            )
-                        },
-
-                    handler:
-                        async ({
-                            selectedRows,
-                            remote,
-                        }) => {
-                            await restorePatients(
-                                selectedRows as Patient[],
-                                remote,
-                            )
-                        },
-                })
+            ?.push(
+                ...patientActions,
+            )
         }
 
         /* ------------------------------------------------------------------ */
@@ -1201,8 +755,6 @@ const options =
                         (column) =>
                             ![
                                 'personal_number',
-                                'address',
-                                'city',
                                 'pin',
                             ].includes(
                                 column.field ??
@@ -1210,13 +762,13 @@ const options =
                             ),
                     )
 
-            const doctorIndex =
+            const actionsIndex =
                 tableOptions
                     .columns
                     .findIndex(
                         (column) =>
                             column.field ===
-                            'doctor',
+                            'documents',
                     )
 
             const managerColumns =
@@ -1269,7 +821,7 @@ const options =
                 ]
 
             tableOptions.columns.splice(
-                doctorIndex + 1,
+                actionsIndex,
                 0,
                 ...managerColumns,
             )
@@ -1298,11 +850,7 @@ const options =
         >
             <template #toolbar-extra>
                 <div
-                    v-if="
-                        authStore.isManager &&
-                        !showDeleted &&
-                        !showDead
-                    "
+                    v-if="authStore.isManager"
                     class="flex items-center gap-2"
                 >
                     <Select

@@ -94,6 +94,16 @@ class Company extends Model
         return $this->hasMany(Branch::class);
     }
 
+    public function episodeTypes()
+    {
+        return $this->hasMany(AdosEpisodeType::class);
+    }
+
+    public function episodeTypeTransitions()
+    {
+        return $this->hasMany(AdosEpisodeTypeTransition::class);
+    }
+
     public function cars()
     {
         return $this->hasMany(Car::class);

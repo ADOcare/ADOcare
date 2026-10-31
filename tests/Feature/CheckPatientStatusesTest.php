@@ -27,7 +27,7 @@ class CheckPatientStatusesTest extends TestCase
 
         $this->app = new Application(dirname(__DIR__, 2));
         Container::setInstance($this->app);
-        $this->app->instance('config', new Repository());
+        $this->app->instance('config', new Repository);
 
         $database = new Manager($this->app);
         $database->addConnection([
@@ -63,16 +63,16 @@ class CheckPatientStatusesTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_active_scope_excludes_deceased_and_soft_deleted_patients(): void
+    public function test_living_scope_excludes_deceased_and_soft_deleted_patients(): void
     {
         $this->insertPatient(1);
         $this->insertPatient(2, deathDate: '2026-10-01');
         $this->insertPatient(3, deletedAt: '2026-10-02 08:00:00');
 
-        self::assertSame([1], Patient::query()->active()->pluck('id')->all());
+        self::assertSame([1], Patient::query()->living()->pluck('id')->all());
     }
 
-    public function test_scheduled_checks_do_not_call_services_for_inactive_patients(): void
+    public function test_scheduled_checks_skip_deceased_and_soft_deleted_patients(): void
     {
         $this->insertPatient(1, deathDate: '2026-10-01');
         $this->insertPatient(2, deletedAt: '2026-10-02 08:00:00');
@@ -89,7 +89,7 @@ class CheckPatientStatusesTest extends TestCase
         $this->app->instance(EoverenieInsuranceService::class, $insuranceService);
         $this->app->instance(PatientNotificationService::class, $notificationService);
 
-        $command = new CheckPatientStatuses();
+        $command = new CheckPatientStatuses;
         $command->setLaravel($this->app);
         $tester = new CommandTester($command);
 

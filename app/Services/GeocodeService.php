@@ -63,7 +63,14 @@ class GeocodeService
                     $item['address']['road'] ?? null,
                     $item['address']['house_number'] ?? null,
                 ])));
-                $city = trim((string) ($item['address']['city'] ?? ($item['address']['town'] ?? ($item['address']['village'] ?? ($item['address']['municipality'] ?? '')))));
+                $city = '';
+                foreach (['city', 'town', 'village', 'hamlet', 'locality', 'municipality', 'administrative'] as $settlementType) {
+                    $settlement = trim((string) ($item['address'][$settlementType] ?? ''));
+                    if ($settlement !== '') {
+                        $city = $settlement;
+                        break;
+                    }
+                }
                 $zip = trim((string) ($item['address']['postcode'] ?? ''));
 
                 return [

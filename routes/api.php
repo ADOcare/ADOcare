@@ -186,6 +186,39 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::get('notifications', [AppNotificationController::class, 'index']);
     Route::post('notifications/{notification}/dismiss', [AppNotificationController::class, 'dismiss']);
 
+    Route::get('ados/episode-types', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'index'])
+        ->middleware('role:any');
+    Route::post('ados/episode-types', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'storeForCurrentCompany'])
+        ->middleware('role:manager,superadmin');
+    Route::patch('ados/episode-types/{episodeType}', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'updateForCurrentCompany'])
+        ->middleware('role:manager,superadmin');
+    Route::get('ados/episode-type-transitions', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'transitionsIndex'])
+        ->middleware('role:any');
+    Route::post('ados/episode-type-transitions', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'storeTransitionForCurrentCompany'])
+        ->middleware('role:manager,superadmin');
+    Route::delete('ados/episode-type-transitions/{transition}', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'destroyTransitionForCurrentCompany'])
+        ->middleware('role:manager,superadmin');
+
+    Route::prefix('companies/{company}/ados')->middleware('role:manager,superadmin')->group(function () {
+        Route::get('episode-types', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'indexForCompany']);
+        Route::post('episode-types', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'store']);
+        Route::patch('episode-types/{episodeType}', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'update']);
+        Route::get('episode-type-transitions', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'transitionsIndexForCompany']);
+        Route::post('episode-type-transitions', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'storeTransition']);
+        Route::delete('episode-type-transitions/{transition}', [\App\Http\Controllers\Api\AdosEpisodeConfigurationController::class, 'destroyTransition']);
+    });
+
+    Route::get('patients/{patient}/episodes', [\App\Http\Controllers\Api\AdosEpisodeController::class, 'index'])
+        ->middleware(['role:any', 'can:view,patient']);
+    Route::get('patients/{patient}/episodes/current', [\App\Http\Controllers\Api\AdosEpisodeController::class, 'current'])
+        ->middleware(['role:any', 'can:view,patient']);
+    Route::post('patients/{patient}/episodes', [\App\Http\Controllers\Api\AdosEpisodeController::class, 'store'])
+        ->middleware(['role:any', 'can:view,patient']);
+    Route::post('ados/episodes/{episode}/change-type', [\App\Http\Controllers\Api\AdosEpisodeController::class, 'changeType'])
+        ->middleware('role:any');
+    Route::post('ados/episodes/{episode}/close', [\App\Http\Controllers\Api\AdosEpisodeController::class, 'close'])
+        ->middleware('role:any');
+
     Route::apiResource('patients', PatientController::class)
         ->except(['index', 'store'])
         ->middleware('role:any');

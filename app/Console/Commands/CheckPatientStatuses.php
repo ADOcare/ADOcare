@@ -14,7 +14,7 @@ class CheckPatientStatuses extends Command
 {
     protected $signature = 'patients:check-statuses {--patient= : Check only this patient ID}';
 
-    protected $description = 'Check active patients for death and insurance status changes.';
+    protected $description = 'Check living patients for death and insurance status changes.';
 
     public function handle(
         UdzsDeathService $deathService,
@@ -26,7 +26,7 @@ class CheckPatientStatuses extends Command
         $insuranceIssues = 0;
 
         $query = Patient::query()
-            ->active()
+            ->living()
             ->whereNotNull('personal_number')
             ->with(['branch', 'latestCoverage.insuranceCompany']);
 

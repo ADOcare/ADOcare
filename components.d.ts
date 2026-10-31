@@ -37,6 +37,5 @@ declare module 'vue' {
     Textarea: typeof import('primevue/textarea')['default']
     Toast: typeof import('primevue/toast')['default']
     ToggleSwitch: typeof import('primevue/toggleswitch')['default']
-    Toolbar: typeof import('primevue/toolbar')['default']
   }
 }

@@ -40,7 +40,7 @@ class PatientController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Patient::with(['latestCoverage.insuranceCompany']);
+        $query = Patient::with(['latestCoverage.insuranceCompany'])->withCount('openPatientAuditIssues');
 
         $results = ApiQuery::apply(
             $request,
@@ -51,7 +51,8 @@ class PatientController extends Controller
                 'personal_number',
             ],
             allowedFilters: ['sex'],
-            defaults: ['sort' => 'last_name']
+            defaults: ['sort' => 'last_name'],
+            allowTrashed: false,
         );
 
         return $this->success(new PatientCollection($results), 'Pacienti boli uspesne nacitani.');
@@ -85,7 +86,8 @@ class PatientController extends Controller
      */
     public function show(Patient $patient): JsonResponse
     {
-        $patient->loadMissing(['doctor', 'visits', 'insuranceCompany', 'latestCoverage.insuranceCompany']);
+        $this->authorize('view', $patient);
+        $patient->loadMissing(['nurse', 'branch', 'doctor', 'visits', 'insuranceCompany', 'latestCoverage.insuranceCompany']);
 
         return $this->success(new PatientResource($patient), 'Pacient bol uspesne nacitany.');
     }

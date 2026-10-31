@@ -61,10 +61,10 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
             title: 'Náhľad tlače pacientov',
             sidebar: false,
             navbar: false,
+            quartalNavbar: true,
             roles: ['manager', 'nurse'],
         },
     },
 ];
 
 export default generalRoutes;
-

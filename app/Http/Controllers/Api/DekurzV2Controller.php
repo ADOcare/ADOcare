@@ -9,6 +9,7 @@ use App\Http\Requests\PreviewDekurzDraftRequest;
 use App\Http\Requests\PropagateDekurzEntryRequest;
 use App\Http\Requests\UpdateDekurzDayRequest;
 use App\Http\Requests\UpdateDekurzEntryRequest;
+use App\Http\Requests\UpdateDekurzSectionsRequest;
 use App\Http\Requests\UpsertPatientProcedureDekurzTemplateRequest;
 use App\Models\DekurzDay;
 use App\Models\DekurzDraft;
@@ -20,6 +21,7 @@ use App\Models\Procedure;
 use App\Services\DekurzBuilderService;
 use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzEntryBatchService;
+use App\Services\DekurzNarrativeService;
 use App\Services\DekurzV2Finalizer;
 use App\Services\DekurzV2PreviewService;
 use App\Services\DocumentService;
@@ -67,7 +69,7 @@ class DekurzV2Controller extends Controller
     {
         $patient = Patient::query()->findOrFail($request->integer('patient_id'));
         $this->authorize('view', $patient);
-        $payload = $this->preview->build($patient, $request->validated('month'), $request->user(), $request->validated('dekurz_number'), $request->validated('days'));
+        $payload = $this->preview->build($patient, $request->validated('month'), $request->user(), $request->validated('dekurz_number'), $request->validated('days'), $request->validated('sections'));
 
         return response()->view('pdf.dekurz', [
             'dekurzData' => $payload,
@@ -255,6 +257,27 @@ class DekurzV2Controller extends Controller
             'preview_url' => "/v1/dekurz/{$document->id}/preview",
             'download_url' => "/v1/dekurz/{$document->id}/download",
         ], 'Dekurz bol úspešne finalizovaný.', 201);
+    }
+
+    /**
+     * Save the free-text sections and their selected days without modifying scoring.
+     *
+     * @group Dekurz
+     *
+     * @urlParam patient int required ID pacienta.
+     * @urlParam draft int required ID konceptu.
+     *
+     * @bodyParam sections object[] required Textové sekcie s poľami text a dates (YYYY-MM-DD).
+     *
+     * @response 200 {"message":"Textové sekcie boli uložené.","data":{"saved":true}}
+     */
+    public function updateSections(UpdateDekurzSectionsRequest $request, Patient $patient, DekurzDraft $draft, DekurzNarrativeService $narratives)
+    {
+        $this->authorize('update', $patient);
+        $this->assertDraftPatientRelation($patient, $draft);
+        $narratives->save($patient, $draft, $request->user(), $request->validated('sections'));
+
+        return $this->success(['saved' => true], 'Textové sekcie boli uložené.');
     }
 
     private function assertCustomTrackPatient(Patient $patient, PatientDekurzCustomTrack $track): void

@@ -34,6 +34,7 @@ use App\Http\Controllers\Api\MyCompanyController;
 use App\Http\Controllers\Api\NurseDiagnosisController;
 use App\Http\Controllers\Api\PatientController;
 use App\Http\Controllers\Api\PatientDeathCheckController;
+use App\Http\Controllers\Api\PatientDekurzTextController;
 use App\Http\Controllers\Api\PatientInsuranceCheckController;
 use App\Http\Controllers\Api\PatientInsurancePrefillController;
 use App\Http\Controllers\Api\PatientPointController;
@@ -498,11 +499,17 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware(['role:any', 'can:view,patient']);
     Route::post('/patients/{patient}/dekurz/ai-improve-text', [DekurzDocumentController::class, 'improveText'])
         ->middleware(['role:any', 'can:view,patient']);
+    Route::get('/patients/{patient}/dekurz-texts', [PatientDekurzTextController::class, 'show'])
+        ->middleware(['role:any', 'can:view,patient']);
+    Route::put('/patients/{patient}/dekurz-texts', [PatientDekurzTextController::class, 'update'])
+        ->middleware(['role:any', 'can:update,patient']);
     Route::get('/patients/{patient}/dekurz-builder', [DekurzV2Controller::class, 'builder'])
         ->middleware(['role:any', 'can:view,patient']);
     Route::post('/patients/{patient}/dekurz-drafts', [DekurzV2Controller::class, 'initializeDraft'])
         ->middleware(['role:any', 'can:update,patient']);
     Route::post('/patients/{patient}/dekurz-drafts/{draft}/finalize', [DekurzV2Controller::class, 'finalize'])
+        ->middleware(['role:any', 'can:update,patient']);
+    Route::patch('/patients/{patient}/dekurz-drafts/{draft}/sections', [DekurzV2Controller::class, 'updateSections'])
         ->middleware(['role:any', 'can:update,patient']);
     Route::put('/patients/{patient}/dekurz-templates/{procedure}', [DekurzV2Controller::class, 'upsertTemplate'])
         ->middleware(['role:any', 'can:update,patient']);

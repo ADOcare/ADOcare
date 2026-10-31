@@ -25,12 +25,14 @@ class DekurzDraft extends Model
         'updated_by',
         'final_document_id',
         'completed_at',
+        'narrative_sections',
     ];
 
     protected $casts = [
         'period' => 'date',
         'dekurz_number' => 'integer',
         'completed_at' => 'datetime',
+        'narrative_sections' => 'array',
     ];
 
     protected function period(): Attribute

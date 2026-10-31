@@ -16,6 +16,7 @@ use App\Services\DekurzDocumentService;
 use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzEntryBatchService;
 use App\Services\DekurzFinalizationValidator;
+use App\Services\DekurzNarrativeService;
 use App\Services\DekurzProcedureClassifier;
 use App\Services\DekurzScoringConsistencyService;
 use App\Services\DekurzScoringService;
@@ -26,6 +27,7 @@ use App\Services\DekurzV2Finalizer;
 use App\Services\DekurzV2PreviewService;
 use App\Services\DekurzV2SnapshotBuilder;
 use App\Services\DocumentService;
+use App\Services\PatientDekurzTextService;
 use App\Services\PatientProcedureDekurzTemplateService;
 use App\Services\VisitTimelineFreshnessService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -79,6 +81,8 @@ class DekurzV2BuilderTest extends TestCase
         (require __DIR__.'/../../database/migrations/2026_10_19_000000_add_sequential_tracks_to_dekurz.php')->up();
         (require __DIR__.'/../../database/migrations/2026_10_19_030000_add_exclusion_to_dekurz_entries.php')->up();
         (require __DIR__.'/../../database/migrations/2026_10_21_000000_link_legacy_dekurz_templates_to_custom_tracks.php')->up();
+        (require __DIR__.'/../../database/migrations/2026_10_31_120000_add_narrative_sections_to_dekurz_drafts.php')->up();
+        (require __DIR__.'/../../database/migrations/2026_10_31_130000_add_dekurz_texts_to_patients.php')->up();
         $this->seedRecords();
     }
 
@@ -422,6 +426,163 @@ class DekurzV2BuilderTest extends TestCase
         $points = $this->finalizationValidator()->validate($patient, $draft->fresh(), $actor);
 
         self::assertCount(4, $points);
+    }
+
+    public function test_free_text_sections_are_saved_and_rendered_without_procedure_texts(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        $sections = [
+            ['text' => 'Pacient je stabilizovaný.', 'dates' => ['2026-10-01', '2026-10-03', '2026-10-05']],
+            ['text' => 'Rana bola ošetrená.', 'dates' => ['2026-10-05']],
+        ];
+        (new DekurzNarrativeService(new DekurzScoringConsistencyService))->save($patient, $draft, $actor, $sections);
+        self::assertSame($sections, $draft->fresh()->narrative_sections);
+        self::assertSame($sections, $this->builder()->build($patient, '2026-10')['draft']['narrative_sections']);
+        self::assertCount(4, $this->finalizationValidator()->validate($patient, $draft->fresh(), $actor));
+
+        $preview = (new DekurzV2PreviewService($this->builder(), new DekurzDocumentService))
+            ->build($patient, '2026-10', $actor);
+        self::assertSame('Pacient je stabilizovaný.', $preview['days'][0]['text']);
+        self::assertSame("Pacient je stabilizovaný.\n\nRana bola ošetrená.", $preview['days'][2]['text']);
+        $storage = $this->useInMemoryStorage();
+        $documents = $this->createMock(DocumentService::class);
+        $documents->expects(self::once())->method('getTravelDocumentPdfPath')
+            ->willReturnCallback(function (Document $document, ?int &$pageCount = null) use ($storage): string {
+                $path = "documents/pdf/dekurz/{$document->id}.pdf";
+                $storage->put($path, 'PDF');
+                $pageCount = 1;
+
+                return $path;
+            });
+        $document = $this->finalizer($documents)->finalize($patient, $draft->fresh(), $actor);
+        $snapshot = json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($sections, $snapshot['narrative_sections']);
+        self::assertSame(array_column($preview['days'], 'text'), array_column($snapshot['days'], 'text'));
+        self::assertCount(4, $snapshot['scoring_rows']);
+        self::assertSame('completed', $draft->fresh()->status);
+        $draft->update(['narrative_sections' => [['text' => 'Neskoršia úprava.', 'dates' => ['2026-10-01']]]]);
+        self::assertSame($snapshot, json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR));
+    }
+
+    public function test_patient_texts_fall_back_to_the_latest_dekurz_and_are_saved_for_the_patient(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $texts = new PatientDekurzTextService;
+        $this->useInMemoryStorage();
+        self::assertSame([], $texts->texts($patient));
+
+        $this->test_free_text_sections_are_saved_and_rendered_without_procedure_texts();
+        self::assertSame(['Pacient je stabilizovaný.', 'Rana bola ošetrená.'], $texts->texts($patient->fresh()));
+
+        self::assertSame(['Upravený text.', ''], $texts->save($patient, ['Upravený text.', null]));
+        self::assertSame(['Upravený text.', ''], $texts->texts($patient->fresh()));
+        self::assertArrayNotHasKey('dekurz_texts', $patient->fresh()->toArray());
+        self::assertSame([], $texts->save($patient, []));
+        self::assertSame([], $texts->texts($patient->fresh()));
+    }
+
+    public function test_patient_texts_prefer_older_free_text_sections_over_procedure_based_documents(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $storage = $this->useInMemoryStorage();
+        $files = [
+            'dekurz/v1-old.json' => ['sections' => [['text' => 'Starší text.', 'dates' => ['2026-01-02']]]],
+            'dekurz/v1.json' => ['sections' => [
+                ['text' => ' Pacient spolupracuje. ', 'dates' => ['2026-02-02']],
+                ['text' => '', 'dates' => []],
+                ['text' => 'Pacient spolupracuje.', 'dates' => ['2026-02-03']],
+                ['text' => 'Preväz rany.', 'dates' => ['2026-02-04']],
+            ]],
+            'dekurz/missing.json' => null,
+            'dekurz/v2.json' => ['schema_version' => 3, 'days' => [
+                ['date' => '2026-03-02', 'text' => 'Výkon A.', 'entries' => [['text' => 'Výkon A.']]],
+            ]],
+        ];
+        foreach ($files as $path => $content) {
+            Document::query()->create(['patient_id' => $patient->id, 'type' => 'dekurz', 'path' => $path]);
+            if ($content !== null) {
+                $storage->put($path, json_encode($content, JSON_THROW_ON_ERROR));
+            }
+        }
+        $texts = new PatientDekurzTextService;
+
+        self::assertSame(['Pacient spolupracuje.', 'Preväz rany.'], $texts->texts($patient));
+
+        $storage->delete('dekurz/v1.json');
+        $storage->delete('dekurz/v1-old.json');
+        self::assertSame(['Výkon A.'], $texts->texts($patient));
+    }
+
+    public function test_narrative_saving_rejects_other_month_days_and_unauthorized_users(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        $service = new DekurzNarrativeService(new DekurzScoringConsistencyService);
+        foreach (['2026-11-01', '2026-10-02'] as $date) {
+            try {
+                $service->save($patient, $draft, $actor, [['text' => 'Text.', 'dates' => [$date]]]);
+                self::fail('Invalid narrative date was accepted.');
+            } catch (\Illuminate\Validation\ValidationException $exception) {
+                self::assertArrayHasKey('sections.0.dates', $exception->errors());
+            }
+        }
+        self::assertNull($draft->fresh()->narrative_sections);
+        $this->expectException(AuthorizationException::class);
+        $service->save($patient, $draft, User::findOrFail(2), [['text' => 'Text.', 'dates' => ['2026-10-01']]]);
+    }
+
+    public function test_narrative_finalization_retains_text_coverage_placeholder_and_scoring_checks(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        $draft->update(['narrative_sections' => [
+            ['text' => '[TEXT]', 'dates' => ['2026-10-01']],
+            ['text' => 'Predvolený text pre liek.', 'dates' => ['2026-10-03']],
+        ]]);
+        PatientPoint::findOrFail(100)->update(['quantity' => 9]);
+        try {
+            $this->finalizationValidator()->validate($patient, $draft->fresh(), $actor);
+            self::fail('Incomplete narrative was accepted.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $messages = implode(' ', array_merge(...array_values($exception->errors())));
+            self::assertStringContainsString('[TEXT]', $messages);
+            self::assertStringContainsString('Pre každý deň', $messages);
+            self::assertStringContainsString('Množstvo', $messages);
+        }
+    }
+
+    public function test_incomplete_narratives_can_be_saved_but_not_finalized(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        (new DekurzNarrativeService(new DekurzScoringConsistencyService))
+            ->save($patient, $draft, $actor, [['text' => '', 'dates' => []]]);
+        self::assertSame([['text' => '', 'dates' => []]], $draft->fresh()->narrative_sections);
+        try {
+            $this->finalizationValidator()->validate($patient, $draft->fresh(), $actor);
+            self::fail('An unfinished narrative was finalized.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            self::assertArrayHasKey('sections.0', $exception->errors());
+        }
+    }
+
+    public function test_legacy_procedure_text_checks_are_preserved(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        try {
+            $this->finalizationValidator()->validate($patient, $draft->fresh(), $actor);
+            self::fail('Generic procedure texts were finalized.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $messages = implode(' ', array_merge(...array_values($exception->errors())));
+            self::assertStringContainsString('Všeobecný predvolený', $messages);
+        }
     }
 
     public function test_finalization_validation_returns_structured_errors_for_reconciliation_changes(): void

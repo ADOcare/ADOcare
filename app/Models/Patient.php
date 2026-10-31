@@ -17,6 +17,10 @@ class Patient extends Model
 
     protected $fillable = ['first_name', 'last_name', 'title', 'personal_number', 'sex', 'contact', 'country_code_phone', 'phone', 'doctor_id', 'insurance_company_id', 'address', 'city', 'zip', 'latitude', 'longitude', 'reference_date', 'dekurz_number', 'branch_id', 'nurse_id', 'death_date'];
 
+    protected $hidden = ['dekurz_texts'];
+
+    protected $casts = ['dekurz_texts' => 'array'];
+
     /**
      * Limit the query to patients without a recorded death date.
      *

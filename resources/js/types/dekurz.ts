@@ -10,6 +10,11 @@ export type DekurzTrackType = 'procedure' | 'custom'
 export type DekurzPropagationMode = 'current' | 'following' | 'selected'
 export type DekurzCustomTrackDistribution = 'visit_days' | 'selected_days'
 
+export interface DekurzNarrativeSection {
+    text: string
+    dates: string[]
+}
+
 export interface DekurzPatient {
     id: number
     full_name: string
@@ -107,6 +112,7 @@ export interface DekurzDraft {
     initialized_at: string | null
     completed_at: string | null
     final_document_id: number | null
+    narrative_sections: DekurzNarrativeSection[] | null
 }
 
 export interface DekurzScoringChanges {
@@ -197,6 +203,7 @@ export interface DekurzRawBuilderPayload {
         dekurz_number: number | null
         completed_at: string | null
         final_document_id: number | null
+        narrative_sections?: DekurzNarrativeSection[] | null
     } | null
     scoring_changes: {
         added: unknown[]

@@ -24,6 +24,9 @@ class DekurzV2SnapshotBuilder
         $month = Carbon::parse($draft->period)->format('Y-m');
         $dailyTexts = [];
         $structuredDays = [];
+        $narrativeTexts = $draft->narrative_sections !== null
+            ? DekurzNarrativeService::dailyTexts($draft->narrative_sections)
+            : null;
 
         foreach ($draft->days->sortBy('date') as $day) {
             $entries = $day->entries
@@ -55,7 +58,7 @@ class DekurzV2SnapshotBuilder
 
             $parts = collect($entries)->pluck('text')->map(fn ($text): string => trim((string) $text))->filter()->values();
             $date = Carbon::parse($day->date)->toDateString();
-            $dailyTexts[$date] = $parts->implode("\n\n");
+            $dailyTexts[$date] = $narrativeTexts !== null ? ($narrativeTexts[$date] ?? '') : $parts->implode("\n\n");
             $structuredDays[$date] = ['id' => $day->id, 'date' => $date, 'entries' => $entries];
         }
 
@@ -66,13 +69,16 @@ class DekurzV2SnapshotBuilder
             (int) $draft->branch_id,
         ))->map(function (array $day) use ($structuredDays): array {
             $structured = $structuredDays[$day['date']];
+
             return $structured + ['text' => $day['text'], 'terrain_time' => $day['terrain_time'], 'administrative_time' => $day['administrative_time']];
         })->values()->all();
 
         $company = $patient->branch?->company;
+
         return [
             'schema_version' => 3,
             'source' => 'dekurz_v2',
+            'narrative_sections' => $draft->narrative_sections,
             'document_id' => $document->id,
             'draft_id' => $draft->id,
             'created_at' => now()->toISOString(),

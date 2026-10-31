@@ -19,6 +19,7 @@ class DekurzV2PreviewService
         User $actor,
         ?int $dekurzNumber = null,
         ?array $previewDays = null,
+        ?array $sections = null,
     ): array {
         $patient->loadMissing(['branch.company', 'insuranceCompany']);
         $builder = $this->builder->build($patient, $month);
@@ -38,6 +39,10 @@ class DekurzV2PreviewService
 
             return [(string) $day['date'] => $parts->implode("\n\n")];
         })->all();
+        $sections ??= $builder['draft']['narrative_sections'] ?? null;
+        if ($sections !== null) {
+            $dailyTexts = DekurzNarrativeService::dailyTexts($sections);
+        }
         $branchId = (int) ($builder['patient']['branch_id'] ?? $patient->branch_id);
         $days = $this->legacyDocuments->attachVisitTimesForPatient(
             $dailyTexts,

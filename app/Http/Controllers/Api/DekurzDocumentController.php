@@ -80,6 +80,7 @@ class DekurzDocumentController extends Controller
         $data = $request->validate([
             'patient_id' => 'required|integer|exists:patients,id',
         ]);
+        $this->authorize('view', Patient::findOrFail((int) $data['patient_id']));
 
         $doc = Document::query()
             ->where('type', 'dekurz')
@@ -99,7 +100,7 @@ class DekurzDocumentController extends Controller
 
         return $this->success([
             'document_id' => $doc->id ?? ($dekurz['document_id'] ?? null),
-            'sections' => $dekurz['sections'] ?? [],
+            'sections' => $dekurz['narrative_sections'] ?? $dekurz['sections'] ?? [],
         ]);
     }
 

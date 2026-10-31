@@ -33,6 +33,30 @@ During capture, the viewer temporarily restores inline image display in the host
 document so Tailwind's image reset does not distort html2canvas's font baseline
 measurements. The override is removed on success or failure.
 
+## Dekurz narrative form
+
+The Dekurz editor uses free-text sections with macros and per-section date
+selection, while retaining the split-page preview and the v2 draft/finalization
+workflow. Apply migrations `2026_10_31_120000_add_narrative_sections_to_dekurz_drafts`
+and `2026_10_31_130000_add_dekurz_texts_to_patients` before using the editor.
+
+Section texts autosave to the patient (`/v1/patients/{patient}/dekurz-texts`,
+column `patients.dekurz_texts`) and load immediately, even when the month draft
+cannot be initialized yet. Without saved patient texts, the patient's Dekurz
+history is searched newest first: free-text sections from older (v1) documents
+win, and procedure-based v2 texts are used only when no sections exist. Texts and selected days also autosave to the
+patient/month draft, separately from scoring entries; a draft that already has
+its own written texts keeps them. Preview and final PDF text are assembled from
+the sections selected for each day. Procedure/default texts are not used to
+populate the form; historical documents are not modified. The Adonis button
+prefills texts from the latest proposal (with undo), and each section can be
+improved by AI and restored.
+Finalization still verifies access, visit timeline freshness, scoring coverage,
+dates, quantities, required text and unresolved `[TEXT]` markers. The
+procedure-default-text check remains for legacy procedure-based drafts, not for
+independent patient narratives. Every draft day must have narrative text before
+generation.
+
 ## Vertex monthly retraining (Dekurz)
 
 The Dekurz retraining pipeline is built to fail safe.

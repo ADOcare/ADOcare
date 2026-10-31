@@ -985,6 +985,7 @@ export interface Patient {
   death_date: string | null
   country_code_phone: string | null
   phone: string | null
+  dekurz_texts?: Array<unknown> | null
   // relations
   nurse: User
   branch: Branch
@@ -1030,6 +1031,7 @@ export interface DekurzDraft {
   created_at: string | null
   updated_at: string | null
   dekurz_number: number | null
+  narrative_sections: Array<unknown> | null
   // relations
   patient: Patient
   branch: Branch

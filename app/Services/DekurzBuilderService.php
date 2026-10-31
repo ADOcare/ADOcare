@@ -243,6 +243,7 @@ class DekurzBuilderService
         return [
             'id' => $draft->id,
             'status' => $draft->status,
+            'narrative_sections' => $draft->narrative_sections,
             'period' => Carbon::parse($draft->period)->format('Y-m'),
             'dekurz_number' => $draft->dekurz_number,
             'completed_at' => $draft->completed_at?->toISOString(),

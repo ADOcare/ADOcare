@@ -25,6 +25,14 @@ class DekurzFinalizationValidator
         $this->consistency->authorizeDraftAccess($actor, $patient, $draft);
         $draft->loadMissing(['finalDocument', 'days.entries.procedure', 'days.entries.customTrack']);
         $errors = [];
+        $narrativeTexts = $draft->narrative_sections !== null
+            ? DekurzNarrativeService::dailyTexts($draft->narrative_sections)
+            : null;
+        foreach ($draft->narrative_sections ?? [] as $index => $section) {
+            if (trim((string) $section['text']) === '' || $section['dates'] === []) {
+                $errors["sections.{$index}"][] = 'Každá sekcia musí obsahovať text a aspoň jeden dátum.';
+            }
+        }
 
         if ($draft->status !== DekurzDraft::STATUS_DRAFT) {
             $errors['draft.status'][] = $draft->final_document_id && $draft->finalDocument
@@ -37,6 +45,18 @@ class DekurzFinalizationValidator
         }
 
         $month = Carbon::parse($draft->period)->format('Y-m');
+        $draftDates = $draft->days->map(fn ($day): string => Carbon::parse($day->date)->toDateString())->all();
+        $deathDate = $patient->death_date ? Carbon::parse($patient->death_date)->toDateString() : null;
+        foreach ($draft->narrative_sections ?? [] as $index => $section) {
+            if (str_contains((string) $section['text'], '[TEXT]')) {
+                $errors["sections.{$index}.text"][] = 'Text obsahuje nedoplnenú hodnotu [TEXT].';
+            }
+            foreach ($section['dates'] as $date) {
+                if (! str_starts_with($date, $month.'-') || ! in_array($date, $draftDates, true) || ($deathDate && $date > $deathDate)) {
+                    $errors["sections.{$index}.dates"][] = 'Sekcia obsahuje neplatný deň Dekurzu.';
+                }
+            }
+        }
         $points = $this->scoring->documentableForMonth($patient, $month);
         $this->timelineReadiness->assertReady($patient, $actor, $points, $month);
         $pointsById = $points->keyBy('id');
@@ -52,6 +72,9 @@ class DekurzFinalizationValidator
 
         foreach ($draft->days as $day) {
             $date = Carbon::parse($day->date)->toDateString();
+            if ($narrativeTexts !== null && trim($narrativeTexts[$date] ?? '') === '') {
+                $errors["days.{$day->id}.text"][] = 'Pre každý deň Dekurzu je povinný text.';
+            }
             if (! str_starts_with($date, $month.'-')) {
                 $errors["days.{$day->id}.date"][] = 'Deň nepatrí do obdobia konceptu.';
             }
@@ -66,7 +89,7 @@ class DekurzFinalizationValidator
                 // scoring linkage below so reconciliation still knows that the
                 // source performance belongs to this Dekurz.
                 if (! $entry->is_excluded) {
-                    $text = trim((string) $entry->text);
+                    $text = $narrativeTexts !== null ? ($narrativeTexts[$date] ?? '') : trim((string) $entry->text);
                     if ($text === '') {
                         $errors[$key][] = 'Text záznamu je povinný.';
                     }
@@ -74,12 +97,11 @@ class DekurzFinalizationValidator
                         $errors[$key][] = 'Text obsahuje nedoplnenú hodnotu [TEXT].';
                     }
 
-                    if (! $entry->isCustomTrack()) {
+                    if ($narrativeTexts === null && ! $entry->isCustomTrack()) {
                         $patientTemplateText = trim((string) ($patientTemplates->get($entry->procedure_id)?->text ?? ''));
                         $procedureDefaultText = trim((string) ($entry->procedure?->default_dekurz_text ?? ''));
                         $matchesPatientTemplate = $patientTemplateText !== '' && $text === $patientTemplateText;
                         $matchesGenericDefault = $procedureDefaultText !== '' && $text === $procedureDefaultText;
-
                         if ($matchesGenericDefault && ! $matchesPatientTemplate) {
                             $errors[$key][] = 'Všeobecný predvolený text výkonu musí byť pred dokončením upravený pre pacienta.';
                         }

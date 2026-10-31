@@ -6,6 +6,7 @@ import type {
     DekurzCustomTrack,
     DekurzEntry,
     DekurzMacro,
+    DekurzNarrativeSection,
     DekurzProcedure,
     DekurzPropagationRequest,
     DekurzRawBuilderPayload,
@@ -167,6 +168,7 @@ export function useDekurzV2(
                       initialized_at: null,
                       completed_at: raw.draft.completed_at,
                       final_document_id: raw.draft.final_document_id,
+                      narrative_sections: raw.draft.narrative_sections ?? null,
                   }
                 : null,
             scoring_changes: {
@@ -209,9 +211,9 @@ export function useDekurzV2(
                 params: { per_page: 100, sort: 'name' },
             })
             const items = response.data?.data?.items ?? response.data?.data ?? []
-            macros.value = items.map((item: { id: number; name: string; text: string }) => ({
+            macros.value = items.map((item: { id: number; name: string; text: string; abbreviation?: string | null }) => ({
                 key: String(item.id),
-                title: item.name,
+                title: item.abbreviation?.trim() || item.name,
                 body: item.text,
             }))
         } catch {
@@ -504,6 +506,39 @@ export function useDekurzV2(
         }
     }
 
+    async function saveSections(
+        sections: DekurzNarrativeSection[],
+        context: { patientId: number; draftId: number; month: string; completed: boolean },
+    ): Promise<boolean> {
+        const savedSections = sections.map(section => ({ text: section.text, dates: [...section.dates] }))
+        const stateKey = `sections-${context.draftId}`
+        saveStates.value[stateKey] = 'saving'
+        return track((async () => {
+            if (context.completed) {
+                await api.post(`/v1/patients/${context.patientId}/dekurz-drafts`, { month: context.month })
+                context.completed = false
+                if (draftId.value === context.draftId && builder.value?.draft) builder.value.draft.status = 'draft'
+            }
+            await api.patch(`/v1/patients/${context.patientId}/dekurz-drafts/${context.draftId}/sections`, {
+                sections: savedSections,
+            })
+            if (draftId.value === context.draftId && builder.value?.draft) {
+                builder.value.draft.narrative_sections = savedSections
+            }
+            saveStates.value[stateKey] = 'saved'
+            return true
+        })().catch(errorValue => {
+            saveStates.value[stateKey] = 'error'
+            toast.add({
+                severity: 'error',
+                summary: 'Texty sa nepodarilo uložiť',
+                detail: messageFrom(errorValue, 'Skúste uložiť texty znova.'),
+                life: 5000,
+            })
+            return false
+        }))
+    }
+
     async function flushPendingSaves() {
         while (pendingSaves.size > 0) {
             await Promise.allSettled([...pendingSaves])
@@ -533,6 +568,7 @@ export function useDekurzV2(
         deleteEntry,
         propagateEntry,
         finalizeDraft,
+        saveSections,
         flushPendingSaves,
     }
 }

@@ -22,6 +22,10 @@ class PreviewDekurzDraftRequest extends FormRequest
             'days.*.general_note' => ['nullable', 'string', 'max:20000'],
             'days.*.entries' => ['required_with:days', 'array'],
             'days.*.entries.*.text' => ['nullable', 'string', 'max:20000'],
+            'sections' => ['nullable', 'array', 'max:100'],
+            'sections.*.text' => ['present', 'nullable', 'string', 'max:20000'],
+            'sections.*.dates' => ['present', 'array', 'max:31'],
+            'sections.*.dates.*' => ['required', 'date_format:Y-m-d'],
         ];
     }
 }

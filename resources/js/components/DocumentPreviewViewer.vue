@@ -38,10 +38,10 @@ const A4_HEIGHT_PX =
     297 / 25.4 * 96
 
 const PREVIEW_HORIZONTAL_SPACE =
-    48
+    0
 
 const PREVIEW_VERTICAL_SPACE =
-    24
+    0
 
 const MIN_ZOOM =
     0.4
@@ -307,7 +307,6 @@ function updateFitScale(
         Math.min(
             widthScale,
             heightScale,
-            1,
         )
 
     centerDocument()
@@ -1488,7 +1487,6 @@ onBeforeUnmount(() => {
                 min-w-0
                 touch-none
                 select-none
-                m-6
             "
             :class="{
                 'cursor-grab':
@@ -1523,8 +1521,8 @@ onBeforeUnmount(() => {
                     overflow-hidden
                     bg-white
                     shadow-lg
-                    ring-1
-                    ring-almostwhite/50
+                    border-darkgrey/30
+                    border-1
                 "
             >
                 <iframe
@@ -1591,9 +1589,10 @@ onBeforeUnmount(() => {
             "
             class="
                 absolute
-                bottom-0
+                bottom-3
                 left-1/2
                 z-10
+                shadow-lg
                 flex
                 -translate-x-1/2
                 items-center

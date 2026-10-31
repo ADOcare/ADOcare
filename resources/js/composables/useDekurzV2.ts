@@ -62,6 +62,14 @@ export function useDekurzV2(
     function normalize(raw: DekurzRawBuilderPayload): DekurzBuilderPayload {
         const supportSelections = [
             { key: 'finding' as const, label: 'Nález', selection: raw.supporting_documents.finding },
+            {
+                key: 'previous_finding' as const,
+                label: 'Predchádzajúci nález',
+                selection: {
+                    default: raw.supporting_documents.finding.candidates[1] ?? null,
+                    candidates: raw.supporting_documents.finding.candidates.slice(1, 2),
+                },
+            },
             { key: 'proposal' as const, label: 'Návrh', selection: raw.supporting_documents.proposal },
             {
                 key: 'previous_dekurz' as const,
@@ -498,7 +506,7 @@ export function useDekurzV2(
         } catch (errorValue) {
             const responseErrors = (errorValue as { response?: { data?: { errors?: Record<string, string[]> } } }).response?.data?.errors
             finalizationErrors.value = responseErrors
-                ? Object.values(responseErrors).flat()
+                ? [...new Set(Object.values(responseErrors).flat())]
                 : [messageFrom(errorValue, 'Dekurz sa nepodarilo finalizovať.')]
             return false
         } finally {

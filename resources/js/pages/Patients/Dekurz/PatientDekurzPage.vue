@@ -25,6 +25,8 @@ import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
 import FormField from '@/components/FormField.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import ReferenceDocumentDrawer from '@/components/ReferenceDocumentDrawer.vue'
+import A4DocumentFrame from '@/components/documents/A4DocumentFrame.vue'
+import ScanDocumentContent from '@/components/documents/ScanDocumentContent.vue'
 
 import PresetMultiDatePicker from '@/components/Date/PresetMultiDatePicker.vue'
 import Popover from 'primevue/popover'
@@ -617,6 +619,15 @@ const supportingDocuments =
             [],
     )
 
+function isScanDocument(
+    document: DekurzSupportingDocument,
+) {
+    return (
+        document.key === 'finding' ||
+        document.key === 'previous_finding'
+    )
+}
+
 function revokeSupportingDocumentPreviewUrls() {
     for (
         const url
@@ -654,6 +665,7 @@ async function loadSupportingDocumentPreviews(
         documents.map(
             async document => {
                 if (
+                    isScanDocument(document) ||
                     !document.document
                         ?.preview_url
                 ) {
@@ -757,9 +769,9 @@ async function handleFinalize() {
                 'Dekurz zatiaľ nie je možné vygenerovať.',
 
             detail:
-                finalizationErrors.value.join(
-                    ' ',
-                ) ||
+                finalizationErrors.value
+                    .slice(0, 3)
+                    .join(' ') ||
                 'Skontrolujte zadané údaje a skúste to znova.',
 
             life:
@@ -886,74 +898,62 @@ onBeforeUnmount(() => {
         :handle-label="document.label"
         :available="!!document.document"
     >
-        <div
-            v-if="document.document"
-            class="
-                h-full
-                min-h-0
-            "
-        >
+        <template #default="{ setAspectRatio }">
+            <ScanDocumentContent
+                v-if="isScanDocument(document) && document.document"
+                :document-id="document.document.id"
+                bare
+                @aspect-ratio-change="setAspectRatio"
+            />
+
             <div
+                v-else-if="supportingDocumentLoading[document.key]"
                 class="
-                    relative
+                    flex
                     h-full
-                    overflow-hidden
-                    bg-tag3
+                    items-center
+                    justify-center
+                    gap-2
+                    bg-white
+                    text-normal
+                    text-accent
                 "
             >
-                <div
-                    v-if="supportingDocumentLoading[document.key]"
+                <i
                     class="
-                        absolute
-                        inset-0
-                        flex
-                        items-center
-                        justify-center
-                        gap-2
-                        text-normal
-                        text-accent
+                        bi
+                        bi-arrow-repeat
+                        animate-spin
                     "
-                >
-                    <i
-                        class="
-                            bi
-                            bi-arrow-repeat
-                            animate-spin
-                        "
-                        aria-hidden="true"
-                    />
-
-                    Načítavam dokument…
-                </div>
-
-                <iframe
-                    v-else-if="supportingDocumentPreviewUrls[document.key]"
-                    :src="supportingDocumentPreviewUrls[document.key]"
-                    :title="document.label"
-                    class="
-                        h-full
-                        w-full
-                        border-0
-                    "
+                    aria-hidden="true"
                 />
 
-                <div
-                    v-else
-                    class="
-                        flex
-                        h-full
-                        items-center
-                        justify-center
-                        p-8
-                        text-center
-                        text-normal
-                        text-lightgrey
-                    "
-                >
-                    Náhľad dokumentu nie je dostupný.
-                </div>
+                Načítavam dokument…
             </div>
-        </div>
+
+            <A4DocumentFrame
+                v-else-if="supportingDocumentPreviewUrls[document.key]"
+                :src="supportingDocumentPreviewUrls[document.key]!"
+                :title="document.label"
+            />
+
+            <div
+                v-else
+                class="
+                    flex
+                    h-full
+                    items-center
+                    justify-center
+                    bg-white
+                    p-8
+                    text-center
+                    text-normal
+                    text-lightgrey
+                "
+            >
+                Náhľad dokumentu nie je dostupný.
+            </div>
+        </template>
     </ReferenceDocumentDrawer>
 
     <!-- ================================================================ -->

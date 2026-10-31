@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Enums\VertexTrainingRunStatus;
+use App\Jobs\Concerns\FailsVertexTrainingRun;
+use App\Exceptions\InsufficientTrainingDataException;
 use App\Models\VertexTrainingRun;
 use App\Services\Vertex\VertexTrainingDatasetService;
 use App\Services\Vertex\VertexTrainingRunNotifier;
@@ -18,6 +20,7 @@ class BuildVertexTrainingDatasetJob implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
+    use FailsVertexTrainingRun;
 
     public int $tries = 3;
 
@@ -40,7 +43,7 @@ class BuildVertexTrainingDatasetJob implements ShouldQueue
 
         try {
             $built = $datasetService->buildForRun($run, $this->force);
-        } catch (\Throwable $e) {
+        } catch (InsufficientTrainingDataException $e) {
             $run->status = VertexTrainingRunStatus::Skipped->value;
             $run->failure_stage = 'dataset_build';
             $run->failure_message = $e->getMessage();
@@ -50,15 +53,27 @@ class BuildVertexTrainingDatasetJob implements ShouldQueue
             $notifier->notify('dataset_skipped', $run);
 
             return;
+        } catch (\Throwable $e) {
+            report($e);
+
+            $run->status = VertexTrainingRunStatus::Failed->value;
+            $run->failure_stage = 'dataset_build';
+            $run->failure_message = mb_substr($e->getMessage(), 0, 1000);
+            $run->failed_at = now();
+            $run->save();
+
+            $notifier->notify('dataset_build_failed', $run);
+
+            return;
         }
 
         $idempotencyKey = hash(
             'sha256',
-            'dekurz|' . (string) ($built['dataset_hash'] ?? '') . '|' . (string) config('services.vertex_ai.auto_train.base_model', '')
+            $run->pipeline . '|' . (string) ($built['dataset_hash'] ?? '') . '|' . (string) config('services.vertex_ai.auto_train.base_model', '')
         );
 
         $existing = VertexTrainingRun::query()
-            ->where('pipeline', 'dekurz')
+            ->where('pipeline', $run->pipeline)
             ->where('idempotency_key', $idempotencyKey)
             ->whereIn('status', [
                 VertexTrainingRunStatus::TrainingRequested->value,
@@ -86,6 +101,12 @@ class BuildVertexTrainingDatasetJob implements ShouldQueue
 
             return;
         }
+
+        // Free the key from earlier failed attempts so this retry can claim it.
+        VertexTrainingRun::query()
+            ->where('idempotency_key', $idempotencyKey)
+            ->where('id', '!=', $run->id)
+            ->update(['idempotency_key' => null]);
 
         $run->status = VertexTrainingRunStatus::DatasetReady->value;
         $run->version = (string) ($built['version'] ?? $run->version);

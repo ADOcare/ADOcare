@@ -101,6 +101,27 @@ export interface NurseDiagnosis {
   updated_at: string | null
 }
 
+export interface AdosEpisodeTypeHistory {
+  // columns
+  id: number
+  ados_episode_id: number
+  episode_type_id: number
+  changed_by: number | null
+  valid_from: string
+  valid_to: string | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  episode: AdosEpisode
+  type: AdosEpisodeType
+  changed_by: User
+  // counts
+  // exists
+  episode_exists: boolean
+  type_exists: boolean
+  changed_by_exists: boolean
+}
+
 export interface Diagnosis {
   // columns
   id: number
@@ -533,6 +554,25 @@ export interface SubscriptionTier {
   companies_exists: boolean
 }
 
+export interface AdosEpisodeTypeTransition {
+  // columns
+  id: number
+  company_id: number
+  from_episode_type_id: number
+  to_episode_type_id: number
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  company: Company
+  from_type: AdosEpisodeType
+  to_type: AdosEpisodeType
+  // counts
+  // exists
+  company_exists: boolean
+  from_type_exists: boolean
+  to_type_exists: boolean
+}
+
 export interface MonthlyExportRun {
   // columns
   id: number
@@ -547,6 +587,53 @@ export interface MonthlyExportRun {
   completed_at: string | null
   created_at: string | null
   updated_at: string | null
+}
+
+export interface AdosEpisodeType {
+  // columns
+  id: number
+  company_id: number
+  name: string
+  code: string
+  description: string | null
+  default_duration_days: number | null
+  sort_order: number
+  is_active: boolean
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  company: Company
+  episodes: AdosEpisode[]
+  outgoing_transitions: AdosEpisodeTypeTransition[]
+  incoming_transitions: AdosEpisodeTypeTransition[]
+  // counts
+  episodes_count: number
+  outgoing_transitions_count: number
+  incoming_transitions_count: number
+  // exists
+  company_exists: boolean
+  episodes_exists: boolean
+  outgoing_transitions_exists: boolean
+  incoming_transitions_exists: boolean
+}
+
+export interface ProposalAiFeedback {
+  // columns
+  id: number
+  document_id: number
+  patient_id: number
+  user_id: number | null
+  scan_document_id: number | null
+  source: string
+  ocr_text: string
+  suggestion: Array<unknown> | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  document: Document
+  // counts
+  // exists
+  document_exists: boolean
 }
 
 export interface DekurzDay {
@@ -608,6 +695,8 @@ export interface Company {
   // relations
   subscription_tier: SubscriptionTier
   branches: Branch[]
+  episode_types: AdosEpisodeType[]
+  episode_type_transitions: AdosEpisodeTypeTransition[]
   cars: Car[]
   patients: Patient[]
   users: User[]
@@ -616,6 +705,8 @@ export interface Company {
   subscription_paid_months: CompanySubscriptionPaidMonth[]
   // counts
   branches_count: number
+  episode_types_count: number
+  episode_type_transitions_count: number
   cars_count: number
   patients_count: number
   users_count: number
@@ -624,6 +715,8 @@ export interface Company {
   // exists
   subscription_tier_exists: boolean
   branches_exists: boolean
+  episode_types_exists: boolean
+  episode_type_transitions_exists: boolean
   cars_exists: boolean
   patients_exists: boolean
   users_exists: boolean
@@ -710,6 +803,41 @@ export interface Total {
   user_exists: boolean
   insurance_company_exists: boolean
   branch_exists: boolean
+}
+
+export interface AdosEpisode {
+  // columns
+  id: number
+  patient_id: number
+  branch_id: number
+  company_id: number
+  episode_type_id: number
+  created_by: number | null
+  ended_by: number | null
+  status: string
+  started_at: string
+  expected_end_at: string | null
+  ended_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  // relations
+  patient: Patient
+  branch: Branch
+  company: Company
+  type: AdosEpisodeType
+  type_history: AdosEpisodeTypeHistory[]
+  creator: User
+  ended_by: User
+  // counts
+  type_history_count: number
+  // exists
+  patient_exists: boolean
+  branch_exists: boolean
+  company_exists: boolean
+  type_exists: boolean
+  type_history_exists: boolean
+  creator_exists: boolean
+  ended_by_exists: boolean
 }
 
 export interface Procedure {
@@ -996,6 +1124,9 @@ export interface Patient {
   insurance_company: InsuranceCompany
   coverages: PatientCoverage[]
   patient_audit_issues: PatientAuditIssue[]
+  open_patient_audit_issues: PatientAuditIssue[]
+  ados_episodes: AdosEpisode[]
+  active_ados_episode: AdosEpisode
   latest_coverage: PatientCoverage
   // counts
   visits_count: number
@@ -1003,7 +1134,8 @@ export interface Patient {
   dekurz_drafts_count: number
   coverages_count: number
   patient_audit_issues_count: number
-  open_patient_audit_issues_count?: number
+  open_patient_audit_issues_count: number
+  ados_episodes_count: number
   // exists
   nurse_exists: boolean
   branch_exists: boolean
@@ -1014,6 +1146,9 @@ export interface Patient {
   insurance_company_exists: boolean
   coverages_exists: boolean
   patient_audit_issues_exists: boolean
+  open_patient_audit_issues_exists: boolean
+  ados_episodes_exists: boolean
+  active_ados_episode_exists: boolean
   latest_coverage_exists: boolean
 }
 

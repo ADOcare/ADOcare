@@ -29,6 +29,7 @@ use App\Services\DekurzV2SnapshotBuilder;
 use App\Services\DocumentService;
 use App\Services\PatientDekurzTextService;
 use App\Services\PatientProcedureDekurzTemplateService;
+use App\Services\Vertex\VertexFeedbackRecorder;
 use App\Services\VisitTimelineFreshnessService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Config\Repository;
@@ -623,7 +624,12 @@ class DekurzV2BuilderTest extends TestCase
                 return $path;
             });
 
-        $document = $this->finalizer($documentService)->finalize($patient, $draft, $actor, 2);
+        $feedbackRecorder = $this->createMock(VertexFeedbackRecorder::class);
+        $feedbackRecorder->expects(self::once())
+            ->method('recordDekurz')
+            ->with(self::isInstanceOf(Document::class), self::callback(fn (array $snapshot): bool => $snapshot['source'] === 'dekurz_v2'));
+
+        $document = $this->finalizer($documentService, $feedbackRecorder)->finalize($patient, $draft, $actor, 2);
         $payload = json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR);
 
         self::assertSame(3, $payload['schema_version']);
@@ -738,12 +744,13 @@ class DekurzV2BuilderTest extends TestCase
         );
     }
 
-    private function finalizer(DocumentService $documentService): DekurzV2Finalizer
+    private function finalizer(DocumentService $documentService, ?VertexFeedbackRecorder $feedbackRecorder = null): DekurzV2Finalizer
     {
         return new DekurzV2Finalizer(
             $this->finalizationValidator(),
             new DekurzV2SnapshotBuilder(new DekurzDocumentService, new DekurzSupportingDocumentService),
             $documentService,
+            $feedbackRecorder ?? $this->createStub(VertexFeedbackRecorder::class),
         );
     }
 

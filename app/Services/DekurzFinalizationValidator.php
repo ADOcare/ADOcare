@@ -90,7 +90,8 @@ class DekurzFinalizationValidator
                 // source performance belongs to this Dekurz.
                 if (! $entry->is_excluded) {
                     $text = $narrativeTexts !== null ? ($narrativeTexts[$date] ?? '') : trim((string) $entry->text);
-                    if ($text === '') {
+                    // Free-text sections are already validated once per day above.
+                    if ($text === '' && $narrativeTexts === null) {
                         $errors[$key][] = 'Text záznamu je povinný.';
                     }
                     if (str_contains($text, '[TEXT]')) {

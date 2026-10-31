@@ -2935,10 +2935,14 @@ onBeforeUnmount(() => {
             !!latestScanDocumentId
         "
     >
-        <ScanDocumentContent
-            v-if="latestScanDocumentId"
-            :document-id="latestScanDocumentId"
-        />
+        <template #default="{ setAspectRatio }">
+            <ScanDocumentContent
+                v-if="latestScanDocumentId"
+                :document-id="latestScanDocumentId"
+                bare
+                @aspect-ratio-change="setAspectRatio"
+            />
+        </template>
     </ReferenceDocumentDrawer>
 
     <div

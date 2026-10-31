@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\VertexTrainingRunStatus;
+use App\Jobs\Concerns\FailsVertexTrainingRun;
 use App\Models\VertexTrainingRun;
 use App\Services\Vertex\VertexTuningService;
 use App\Services\Vertex\VertexTrainingRunNotifier;
@@ -18,6 +19,7 @@ class PollVertexTuningJob implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
+    use FailsVertexTrainingRun;
 
     public int $tries = 100;
 

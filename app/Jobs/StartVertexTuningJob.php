@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\VertexTrainingRunStatus;
+use App\Jobs\Concerns\FailsVertexTrainingRun;
 use App\Models\VertexTrainingRun;
 use App\Services\Vertex\VertexTuningService;
 use App\Services\Vertex\VertexTrainingRunNotifier;
@@ -18,6 +19,7 @@ class StartVertexTuningJob implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
+    use FailsVertexTrainingRun;
 
     public int $tries = 3;
 
@@ -61,7 +63,7 @@ class StartVertexTuningJob implements ShouldQueue
 
         $run->status = VertexTrainingRunStatus::Training->value;
         $run->tuning_job_name = $jobName;
-        $run->metadata = array_merge(is_array($run->metadata) ? $run->metadata : [], ['tuning_job_name' => $jobName]);
+        $run->metadata = array_merge(is_array($run->metadata) ? $run->metadata : [], ['tuning_job_name' => $jobName, 'base_model' => $tuningService->baseModel()]);
         $run->save();
 
         $notifier->notify('training_started', $run);

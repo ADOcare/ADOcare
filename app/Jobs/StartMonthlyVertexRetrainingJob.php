@@ -26,13 +26,14 @@ class StartMonthlyVertexRetrainingJob implements ShouldQueue
      */
     public function __construct(
         public array $eligibilityContext,
-        public bool $force = false
+        public bool $force = false,
+        public string $pipeline = 'dekurz',
     ) {
     }
 
     public function handle(VertexTrainingRunNotifier $notifier): void
     {
-        $lock = Cache::lock('vertex-retraining:dekurz', 172800);
+        $lock = Cache::lock('vertex-retraining:'.$this->pipeline, 172800);
 
         if (! $lock->get()) {
             return;
@@ -40,7 +41,7 @@ class StartMonthlyVertexRetrainingJob implements ShouldQueue
 
         try {
             $hasActiveRun = VertexTrainingRun::query()
-                ->where('pipeline', 'dekurz')
+                ->where('pipeline', $this->pipeline)
                 ->whereIn('status', VertexTrainingRunStatus::activeStatuses())
                 ->exists();
 
@@ -49,8 +50,8 @@ class StartMonthlyVertexRetrainingJob implements ShouldQueue
             }
 
             $run = VertexTrainingRun::query()->create([
-                'pipeline' => 'dekurz',
-                'version' => now()->format('Y-m-d') . '-001',
+                'pipeline' => $this->pipeline,
+                'version' => now()->format('Y-m-d-His'),
                 'status' => VertexTrainingRunStatus::Pending->value,
                 'started_at' => now(),
                 'metadata' => [

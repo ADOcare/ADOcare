@@ -76,7 +76,7 @@ class UdzsDeathService
         $password = (string) config('services.udzs.password');
         $baseUrl = rtrim((string) config('services.udzs.base_url'), '/');
         $timeout = (int) config('services.udzs.timeout', 10);
-        $cookieSession = env('UDZS_COOKIESESSION1');
+        $cookieSession = config('services.udzs.cookie_session');
 
         if ($email === '' || $password === '') {
             return null;
@@ -117,7 +117,7 @@ class UdzsDeathService
     {
         $baseUrl = rtrim((string) config('services.udzs.base_url'), '/');
         $timeout = (int) config('services.udzs.timeout', 10);
-        $cookieSession = env('UDZS_COOKIESESSION1');
+        $cookieSession = config('services.udzs.cookie_session');
 
         $http = Http::timeout($timeout)
             ->withHeaders([

@@ -59,7 +59,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $schedule
             ->command('vertex:monthly-retrain')
-            ->monthlyOn(1, '02:30')
+            // Daily trigger; the command itself only starts runs on the configured VERTEX_AUTOTRAIN_DAY.
+            ->dailyAt('02:30')
             ->withoutOverlapping(1440)
             ->onOneServer();
 

@@ -2,256 +2,256 @@
 
 namespace App\Services\Vertex;
 
-use App\Models\DekurzAiFeedback;
-use App\Models\Document;
+use App\Enums\VertexTrainingRunStatus;
+use App\Exceptions\InsufficientTrainingDataException;
 use App\Models\VertexTrainingRun;
 use App\Models\VertexTrainingRunExample;
+use App\Services\Vertex\Training\VertexTrainingTask;
+use App\Services\Vertex\Training\VertexTrainingTasks;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 
 class VertexTrainingDatasetService
 {
-    public function __construct(
-        private readonly DekurzPromptBuilder $promptBuilder
-    ) {
+    private const MAX_VALIDATION_EXAMPLES = 256;
+
+    public function __construct(private readonly VertexTrainingTasks $tasks) {}
+
+    /**
+     * Number of approved examples that were not part of a promoted or running training run yet.
+     */
+    public function countNewExamples(VertexTrainingTask $task): int
+    {
+        $trained = $this->trainedFeedbackIds($task->pipeline());
+
+        return count(array_filter(
+            $task->loadRows(),
+            fn (array $row) => ! in_array($row['feedback_id'], $trained, true)
+        ));
     }
 
     /**
+     * Build the cumulative dataset (all approved examples) and upload it in Vertex tuning format.
+     *
      * @return array<string, mixed>
      */
     public function buildForRun(VertexTrainingRun $run, bool $force = false): array
     {
+        $task = $this->tasks->get((string) $run->pipeline);
         $version = $run->version ?: now()->format('Y-m-d-His');
-        $basePath = 'ai/dekurz-autotrain/datasets';
+        $basePath = $task->datasetDirectory();
 
-        $trainPath = $basePath . '/train-' . $version . '.jsonl';
-        $validationPath = $basePath . '/validation.jsonl';
-        $holdoutPath = $basePath . '/holdout.jsonl';
+        $this->ensureWritableDirectory($basePath);
 
-        $existingValidation = $this->readRows($validationPath);
-        $existingHoldout = $this->readRows($holdoutPath);
+        $validationPath = $basePath.'/validation.jsonl';
+        $holdoutPath = $basePath.'/holdout.jsonl';
+        [$validation, $holdout] = $this->resolveEvaluationSplit($task, $validationPath, $holdoutPath);
 
-        $knownRoleFeedbackIds = VertexTrainingRunExample::query()
-            ->whereIn('dataset_role', ['validation', 'holdout'])
-            ->pluck('feedback_id')
-            ->all();
+        $reservedIds = array_map(fn (array $row) => (int) $row['feedback_id'], array_merge($validation, $holdout));
+        $training = $task->loadRows($reservedIds);
 
-        if (empty($existingValidation) || empty($existingHoldout)) {
-            $seedRows = $this->loadApprovedFeedbackRows();
-            $seedRows = array_values(array_filter($seedRows, fn (array $row) => ! in_array((int) $row['feedback_id'], $knownRoleFeedbackIds, true)));
-
-            foreach ($seedRows as $index => $seed) {
-                $bucket = $index % 10;
-
-                if ($bucket === 0) {
-                    $existingHoldout[] = $seed;
-                } elseif ($bucket === 1) {
-                    $existingValidation[] = $seed;
-                }
-            }
-
-            if (empty($existingValidation) && ! empty($seedRows)) {
-                $existingValidation[] = $seedRows[0];
-            }
-
-            if (empty($existingHoldout) && count($seedRows) > 1) {
-                $existingHoldout[] = $seedRows[1];
-            }
-
-            $this->writeRows($validationPath, $existingValidation);
-            $this->writeRows($holdoutPath, $existingHoldout);
-        }
-
-        $usedForTraining = VertexTrainingRunExample::query()
-            ->where('dataset_role', 'training')
-            ->pluck('feedback_id')
-            ->all();
-
-        $blockedIds = array_values(array_unique(array_merge(
-            $usedForTraining,
-            array_map(fn (array $row) => (int) ($row['feedback_id'] ?? 0), $existingValidation),
-            array_map(fn (array $row) => (int) ($row['feedback_id'] ?? 0), $existingHoldout)
-        )));
-
-        $newRows = $this->loadApprovedFeedbackRows($blockedIds);
+        $trained = $this->trainedFeedbackIds($task->pipeline());
+        $newCount = count(array_filter($training, fn (array $row) => ! in_array($row['feedback_id'], $trained, true)));
         $minimum = (int) config('services.vertex_ai.auto_train.min_new_feedback', 25);
 
-        if (! $force && count($newRows) < $minimum) {
-            throw new \RuntimeException('Nedostatok nových schválených príkladov pre retrénovanie.');
+        if ($training === [] || (! $force && $newCount < $minimum)) {
+            throw new InsufficientTrainingDataException(sprintf(
+                'Nedostatok nových schválených príkladov pre retrénovanie (%d / %d).',
+                $newCount,
+                $minimum
+            ));
         }
 
-        $this->validateRows($newRows, 'training');
-        $this->validateRows($existingValidation, 'validation');
-        $this->validateRows($existingHoldout, 'holdout');
+        $this->validateRows($training, 'training');
+        $this->validateRows($validation, 'validation');
 
-        $this->writeRows($trainPath, $newRows);
+        $trainPath = $basePath.'/train-'.$version.'.jsonl';
+        $this->writeRows($trainPath, $training);
 
-        foreach ($newRows as $row) {
-            VertexTrainingRunExample::query()->create([
-                'training_run_id' => $run->id,
-                'feedback_id' => (int) $row['feedback_id'],
-                'dataset_role' => 'training',
-                'created_at' => now(),
-            ]);
-        }
-
-        foreach ($existingValidation as $row) {
-            VertexTrainingRunExample::query()->firstOrCreate([
-                'training_run_id' => $run->id,
-                'feedback_id' => (int) $row['feedback_id'],
-                'dataset_role' => 'validation',
-            ], ['created_at' => now()]);
-        }
-
-        foreach ($existingHoldout as $row) {
-            VertexTrainingRunExample::query()->firstOrCreate([
-                'training_run_id' => $run->id,
-                'feedback_id' => (int) $row['feedback_id'],
-                'dataset_role' => 'holdout',
-            ], ['created_at' => now()]);
-        }
-
-        $datasetHash = hash('sha256', implode("\n", array_map(
-            fn (array $row) => json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            $newRows
-        )));
+        $vertexTrainPath = $basePath.'/vertex-train-'.$version.'.jsonl';
+        $vertexValidationPath = $basePath.'/vertex-validation-'.$version.'.jsonl';
+        $this->writeRows($vertexTrainPath, $this->toVertexRows($task, $training));
+        $this->writeRows($vertexValidationPath, $this->toVertexRows($task, array_slice($validation, 0, self::MAX_VALIDATION_EXAMPLES)));
 
         $datasetDisk = (string) config('services.vertex_ai.auto_train.dataset_disk', 'gcs');
-        $datasetPrefix = trim((string) config('services.vertex_ai.auto_train.dataset_prefix', 'ai/dekurz-feedback'), '/');
-        $bucket = trim((string) config('filesystems.disks.' . $datasetDisk . '.bucket'));
+        $bucket = trim((string) config('filesystems.disks.'.$datasetDisk.'.bucket'));
 
         if ($bucket === '') {
-            throw new \RuntimeException('Dataset disk nemá nakonfigurovaný bucket.');
+            throw new RuntimeException("Dataset disk '{$datasetDisk}' nemá nakonfigurovaný bucket.");
         }
 
-        $remoteTrainPath = $datasetPrefix . '/' . $version . '/train.jsonl';
-        $remoteValidationPath = $datasetPrefix . '/' . $version . '/validation.jsonl';
+        $remoteTrainPath = $task->remoteDatasetPrefix().'/'.$version.'/train.jsonl';
+        $remoteValidationPath = $task->remoteDatasetPrefix().'/'.$version.'/validation.jsonl';
 
-        Storage::disk($datasetDisk)->put($remoteTrainPath, Storage::disk('local')->get($trainPath));
-        Storage::disk($datasetDisk)->put($remoteValidationPath, Storage::disk('local')->get($validationPath));
+        if (
+            ! Storage::disk($datasetDisk)->put($remoteTrainPath, Storage::disk('local')->get($vertexTrainPath))
+            || ! Storage::disk($datasetDisk)->put($remoteValidationPath, Storage::disk('local')->get($vertexValidationPath))
+        ) {
+            throw new RuntimeException("Nepodarilo sa nahrať dataset do bucketu '{$bucket}'.");
+        }
+
+        $this->recordExamples($run, 'training', $training);
+        $this->recordExamples($run, 'validation', $validation);
+        $this->recordExamples($run, 'holdout', $holdout);
 
         return [
             'version' => $version,
             'train_path' => $trainPath,
             'validation_path' => $validationPath,
             'holdout_path' => $holdoutPath,
-            'training_examples_count' => count($newRows),
-            'validation_examples_count' => count($existingValidation),
-            'holdout_examples_count' => count($existingHoldout),
-            'training_dataset_uri' => 'gs://' . $bucket . '/' . $remoteTrainPath,
-            'validation_dataset_uri' => 'gs://' . $bucket . '/' . $remoteValidationPath,
-            'dataset_hash' => $datasetHash,
+            'training_examples_count' => count($training),
+            'new_examples_count' => $newCount,
+            'validation_examples_count' => count($validation),
+            'holdout_examples_count' => count($holdout),
+            'training_dataset_uri' => 'gs://'.$bucket.'/'.$remoteTrainPath,
+            'validation_dataset_uri' => 'gs://'.$bucket.'/'.$remoteValidationPath,
+            'dataset_hash' => hash('sha256', (string) Storage::disk('local')->get($vertexTrainPath)),
         ];
     }
 
     /**
-     * @param array<int, int> $excludeFeedbackIds
+     * Evaluation rows (validation + holdout) of the pipeline.
+     *
      * @return array<int, array<string, mixed>>
      */
-    private function loadApprovedFeedbackRows(array $excludeFeedbackIds = []): array
+    public function evaluationRows(VertexTrainingTask $task): array
     {
-        $source = trim((string) config('services.vertex_ai.auto_train.source', 'proposal_ai_prefill'));
+        $basePath = $task->datasetDirectory();
 
-        $query = DekurzAiFeedback::query()
-            ->whereNotNull('proposal_document_id')
-            ->orderBy('id');
-
-        if ($source !== '') {
-            $query->where('source', $source);
-        }
-
-        if (! empty($excludeFeedbackIds)) {
-            $query->whereNotIn('id', $excludeFeedbackIds);
-        }
-
-        $rows = [];
-
-        $query->chunkById(250, function ($items) use (&$rows): void {
-            foreach ($items as $feedback) {
-                $proposal = $this->loadProposalPayload((int) $feedback->proposal_document_id);
-                if ($proposal === null) {
-                    continue;
-                }
-
-                $sections = collect($feedback->final_sections ?? [])
-                    ->map(fn ($section) => ['text' => trim((string) ($section['text'] ?? ''))])
-                    ->filter(fn (array $section) => $section['text'] !== '')
-                    ->values()
-                    ->all();
-
-                if (empty($sections)) {
-                    continue;
-                }
-
-                $rows[] = [
-                    'feedback_id' => (int) $feedback->id,
-                    'proposal' => $this->normalizeProposal($proposal),
-                    'expected' => ['sections' => $sections],
-                    'input_prompt' => $this->promptBuilder->build($proposal),
-                ];
-            }
-        });
-
-        return $rows;
+        return array_values(array_filter(
+            array_merge($this->readRows($basePath.'/validation.jsonl'), $this->readRows($basePath.'/holdout.jsonl')),
+            fn (array $row) => $this->isCurrentFormat($row)
+        ));
     }
 
     /**
-     * @return array<string, mixed>|null
+     * Keep a stable validation/holdout split across runs; (re)seed it when missing or outdated.
+     *
+     * @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>}
      */
-    private function loadProposalPayload(int $proposalDocumentId): ?array
+    private function resolveEvaluationSplit(VertexTrainingTask $task, string $validationPath, string $holdoutPath): array
     {
-        $document = Document::query()->find($proposalDocumentId);
+        $validation = $this->readRows($validationPath);
+        $holdout = $this->readRows($holdoutPath);
+        $isCurrent = fn (array $rows) => $rows !== [] && collect($rows)->every(fn (array $row) => $this->isCurrentFormat($row));
 
-        if (! $document || ! $document->path || ! Storage::disk('local')->exists($document->path)) {
-            return null;
+        if ($isCurrent($validation) && $isCurrent($holdout)) {
+            return [$validation, $holdout];
         }
 
-        $decoded = json_decode((string) Storage::disk('local')->get($document->path), true);
+        $validation = [];
+        $holdout = [];
 
-        return is_array($decoded) ? $decoded : null;
+        foreach ($task->loadRows() as $index => $row) {
+            match ($index % 10) {
+                0 => $holdout[] = $row,
+                1 => $validation[] = $row,
+                default => null,
+            };
+        }
+
+        if ($validation === [] || $holdout === []) {
+            throw new InsufficientTrainingDataException('Nedostatok príkladov na vytvorenie validačnej a kontrolnej množiny.');
+        }
+
+        $this->writeRows($validationPath, $validation);
+        $this->writeRows($holdoutPath, $holdout);
+
+        return [$validation, $holdout];
     }
 
     /**
-     * @param array<string, mixed> $proposal
-     * @return array<string, mixed>
+     * Feedback IDs already used for training by a run that is promoted or still running.
+     *
+     * @return array<int, int>
      */
-    private function normalizeProposal(array $proposal): array
+    private function trainedFeedbackIds(string $pipeline): array
     {
-        return [
-            'diagnosis' => is_array($proposal['diagnosis'] ?? null) ? $proposal['diagnosis'] : [],
-            'nurse_diagnosis' => is_array($proposal['nurse_diagnosis'] ?? null) ? $proposal['nurse_diagnosis'] : [],
-            'epicrisis' => (string) ($proposal['epicrisis'] ?? ''),
-            'care_plan' => (string) ($proposal['care_plan'] ?? ''),
-            'mobility' => is_array($proposal['mobility'] ?? null) ? $proposal['mobility'] : [],
-            'expected_duration' => (string) ($proposal['expected_duration'] ?? ''),
-            'procedures' => is_array($proposal['procedures'] ?? null) ? $proposal['procedures'] : [],
-        ];
+        return VertexTrainingRunExample::query()
+            ->where('dataset_role', 'training')
+            ->whereHas('run', fn ($query) => $query
+                ->where('pipeline', $pipeline)
+                ->whereIn('status', [VertexTrainingRunStatus::Promoted->value, ...VertexTrainingRunStatus::activeStatuses()]))
+            ->pluck('feedback_id')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
+     */
+    private function recordExamples(VertexTrainingRun $run, string $role, array $rows): void
+    {
+        foreach ($rows as $row) {
+            VertexTrainingRunExample::query()->firstOrCreate([
+                'training_run_id' => $run->id,
+                'feedback_id' => (int) $row['feedback_id'],
+                'dataset_role' => $role,
+            ], ['created_at' => now()]);
+        }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function toVertexRows(VertexTrainingTask $task, array $rows): array
+    {
+        return array_map(fn (array $row) => [
+            'systemInstruction' => ['parts' => [['text' => $task->systemInstruction()]]],
+            'contents' => [
+                ['role' => 'user', 'parts' => [['text' => (string) $row['input_prompt']]]],
+                ['role' => 'model', 'parts' => [['text' => (string) $row['expected_output']]]],
+            ],
+        ], $rows);
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    private function isCurrentFormat(array $row): bool
+    {
+        return (int) ($row['feedback_id'] ?? 0) > 0
+            && trim((string) ($row['input_prompt'] ?? '')) !== ''
+            && trim((string) ($row['expected_output'] ?? '')) !== '';
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $rows
      */
     private function validateRows(array $rows, string $role): void
     {
-        if (empty($rows)) {
-            throw new \RuntimeException('Dataset (' . $role . ') je prázdny.');
+        if ($rows === []) {
+            throw new InsufficientTrainingDataException('Dataset ('.$role.') je prázdny.');
         }
 
-        $seen = [];
-
         foreach ($rows as $row) {
-            $feedbackId = (int) ($row['feedback_id'] ?? 0);
-            $prompt = trim((string) ($row['input_prompt'] ?? ''));
-            $sections = data_get($row, 'expected.sections', []);
-
-            if ($feedbackId <= 0 || $prompt === '' || ! is_array($sections) || empty($sections)) {
-                throw new \RuntimeException('Dataset (' . $role . ') obsahuje neplatné záznamy.');
+            if (! $this->isCurrentFormat($row)) {
+                throw new RuntimeException('Dataset ('.$role.') obsahuje neplatné záznamy.');
             }
+        }
+    }
 
-            $hash = hash('sha256', $prompt . '|' . json_encode($sections, JSON_UNESCAPED_UNICODE));
-            if (isset($seen[$hash])) {
-                throw new \RuntimeException('Dataset (' . $role . ') obsahuje duplicitné vstup/výstup páry.');
-            }
-            $seen[$hash] = true;
+    private function ensureWritableDirectory(string $directory): void
+    {
+        $disk = Storage::disk('local');
+
+        try {
+            $created = $disk->exists($directory) || $disk->makeDirectory($directory);
+        } catch (\Throwable) {
+            $created = false;
+        }
+
+        $absolute = $disk->path($directory);
+
+        if (! $created || ! is_writable($absolute)) {
+            throw new RuntimeException(sprintf(
+                'Priečinok %s neexistuje alebo nie je zapisovateľný pre používateľa %s. Skontrolujte oprávnenia storage/ na serveri.',
+                $absolute,
+                get_current_user()
+            ));
         }
     }
 
@@ -264,18 +264,11 @@ class VertexTrainingDatasetService
             return [];
         }
 
-        $raw = (string) Storage::disk('local')->get($path);
-        $lines = preg_split('/\R/', $raw) ?: [];
-
         $rows = [];
 
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '') {
-                continue;
-            }
+        foreach (preg_split('/\R/', (string) Storage::disk('local')->get($path)) ?: [] as $line) {
+            $decoded = json_decode(trim($line), true);
 
-            $decoded = json_decode($line, true);
             if (is_array($decoded)) {
                 $rows[] = $decoded;
             }
@@ -285,20 +278,17 @@ class VertexTrainingDatasetService
     }
 
     /**
-     * @param array<int, array<string, mixed>> $rows
+     * @param  array<int, array<string, mixed>>  $rows
      */
     private function writeRows(string $path, array $rows): void
     {
-        $dir = dirname($path);
-        if (! Storage::disk('local')->exists($dir)) {
-            Storage::disk('local')->makeDirectory($dir);
-        }
-
         $lines = array_map(
             fn (array $row) => json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             $rows
         );
 
-        Storage::disk('local')->put($path, implode("\n", $lines));
+        if (! Storage::disk('local')->put($path, implode("\n", $lines))) {
+            throw new RuntimeException('Nepodarilo sa zapísať súbor '.Storage::disk('local')->path($path).'.');
+        }
     }
 }

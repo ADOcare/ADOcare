@@ -4,7 +4,10 @@ namespace App\Services;
 
 use App\Models\Document;
 use App\Models\Patient;
+use App\Services\Vertex\VertexAutotrainStateService;
+use App\Services\Vertex\VertexSuggestionCache;
 use App\Support\ClinicalFrequency;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -18,6 +21,36 @@ class ProposalOcrPrefillService
     private const VERTEX_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
     private const MAX_OCR_TEXT_CHARS = 24000;
+
+    public const SYSTEM_INSTRUCTION = 'Si asistent pre zdravotnícky systém. Vráť výlučne validný JSON bez markdownu.';
+
+    public function __construct(
+        private readonly VertexAutotrainStateService $stateService,
+        private readonly VertexSuggestionCache $suggestions,
+    ) {}
+
+    /**
+     * Latest scan with OCR text, optionally only scans created before the given moment.
+     *
+     * @return array{document: Document, ocr_text: string}|null
+     */
+    public function latestScanOcr(Patient $patient, ?CarbonInterface $before = null): ?array
+    {
+        $document = Document::query()
+            ->where('patient_id', $patient->id)
+            ->where('type', 'scan')
+            ->when($before, fn ($query) => $query->where('created_at', '<=', $before))
+            ->orderByDesc('created_at')
+            ->first();
+
+        if (! $document) {
+            return null;
+        }
+
+        $ocrText = $this->extractOcrText($this->readScanPayload($document));
+
+        return trim($ocrText) === '' ? null : ['document' => $document, 'ocr_text' => $ocrText];
+    }
 
     /**
      * @return array<string, mixed>
@@ -110,6 +143,11 @@ class ProposalOcrPrefillService
             'scan_document_id' => $document->id,
         ]);
 
+        $this->suggestions->remember('proposal', $patient->id, [
+            'scan_document_id' => $document->id,
+            'prefill' => $structured,
+        ]);
+
         return [
             'latest_scan_document_id' => $document->id,
             'scanned_at' => $payload['scanned_at'] ?? null,
@@ -192,6 +230,48 @@ class ProposalOcrPrefillService
     private function callVertexAndParse(string $ocrText): array
     {
         $config = $this->resolveVertexConfig();
+        $active = $this->resolveActiveEndpoint();
+
+        if ($active !== null && $active['endpoint_id'] !== $config['endpoint_id']) {
+            try {
+                return $this->requestVertex($ocrText, array_merge($config, $active));
+            } catch (\Throwable $exception) {
+                if (! (bool) config('services.vertex_ai.auto_train.runtime_fallback', true)) {
+                    throw $exception;
+                }
+
+                Log::warning('Proposal OCR prefill: retrained endpoint failed, falling back to static endpoint', [
+                    'active_endpoint_id' => $active['endpoint_id'],
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        return $this->requestVertex($ocrText, $config);
+    }
+
+    /**
+     * Endpoint promoted by the automatic retraining pipeline, if any.
+     *
+     * @return array{location: string, endpoint_id: string}|null
+     */
+    private function resolveActiveEndpoint(): ?array
+    {
+        $state = $this->stateService->read('proposal');
+        $location = trim((string) ($state['active_location'] ?? ''));
+        $endpointId = trim((string) ($state['active_endpoint_id'] ?? ''));
+
+        return $location === '' || $endpointId === ''
+            ? null
+            : ['location' => $location, 'endpoint_id' => $endpointId];
+    }
+
+    /**
+     * @param  array{credentials_path: string, project_id: string, location: string, endpoint_id: string}  $config
+     * @return array<string, mixed>
+     */
+    private function requestVertex(string $ocrText, array $config): array
+    {
         $accessToken = $this->getVertexAccessToken(
             $config['credentials_path']
         );
@@ -218,7 +298,7 @@ class ProposalOcrPrefillService
             ->post($url, [
                 'systemInstruction' => [
                     'parts' => [[
-                        'text' => 'Si asistent pre zdravotnícky systém. Vráť výlučne validný JSON bez markdownu.',
+                        'text' => self::SYSTEM_INSTRUCTION,
                     ]],
                 ],
                 'contents' => [[
@@ -478,7 +558,7 @@ class ProposalOcrPrefillService
         );
     }
 
-    private function buildPrompt(string $ocrText): string
+    public function buildPrompt(string $ocrText): string
     {
         $frequencyValues = implode('"|"', ClinicalFrequency::canonicalValues());
 
@@ -504,7 +584,7 @@ class ProposalOcrPrefillService
      * @param  array<string, mixed>  $decoded
      * @return array<string, mixed>
      */
-    private function normalizeGeminiOutput(array $decoded): array
+    public function normalizeGeminiOutput(array $decoded): array
     {
         $medical = array_values(array_filter(array_map(
             fn ($value) => trim((string) $value),

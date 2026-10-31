@@ -57,38 +57,43 @@ procedure-default-text check remains for legacy procedure-based drafts, not for
 independent patient narratives. Every draft day must have narrative text before
 generation.
 
-## Vertex monthly retraining (Dekurz)
+## Vertex monthly retraining (adocare-dekurz, adocare-proposal)
 
-The Dekurz retraining pipeline is built to fail safe.
+Both fine-tuned models (`dekurz`, `proposal`) are retrained by the same fail-safe pipeline.
+
+Training data:
+
+- Dekurz: every finalized Dekurz v2 is stored in `dekurz_ai_feedback` (source `dekurz_v2`) together with the patient's latest proposal.
+- Proposal: every stored proposal is saved in `proposal_ai_feedback` together with the OCR text of the latest scan (max. 90 days old).
+- Existing documents can be imported with `php artisan vertex:backfill-feedback`.
 
 High-level lifecycle:
 
-1. `vertex:monthly-retrain` validates eligibility and dispatches queue work.
-2. Build versioned dataset from approved feedback (training + stable validation/holdout).
-3. Validate schema and deduplicate rows.
-4. Upload train/validation dataset to GCS.
-5. Create Vertex tuning job.
-6. Poll tuning asynchronously.
-7. Resolve candidate model/endpoint.
-8. Evaluate candidate against stable validation/holdout and compare against current production.
-9. Promote atomically by updating `storage/app/private/ai/dekurz-autotrain/state.json`.
-10. Run post-promotion health check and rollback automatically on failure.
+1. `vertex:monthly-retrain` runs daily and starts a run per pipeline only on `VERTEX_AUTOTRAIN_DAY`.
+2. Build a cumulative dataset in Vertex `contents` format (stable validation/holdout split).
+3. Upload train/validation dataset to GCS.
+4. Create a Vertex tuning job, always from `VERTEX_AUTOTRAIN_BASE_MODEL` (Gemini 3.5 Flash).
+5. Poll tuning asynchronously.
+6. Evaluate the candidate on validation/holdout rows against the current production model.
+7. Promote atomically by updating the pipeline state file (`ai/dekurz-autotrain/state.json`, `ai/proposal-autotrain/state.json`).
+8. Run a post-promotion health check and roll back automatically on failure.
 
 Safety guarantees:
 
-- Failed training does not change production endpoint.
-- Failed evaluation does not change production endpoint.
-- Runtime candidate endpoint failures fall back to static `VERTEX_DEKURZ_ENDPOINT_ID`.
-- Post-promotion health failure triggers automatic rollback.
+- Failed training or evaluation does not change the production endpoint.
+- Runtime candidate endpoint failures fall back to the static `VERTEX_DEKURZ_ENDPOINT_ID` / `VERTEX_PROPOSAL_ENDPOINT_ID`.
+- Every failure, skip, rejection, rollback and successful retrain is emailed to `VERTEX_AUTOTRAIN_NOTIFICATION_EMAILS`.
 - `.env` is never modified automatically.
 
 Required config (see `.env.example`):
 
-- `VERTEX_AUTOTRAIN_ENABLED`
-- `VERTEX_AUTOTRAIN_FREQUENCY=monthly`
+- `VERTEX_AUTOTRAIN_ENABLED=true`
 - `VERTEX_AUTOTRAIN_DAY=1`
-- `VERTEX_AUTOTRAIN_TIME=02:30`
 - `VERTEX_AUTOTRAIN_MIN_NEW_FEEDBACK=25`
+- `VERTEX_AUTOTRAIN_SOURCE=proposal_ai_prefill,dekurz_v2`
+- `VERTEX_AUTOTRAIN_BASE_MODEL=publishers/google/models/gemini-3.5-flash`
+- `VERTEX_AUTOTRAIN_LOCATION=` (optional tuning region override)
+- `VERTEX_AUTOTRAIN_MAX_EVALUATION_EXAMPLES=50`
 - `VERTEX_AUTOTRAIN_MIN_JSON_VALIDITY=1.00`
 - `VERTEX_AUTOTRAIN_MIN_REQUIRED_FIELDS_RATE=1.00`
 - `VERTEX_AUTOTRAIN_MAX_SCORE_REGRESSION=0.01`
@@ -97,24 +102,25 @@ Required config (see `.env.example`):
 - `VERTEX_AUTOTRAIN_POLL_MINUTES=15`
 - `VERTEX_AUTOTRAIN_MAX_HOURS=48`
 - `VERTEX_AUTOTRAIN_RETENTION_DAYS=180`
-- `VERTEX_AUTOTRAIN_KEEP_SUCCESSFUL_VERSIONS=4`
-- `VERTEX_AUTOTRAIN_REQUIRE_MANUAL_APPROVAL=false`
-- `VERTEX_AUTOTRAIN_ROLLBACK_ON_HEALTH_FAILURE=true`
 - `VERTEX_AUTOTRAIN_RUNTIME_FALLBACK=true`
-- `VERTEX_AUTOTRAIN_NOTIFICATION_EMAILS=ops@example.com,ml@example.com` (optional)
+- `VERTEX_AUTOTRAIN_NOTIFICATION_EMAILS=adocare@studiokristian.com`
+- `VERTEX_PROPOSAL_AUTOTRAIN_STATE_PATH`, `VERTEX_PROPOSAL_AUTOTRAIN_DATASET_PREFIX`
 
-Scheduler:
+Scheduler (requires the Laravel scheduler cron and a queue worker):
 
 - Registered in `bootstrap/app.php`:
-	- `Schedule::command('vertex:monthly-retrain')->monthlyOn(1, '02:30')->withoutOverlapping(1440)->onOneServer()`
+	- `Schedule::command('vertex:monthly-retrain')->dailyAt('02:30')->withoutOverlapping(1440)->onOneServer()`
 
 Operational commands:
 
+- `php artisan vertex:backfill-feedback [--pipeline=dekurz] [--since=2026-05-01]`
 - `php artisan vertex:monthly-retrain --dry-run`
 - `php artisan vertex:monthly-retrain`
 - `php artisan vertex:monthly-retrain --force`
+- `php artisan vertex:monthly-retrain --pipeline=proposal`
 - `php artisan vertex:run-status`
 - `php artisan vertex:run-status --id=123`
+- `php artisan vertex:run-status --pipeline=proposal`
 - `php artisan vertex:check-job "projects/.../tuningJobs/..."`
 - `php artisan vertex:evaluate-candidate 123`
 - `php artisan vertex:promote-candidate 123`

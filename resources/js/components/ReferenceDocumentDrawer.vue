@@ -8,6 +8,7 @@ import {
     watch,
 } from 'vue'
 
+import A4DocumentFrame from '@/components/documents/A4DocumentFrame.vue'
 import api from '@/services/api'
 import {
     useReferenceDocumentDrawerManager,
@@ -15,6 +16,7 @@ import {
 
 const props = withDefaults(
     defineProps<{
+        aspectRatio?: number
         available?: boolean
         handleLabel?: string
         previewUrl?: string | null
@@ -22,6 +24,8 @@ const props = withDefaults(
         title: string
     }>(),
     {
+        aspectRatio:
+            210 / 297,
         available: false,
         handleLabel:
             'Zobraziť referenčný dokument',
@@ -44,10 +48,15 @@ const MAX_BUBBLE_WIDTH = 420
 const BUBBLE_EXTRA_SPACE = 24
 
 const DEFAULT_WINDOW_WIDTH = 440
-const DEFAULT_WINDOW_HEIGHT = 520
+const DEFAULT_WINDOW_HEIGHT = 620
 
-const MIN_WINDOW_WIDTH = 320
-const MIN_WINDOW_HEIGHT = 280
+/*
+ * The window body always keeps the document's
+ * aspect ratio, so only the header adds height.
+ */
+const WINDOW_HEADER_HEIGHT = 34
+const MIN_CONTENT_SIDE = 240
+const MAX_DEFAULT_WINDOW_WIDTH = 720
 
 const VELOCITY_MULTIPLIER = 1.08
 const FRICTION = 3.4
@@ -1170,6 +1179,188 @@ function handleBubbleClick() {
 /* Window sizing                                                              */
 /* -------------------------------------------------------------------------- */
 
+const contentAspectRatio =
+    ref(props.aspectRatio)
+
+function getAspectRatio() {
+    const ratio =
+        contentAspectRatio.value
+
+    return Number.isFinite(ratio) &&
+        ratio > 0
+        ? ratio
+        : 210 / 297
+}
+
+function getHeightForWidth(
+    width: number,
+) {
+    return (
+        width /
+            getAspectRatio() +
+        WINDOW_HEADER_HEIGHT
+    )
+}
+
+function getDefaultWindowWidth() {
+    return Math.min(
+        Math.max(
+            DEFAULT_WINDOW_WIDTH *
+                0.75,
+
+            (DEFAULT_WINDOW_HEIGHT -
+                WINDOW_HEADER_HEIGHT) *
+                getAspectRatio(),
+        ),
+
+        MAX_DEFAULT_WINDOW_WIDTH,
+    )
+}
+
+/*
+ * Returns a ratio-locked window size for the
+ * desired width that fits into the given space.
+ */
+function getRatioWindowSize(
+    desiredWidth: number,
+    availableWidth =
+        getAreaWidth() -
+        AREA_MARGIN *
+            2,
+    availableHeight =
+        getAreaHeight() -
+        AREA_MARGIN *
+            2,
+) {
+    const ratio =
+        getAspectRatio()
+
+    const maximumWidth =
+        Math.max(
+            0,
+
+            Math.min(
+                availableWidth,
+
+                (availableHeight -
+                    WINDOW_HEADER_HEIGHT) *
+                    ratio,
+            ),
+        )
+
+    const minimumWidth =
+        Math.min(
+            maximumWidth,
+
+            Math.max(
+                MIN_CONTENT_SIDE,
+                MIN_CONTENT_SIDE *
+                    ratio,
+            ),
+        )
+
+    const width =
+        clamp(
+            desiredWidth,
+            minimumWidth,
+            maximumWidth,
+        )
+
+    return {
+        width,
+
+        height:
+            getHeightForWidth(
+                width,
+            ),
+    }
+}
+
+function setContentAspectRatio(
+    ratio: number,
+) {
+    if (
+        !Number.isFinite(ratio) ||
+        ratio <= 0 ||
+        Math.abs(
+            ratio -
+                contentAspectRatio.value,
+        ) < 0.001
+    ) {
+        return
+    }
+
+    /*
+     * Keep the current window height where
+     * possible and let the width follow the
+     * newly known document format.
+     */
+    const currentContentHeight =
+        Math.max(
+            0,
+
+            windowSize.value.height -
+                WINDOW_HEADER_HEIGHT,
+        )
+
+    const preferredContentHeight =
+        Math.max(
+            0,
+
+            preferredWindowSize.value.height -
+                WINDOW_HEADER_HEIGHT,
+        )
+
+    contentAspectRatio.value =
+        ratio
+
+    preferredWindowSize.value =
+        getRatioWindowSize(
+            Math.min(
+                preferredContentHeight *
+                    ratio,
+
+                MAX_DEFAULT_WINDOW_WIDTH,
+            ),
+        )
+
+    if (
+        !isOpen.value ||
+        isMorphing.value
+    ) {
+        return
+    }
+
+    const previousRight =
+        windowPosition.value.x +
+        windowSize.value.width
+
+    windowSize.value =
+        getRatioWindowSize(
+            Math.min(
+                currentContentHeight *
+                    ratio,
+
+                MAX_DEFAULT_WINDOW_WIDTH,
+            ),
+        )
+
+    // Keep the right edge in place, the drawers live on the right side.
+    windowPosition.value = {
+        ...windowPosition.value,
+
+        x:
+            previousRight -
+            windowSize.value.width,
+    }
+
+    if (
+        !isInitialIntro.value
+    ) {
+        fitWindowToArea()
+    }
+}
+
 function initializeWindowSize() {
     if (
         windowInitialized
@@ -1177,37 +1368,10 @@ function initializeWindowSize() {
         return
     }
 
-    const maximumWidth =
-        Math.max(
-            0,
-
-            getAreaWidth() -
-                AREA_MARGIN *
-                    2,
+    preferredWindowSize.value =
+        getRatioWindowSize(
+            getDefaultWindowWidth(),
         )
-
-    const maximumHeight =
-        Math.max(
-            0,
-
-            getAreaHeight() -
-                AREA_MARGIN *
-                    2,
-        )
-
-    preferredWindowSize.value = {
-        width:
-            Math.min(
-                DEFAULT_WINDOW_WIDTH,
-                maximumWidth,
-            ),
-
-        height:
-            Math.min(
-                DEFAULT_WINDOW_HEIGHT,
-                maximumHeight,
-            ),
-    }
 
     windowSize.value = {
         ...preferredWindowSize.value,
@@ -1222,55 +1386,11 @@ function initializeWindowSize() {
 /* -------------------------------------------------------------------------- */
 
 function fitWindowToArea() {
-    const maximumWidth =
-        Math.max(
-            0,
-
-            getAreaWidth() -
-                AREA_MARGIN *
-                    2,
+    windowSize.value =
+        getRatioWindowSize(
+            windowSize.value
+                .width,
         )
-
-    const maximumHeight =
-        Math.max(
-            0,
-
-            getAreaHeight() -
-                AREA_MARGIN *
-                    2,
-        )
-
-    const minimumWidth =
-        Math.min(
-            MIN_WINDOW_WIDTH,
-            maximumWidth,
-        )
-
-    const minimumHeight =
-        Math.min(
-            MIN_WINDOW_HEIGHT,
-            maximumHeight,
-        )
-
-    windowSize.value = {
-        width:
-            clamp(
-                windowSize.value
-                    .width,
-
-                minimumWidth,
-                maximumWidth,
-            ),
-
-        height:
-            clamp(
-                windowSize.value
-                    .height,
-
-                minimumHeight,
-                maximumHeight,
-            ),
-    }
 
     windowPosition.value = {
         x:
@@ -1551,10 +1671,6 @@ async function openDocument() {
         preferredWindowSize.value
             .width
 
-    const targetHeight =
-        preferredWindowSize.value
-            .height
-
     const currentBubbleWidth =
         getBubbleWidth()
 
@@ -1596,30 +1712,15 @@ async function openDocument() {
         () => {
             requestAnimationFrame(
                 () => {
-                    const finalWidth =
-                        Math.min(
+                    const {
+                        width:
+                            finalWidth,
+
+                        height:
+                            finalHeight,
+                    } =
+                        getRatioWindowSize(
                             targetWidth,
-
-                            Math.max(
-                                0,
-
-                                getAreaWidth() -
-                                    AREA_MARGIN *
-                                        2,
-                            ),
-                        )
-
-                    const finalHeight =
-                        Math.min(
-                            targetHeight,
-
-                            Math.max(
-                                0,
-
-                                getAreaHeight() -
-                                    AREA_MARGIN *
-                                        2,
-                            ),
                         )
 
                     const targetX =
@@ -1908,32 +2009,16 @@ async function playInitialPreview() {
     bubblePosition.value =
         getInitialBubblePosition()
 
-    const finalWidth =
-        Math.min(
+    const {
+        width:
+            finalWidth,
+
+        height:
+            finalHeight,
+    } =
+        getRatioWindowSize(
             preferredWindowSize.value
                 .width,
-
-            Math.max(
-                0,
-
-                getAreaWidth() -
-                    AREA_MARGIN *
-                        2,
-            ),
-        )
-
-    const finalHeight =
-        Math.min(
-            preferredWindowSize.value
-                .height,
-
-            Math.max(
-                0,
-
-                getAreaHeight() -
-                    AREA_MARGIN *
-                        2,
-            ),
         )
 
     windowPosition.value = {
@@ -2203,195 +2288,89 @@ function moveWindow(
         type ===
             'resize-bottom-left'
 
-    const resizeRight =
-        type ===
-            'resize-top-right' ||
-        type ===
-            'resize-bottom-right'
-
     const resizeTop =
         type ===
             'resize-top-left' ||
         type ===
             'resize-top-right'
 
-    const resizeBottom =
-        type ===
-            'resize-bottom-left' ||
-        type ===
-            'resize-bottom-right'
+    const ratio =
+        getAspectRatio()
 
-    let left =
-        windowInteraction.left
-
-    let right =
-        windowInteraction.right
-
-    let top =
-        windowInteraction.top
-
-    let bottom =
-        windowInteraction.bottom
-
-    if (
+    /*
+     * The opposite corner stays anchored and
+     * the larger pointer movement wins, so the
+     * window always follows the document ratio.
+     */
+    const anchorX =
         resizeLeft
-    ) {
-        const effectiveMinWidth =
-            Math.min(
-                MIN_WINDOW_WIDTH,
+            ? windowInteraction.right
+            : windowInteraction.left
 
-                Math.max(
-                    0,
-
-                    getAreaWidth() -
-                        AREA_MARGIN *
-                            2,
-                ),
-            )
-
-        const maximumLeft =
-            Math.max(
-                AREA_MARGIN,
-
-                windowInteraction.right -
-                    effectiveMinWidth,
-            )
-
-        left =
-            clamp(
-                windowInteraction.left +
-                    deltaX,
-
-                AREA_MARGIN,
-                maximumLeft,
-            )
-    }
-
-    if (
-        resizeRight
-    ) {
-        const effectiveMinWidth =
-            Math.min(
-                MIN_WINDOW_WIDTH,
-
-                Math.max(
-                    0,
-
-                    getAreaWidth() -
-                        AREA_MARGIN *
-                            2,
-                ),
-            )
-
-        const minimumRight =
-            Math.min(
-                getAreaWidth() -
-                    AREA_MARGIN,
-
-                windowInteraction.left +
-                    effectiveMinWidth,
-            )
-
-        right =
-            clamp(
-                windowInteraction.right +
-                    deltaX,
-
-                minimumRight,
-
-                getAreaWidth() -
-                    AREA_MARGIN,
-            )
-    }
-
-    if (
+    const anchorY =
         resizeTop
-    ) {
-        const effectiveMinHeight =
-            Math.min(
-                MIN_WINDOW_HEIGHT,
+            ? windowInteraction.bottom
+            : windowInteraction.top
 
-                Math.max(
-                    0,
+    const widthFromHorizontal =
+        windowInteraction.width +
+        (resizeLeft
+            ? -deltaX
+            : deltaX)
 
-                    getAreaHeight() -
-                        AREA_MARGIN *
-                            2,
-                ),
-            )
+    const heightFromVertical =
+        windowInteraction.height +
+        (resizeTop
+            ? -deltaY
+            : deltaY)
 
-        const maximumTop =
+    const widthFromVertical =
+        (heightFromVertical -
+            WINDOW_HEADER_HEIGHT) *
+        ratio
+
+    const availableWidth =
+        resizeLeft
+            ? anchorX -
+              AREA_MARGIN
+            : getAreaWidth() -
+              AREA_MARGIN -
+              anchorX
+
+    const availableHeight =
+        resizeTop
+            ? anchorY -
+              AREA_MARGIN
+            : getAreaHeight() -
+              AREA_MARGIN -
+              anchorY
+
+    const nextSize =
+        getRatioWindowSize(
             Math.max(
-                AREA_MARGIN,
-
-                windowInteraction.bottom -
-                    effectiveMinHeight,
-            )
-
-        top =
-            clamp(
-                windowInteraction.top +
-                    deltaY,
-
-                AREA_MARGIN,
-                maximumTop,
-            )
-    }
-
-    if (
-        resizeBottom
-    ) {
-        const effectiveMinHeight =
-            Math.min(
-                MIN_WINDOW_HEIGHT,
-
-                Math.max(
-                    0,
-
-                    getAreaHeight() -
-                        AREA_MARGIN *
-                            2,
-                ),
-            )
-
-        const minimumBottom =
-            Math.min(
-                getAreaHeight() -
-                    AREA_MARGIN,
-
-                windowInteraction.top +
-                    effectiveMinHeight,
-            )
-
-        bottom =
-            clamp(
-                windowInteraction.bottom +
-                    deltaY,
-
-                minimumBottom,
-
-                getAreaHeight() -
-                    AREA_MARGIN,
-            )
-    }
+                widthFromHorizontal,
+                widthFromVertical,
+            ),
+            availableWidth,
+            availableHeight,
+        )
 
     windowPosition.value = {
         x:
-            left,
+            resizeLeft
+                ? anchorX -
+                  nextSize.width
+                : anchorX,
 
         y:
-            top,
+            resizeTop
+                ? anchorY -
+                  nextSize.height
+                : anchorY,
     }
 
-    windowSize.value = {
-        width:
-            right -
-            left,
-
-        height:
-            bottom -
-            top,
-    }
+    windowSize.value =
+        nextSize
 }
 
 function stopWindowInteraction(
@@ -2746,6 +2725,17 @@ watch(
         }
 
         initializeBubblePosition()
+    },
+)
+
+watch(
+    () =>
+        props.aspectRatio,
+
+    ratio => {
+        setContentAspectRatio(
+            ratio,
+        )
     },
 )
 
@@ -3268,6 +3258,9 @@ onBeforeUnmount(() => {
                             $slots.default &&
                             isOpen
                         "
+                        :set-aspect-ratio="
+                            setContentAspectRatio
+                        "
                     />
 
                     <!-- LOADING -->
@@ -3325,7 +3318,7 @@ onBeforeUnmount(() => {
 
                     <!-- IFRAME -->
 
-                    <iframe
+                    <A4DocumentFrame
                         v-else-if="
                             resolvedPreviewUrl &&
                             isOpen
@@ -3335,12 +3328,6 @@ onBeforeUnmount(() => {
                         "
                         :title="
                             title
-                        "
-                        class="
-                            h-full
-                            w-full
-                            border-0
-                            bg-white
                         "
                         @load="
                             handlePreviewFrameLoaded

@@ -3,7 +3,9 @@
 namespace App\Jobs;
 
 use App\Enums\VertexTrainingRunStatus;
+use App\Jobs\Concerns\FailsVertexTrainingRun;
 use App\Models\VertexTrainingRun;
+use App\Services\Vertex\Training\VertexTrainingTasks;
 use App\Services\Vertex\VertexAutotrainStateService;
 use App\Services\Vertex\VertexInferenceClient;
 use App\Services\Vertex\VertexModelPromotionService;
@@ -20,6 +22,7 @@ class PostPromotionHealthCheckJob implements ShouldQueue
     use InteractsWithQueue;
     use Queueable;
     use SerializesModels;
+    use FailsVertexTrainingRun;
 
     public int $tries = 3;
 
@@ -31,7 +34,8 @@ class PostPromotionHealthCheckJob implements ShouldQueue
         VertexAutotrainStateService $stateService,
         VertexInferenceClient $inferenceClient,
         VertexModelPromotionService $promotionService,
-        VertexTrainingRunNotifier $notifier
+        VertexTrainingRunNotifier $notifier,
+        VertexTrainingTasks $tasks
     ): void {
         $run = VertexTrainingRun::query()->find($this->runId);
 
@@ -39,7 +43,8 @@ class PostPromotionHealthCheckJob implements ShouldQueue
             return;
         }
 
-        $state = $stateService->read();
+        $task = $tasks->get((string) $run->pipeline);
+        $state = $stateService->read($task->pipeline());
         $location = trim((string) ($state['active_location'] ?? ''));
         $endpointId = trim((string) ($state['active_endpoint_id'] ?? ''));
 
@@ -48,25 +53,12 @@ class PostPromotionHealthCheckJob implements ShouldQueue
             return;
         }
 
-        $smokePrompt = "You are given a structured nursing proposal. Return JSON only in shape {\"sections\":[{\"text\":\"...\"}]}. INPUT JSON:\n{\"diagnosis\":[\"I10\"],\"nurse_diagnosis\":[\"A110\"],\"epicrisis\":\"Stabilizovaný stav\",\"care_plan\":\"Monitoring\",\"mobility\":[\"I\"],\"expected_duration\":\"one_month\",\"procedures\":[{\"code\":\"3439\",\"frequency\":\"daily\"}]}";
-
         try {
-            $response = $inferenceClient->invokeEndpoint($location, $endpointId, $smokePrompt);
+            $response = $inferenceClient->invokeEndpoint($location, $endpointId, $task->smokePrompt(), $task->systemInstruction());
             $text = trim((string) data_get($response, 'candidates.0.content.parts.0.text', ''));
-            if ($text === '') {
-                $text = trim((string) data_get($response, 'predictions.0.content.parts.0.text', ''));
-            }
-
             $decoded = json_decode($text, true);
-            $sections = data_get($decoded, 'sections', []);
 
-            $valid = is_array($decoded)
-                && is_array($sections)
-                && ! empty($sections)
-                && collect($sections)->every(fn ($s) => is_array($s) && trim((string) ($s['text'] ?? '')) !== '')
-                && ! str_contains($text, '```');
-
-            if (! $valid) {
+            if (! is_array($decoded) || str_contains($text, '```') || ! $task->isValidOutput($decoded)) {
                 $promotionService->rollback($run, 'Post-promotion health check zlyhal: neplatná odpoveď kandidáta.');
                 return;
             }

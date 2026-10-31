@@ -3,12 +3,13 @@
 namespace App\Services\Vertex;
 
 use App\Models\VertexTrainingRun;
+use App\Services\Vertex\Training\VertexTrainingTasks;
 use Illuminate\Support\Facades\Http;
 
 class VertexTuningService
 {
     public function __construct(
-        private readonly VertexAutotrainStateService $stateService,
+        private readonly VertexTrainingTasks $tasks,
         private readonly VertexAuthService $authService
     ) {
     }
@@ -16,7 +17,7 @@ class VertexTuningService
     public function createTuningJob(VertexTrainingRun $run): string
     {
         $projectId = trim((string) config('services.vertex_ai.project_id'));
-        $location = trim((string) config('services.vertex_ai.dekurz.location', 'europe-southwest1'));
+        $location = $this->tuningLocation((string) $run->pipeline);
         $endpoint = trim((string) config('services.vertex_ai.auto_train.training_endpoint', 'tuningJobs'));
         $credentialsPath = trim((string) config('services.vertex_ai.credentials_path'));
 
@@ -24,7 +25,7 @@ class VertexTuningService
             throw new \RuntimeException('Vertex AI konfigurácia pre retrénovanie je neúplná.');
         }
 
-        $baseModel = $this->resolveBaseModel();
+        $baseModel = $this->baseModel();
         $accessToken = $this->authService->getAccessToken($credentialsPath);
 
         $url = sprintf(
@@ -45,7 +46,7 @@ class VertexTuningService
                     'trainingDatasetUri' => (string) $run->training_dataset_uri,
                     'validationDatasetUri' => (string) $run->validation_dataset_uri,
                 ],
-                'tunedModelDisplayName' => 'dekurz-autotrain-' . ($run->version ?: now()->format('Ymd-His')),
+                'tunedModelDisplayName' => 'adocare-' . $run->pipeline . '-autotrain-' . ($run->version ?: now()->format('Ymd-His')),
             ]);
 
         if (! $response->successful()) {
@@ -77,7 +78,7 @@ class VertexTuningService
      */
     public function getTuningJob(string $jobName): array
     {
-        $location = trim((string) config('services.vertex_ai.dekurz.location', 'europe-southwest1'));
+        $location = $this->locationFromResourceName($jobName);
         $credentialsPath = trim((string) config('services.vertex_ai.credentials_path'));
 
         if ($location === '' || $credentialsPath === '') {
@@ -107,7 +108,7 @@ class VertexTuningService
 
     public function cancelTuningJob(string $jobName): void
     {
-        $location = trim((string) config('services.vertex_ai.dekurz.location', 'europe-southwest1'));
+        $location = $this->locationFromResourceName($jobName);
         $credentialsPath = trim((string) config('services.vertex_ai.credentials_path'));
 
         if ($location === '' || $credentialsPath === '') {
@@ -139,7 +140,7 @@ class VertexTuningService
         $endpointId = trim((string) ($endpointMatch[1] ?? ''));
 
         preg_match('/locations\/([^\/]+)/', $endpointName, $locationMatch);
-        $location = trim((string) ($locationMatch[1] ?? config('services.vertex_ai.dekurz.location', '')));
+        $location = trim((string) ($locationMatch[1] ?? ''));
 
         if ($endpointId === '' || $location === '') {
             throw new \RuntimeException('Vertex endpoint deployment údaje sú neplatné.');
@@ -153,16 +154,25 @@ class VertexTuningService
         ];
     }
 
-    private function resolveBaseModel(): string
+    /**
+     * Every run tunes the configured publisher model on the full cumulative dataset.
+     */
+    public function baseModel(): string
     {
-        $state = $this->stateService->read();
-        $activeModel = trim((string) ($state['active_model_name'] ?? ''));
-
-        if ($activeModel !== '') {
-            return $activeModel;
-        }
-
-        return trim((string) config('services.vertex_ai.auto_train.base_model', 'publishers/google/models/gemini-2.5-flash'));
+        return trim((string) config('services.vertex_ai.auto_train.base_model', 'publishers/google/models/gemini-3.5-flash'));
     }
 
+    private function tuningLocation(string $pipeline): string
+    {
+        $override = trim((string) config('services.vertex_ai.auto_train.tuning_location'));
+
+        return $override !== '' ? $override : $this->tasks->get($pipeline)->location();
+    }
+
+    private function locationFromResourceName(string $name): string
+    {
+        preg_match('/locations\/([^\/]+)/', $name, $match);
+
+        return trim((string) ($match[1] ?? ''));
+    }
 }

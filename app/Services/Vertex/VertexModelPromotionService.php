@@ -4,13 +4,15 @@ namespace App\Services\Vertex;
 
 use App\Enums\VertexTrainingRunStatus;
 use App\Models\VertexTrainingRun;
+use App\Services\Vertex\Training\VertexTrainingTasks;
 use Illuminate\Support\Facades\Cache;
 
 class VertexModelPromotionService
 {
     public function __construct(
         private readonly VertexAutotrainStateService $stateService,
-        private readonly VertexTrainingRunNotifier $notifier
+        private readonly VertexTrainingRunNotifier $notifier,
+        private readonly VertexTrainingTasks $tasks
     ) {
     }
 
@@ -20,26 +22,28 @@ class VertexModelPromotionService
      */
     public function promote(VertexTrainingRun $run, array $deployment, array $evaluation): void
     {
-        $lock = Cache::lock('vertex-retraining:dekurz:promotion', 300);
+        $task = $this->tasks->get((string) $run->pipeline);
+        $lock = Cache::lock('vertex-retraining:'.$task->pipeline().':promotion', 300);
 
         if (! $lock->get()) {
             throw new \RuntimeException('Promócia modelu je práve uzamknutá iným procesom.');
         }
 
         try {
-            $state = $this->stateService->read();
+            $state = $this->stateService->read($task->pipeline());
 
             $newState = [
                 'schema_version' => 1,
-                'pipeline' => 'dekurz',
+                'pipeline' => $task->pipeline(),
+                'base_model' => (string) data_get($run->metadata, 'base_model', config('services.vertex_ai.auto_train.base_model')),
                 'active_model_name' => $deployment['model_name'] ?? '',
                 'active_endpoint_name' => $deployment['endpoint_name'] ?? '',
                 'active_endpoint_id' => $deployment['endpoint_id'] ?? '',
                 'active_location' => $deployment['location'] ?? '',
                 'previous_model_name' => (string) ($state['active_model_name'] ?? ''),
                 'previous_endpoint_name' => (string) ($state['active_endpoint_name'] ?? ''),
-                'previous_endpoint_id' => (string) ($state['active_endpoint_id'] ?? config('services.vertex_ai.dekurz.endpoint_id')),
-                'previous_location' => (string) ($state['active_location'] ?? config('services.vertex_ai.dekurz.location')),
+                'previous_endpoint_id' => (string) ($state['active_endpoint_id'] ?? $task->staticEndpointId()),
+                'previous_location' => (string) ($state['active_location'] ?? $task->location()),
                 'training_run_id' => $run->id,
                 'dataset_version' => (string) $run->version,
                 'dataset_hash' => (string) $run->dataset_hash,
@@ -47,7 +51,7 @@ class VertexModelPromotionService
                 'activated_at' => now()->toIso8601String(),
             ];
 
-            $this->stateService->writeAtomic($newState);
+            $this->stateService->writeAtomic($newState, $task->pipeline());
 
             $run->status = VertexTrainingRunStatus::Promoted->value;
             $run->promoted_at = now();
@@ -62,19 +66,20 @@ class VertexModelPromotionService
 
     public function rollback(VertexTrainingRun $run, string $reason): void
     {
-        $lock = Cache::lock('vertex-retraining:dekurz:promotion', 300);
+        $task = $this->tasks->get((string) $run->pipeline);
+        $lock = Cache::lock('vertex-retraining:'.$task->pipeline().':promotion', 300);
 
         if (! $lock->get()) {
             return;
         }
 
         try {
-            $state = $this->stateService->read();
+            $state = $this->stateService->read($task->pipeline());
 
             $previousModel = trim((string) ($state['previous_model_name'] ?? ''));
             $previousEndpointName = trim((string) ($state['previous_endpoint_name'] ?? ''));
-            $previousEndpointId = trim((string) ($state['previous_endpoint_id'] ?? config('services.vertex_ai.dekurz.endpoint_id')));
-            $previousLocation = trim((string) ($state['previous_location'] ?? config('services.vertex_ai.dekurz.location')));
+            $previousEndpointId = trim((string) ($state['previous_endpoint_id'] ?? $task->staticEndpointId()));
+            $previousLocation = trim((string) ($state['previous_location'] ?? $task->location()));
 
             $rollbackState = [
                 ...$state,
@@ -87,7 +92,7 @@ class VertexModelPromotionService
                 'rollback_reason' => $reason,
             ];
 
-            $this->stateService->writeAtomic($rollbackState);
+            $this->stateService->writeAtomic($rollbackState, $task->pipeline());
 
             $run->status = VertexTrainingRunStatus::RolledBack->value;
             $run->failed_at = now();

@@ -73,7 +73,7 @@ export interface DekurzDay {
 }
 
 export interface DekurzSupportingDocument {
-    key: 'finding' | 'proposal' | 'previous_dekurz'
+    key: 'finding' | 'previous_finding' | 'proposal' | 'previous_dekurz'
     label: string
     status: 'found' | 'missing'
     document: {

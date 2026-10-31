@@ -9,9 +9,9 @@ class VertexAutotrainStateService
     /**
      * @return array<string, mixed>
      */
-    public function read(): array
+    public function read(string $pipeline = 'dekurz'): array
     {
-        $path = $this->statePath();
+        $path = $this->statePath($pipeline);
 
         if (! Storage::disk('local')->exists($path)) {
             return [];
@@ -26,9 +26,9 @@ class VertexAutotrainStateService
     /**
      * @param array<string, mixed> $state
      */
-    public function writeAtomic(array $state): void
+    public function writeAtomic(array $state, string $pipeline = 'dekurz'): void
     {
-        $path = $this->statePath();
+        $path = $this->statePath($pipeline);
         $directory = trim((string) dirname($path), '.');
 
         if ($directory !== '' && ! Storage::disk('local')->exists($directory)) {
@@ -61,8 +61,12 @@ class VertexAutotrainStateService
         }
     }
 
-    public function statePath(): string
+    public function statePath(string $pipeline = 'dekurz'): string
     {
+        if ($pipeline === 'proposal') {
+            return trim((string) config('services.vertex_ai.proposal.state_path', 'ai/proposal-autotrain/state.json'));
+        }
+
         return trim((string) config('services.vertex_ai.auto_train.state_path', 'ai/dekurz-autotrain/state.json'));
     }
 }

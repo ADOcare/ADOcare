@@ -31,18 +31,47 @@ type ScanData = {
 
 const props = withDefaults(
     defineProps<{
+        bare?: boolean
         data?: ScanData | null
         documentId?: number | string | null
         isPublic?: boolean
         loading?: boolean
     }>(),
     {
+        bare: false,
         data: null,
         documentId: null,
         isPublic: false,
         loading: false,
     },
 )
+
+const emit = defineEmits<{
+    aspectRatioChange: [ratio: number]
+}>()
+
+function handleImageLoad(
+    event: Event,
+    index: number,
+) {
+    if (index !== 0) {
+        return
+    }
+
+    const image =
+        event.target as HTMLImageElement
+
+    if (
+        image.naturalWidth > 0 &&
+        image.naturalHeight > 0
+    ) {
+        emit(
+            'aspectRatioChange',
+            image.naturalWidth /
+                image.naturalHeight,
+        )
+    }
+}
 
 const toast =
     useToast()
@@ -457,8 +486,10 @@ onBeforeUnmount(() => {
             min-h-0
             overflow-y-auto
             bg-white
-            p-4
         "
+        :class="{
+            'p-4': !bare,
+        }"
     >
         <div
             v-if="isLoading"
@@ -487,10 +518,11 @@ onBeforeUnmount(() => {
                 mx-auto
                 flex
                 w-full
-                max-w-2xl
                 flex-col
-                gap-4
             "
+            :class="{
+                'max-w-2xl gap-4': !bare,
+            }"
         >
             <article
                 v-for="(
@@ -502,11 +534,10 @@ onBeforeUnmount(() => {
                     relative
                     w-full
                     overflow-hidden
-                    rounded-md
-                    border
-                    border-tag3
-                    bg-tag3
                 "
+                :class="{
+                    'rounded-md border border-tag3 bg-tag3': !bare,
+                }"
             >
                 <img
                     :src="page.image_url"
@@ -517,13 +548,22 @@ onBeforeUnmount(() => {
                         mx-auto
                         block
                         h-auto
-                        max-w-full
-                        rounded-md
+                    "
+                    :class="
+                        bare
+                            ? 'w-full'
+                            : 'max-w-full rounded-md'
+                    "
+                    @load="
+                        handleImageLoad(
+                            $event,
+                            index,
+                        )
                     "
                 />
 
                 <AppButton
-                    v-if="!isPublic"
+                    v-if="!isPublic && !bare"
                     type="button"
                     icon="bi bi-text-paragraph"
                     :label="

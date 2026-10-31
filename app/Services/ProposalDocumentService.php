@@ -6,12 +6,16 @@ use App\Models\Branch;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
+use App\Services\Vertex\VertexFeedbackRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class ProposalDocumentService
 {
-    public function __construct(private ImmediateDocumentationAuditService $immediateAudit) {}
+    public function __construct(
+        private ImmediateDocumentationAuditService $immediateAudit,
+        private VertexFeedbackRecorder $feedbackRecorder,
+    ) {}
 
     /**
      * Create proposal document and persist JSON payload.
@@ -64,6 +68,7 @@ class ProposalDocumentService
         }
 
         $this->immediateAudit->documentsChanged([$document]);
+        $this->feedbackRecorder->recordProposal($document, $patient);
 
         return [$document, $payload];
     }

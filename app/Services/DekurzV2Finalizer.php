@@ -6,6 +6,7 @@ use App\Models\DekurzDraft;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Models\User;
+use App\Services\Vertex\VertexFeedbackRecorder;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -19,15 +20,17 @@ class DekurzV2Finalizer
         private DekurzFinalizationValidator $validator,
         private DekurzV2SnapshotBuilder $snapshots,
         private DocumentService $documents,
+        private VertexFeedbackRecorder $feedbackRecorder,
     ) {}
 
     public function finalize(Patient $patient, DekurzDraft $draft, User $actor, ?int $previewPageCount = null): Document
     {
         $jsonPath = null;
         $pdfPath = null;
+        $snapshot = null;
 
         try {
-            return DB::transaction(function () use ($patient, $draft, $actor, $previewPageCount, &$jsonPath, &$pdfPath): Document {
+            $document = DB::transaction(function () use ($patient, $draft, $actor, $previewPageCount, &$jsonPath, &$pdfPath, &$snapshot): Document {
                 $lockedPatient = Patient::query()->lockForUpdate()->findOrFail($patient->id);
                 $lockedDraft = DekurzDraft::query()->lockForUpdate()->findOrFail($draft->id);
                 $previousDocumentId = $lockedDraft->final_document_id;
@@ -100,5 +103,9 @@ class DekurzV2Finalizer
 
             throw $exception;
         }
+
+        $this->feedbackRecorder->recordDekurz($document, $snapshot);
+
+        return $document;
     }
 }

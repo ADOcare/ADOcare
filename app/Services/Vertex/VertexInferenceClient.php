@@ -14,7 +14,7 @@ class VertexInferenceClient
     /**
      * @return array<string, mixed>
      */
-    public function invokeEndpoint(string $location, string $endpointId, string $prompt): array
+    public function invokeEndpoint(string $location, string $endpointId, string $prompt, ?string $systemInstruction = null): array
     {
         $projectId = trim((string) config('services.vertex_ai.project_id'));
         $credentialsPath = trim((string) config('services.vertex_ai.credentials_path'));
@@ -40,7 +40,7 @@ class VertexInferenceClient
             ->post($url, [
                 'systemInstruction' => [
                     'parts' => [[
-                        'text' => 'You are a nursing documentation assistant. Return valid JSON only.',
+                        'text' => $systemInstruction ?? 'You are a nursing documentation assistant. Return valid JSON only.',
                     ]],
                 ],
                 'contents' => [[

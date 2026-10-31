@@ -6,6 +6,7 @@ use App\Jobs\HandleVertexModelIncidentJob;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Services\Vertex\DekurzPromptBuilder;
+use App\Services\Vertex\VertexSuggestionCache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -13,7 +14,8 @@ use Illuminate\Support\Facades\Storage;
 class DekurzAiPrefillService
 {
         public function __construct(
-            private readonly DekurzPromptBuilder $promptBuilder
+            private readonly DekurzPromptBuilder $promptBuilder,
+            private readonly VertexSuggestionCache $suggestionCache
         ) {
         }
 
@@ -47,10 +49,14 @@ class DekurzAiPrefillService
             );
         }
 
-        return [
+        $suggestion = [
             'proposal_document_id' => $document->id,
             'sections' => $this->callVertexAndParse($proposal),
         ];
+
+        $this->suggestionCache->remember('dekurz', (int) $patient->id, $suggestion);
+
+        return $suggestion;
     }
 
     /**

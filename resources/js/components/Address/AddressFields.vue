@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import InputText from 'primevue/inputtext'
-import Message from 'primevue/message'
 import AddressAutocomplete from './AddressAutocomplete.vue'
 import MapSelector from './MapSelector.vue'
 import { addressDistanceKm, useAddressForm } from '@/composables/address'

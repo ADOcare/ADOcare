@@ -107,5 +107,5 @@ function onInput(v: any) {
 
 <template>
     <AutoComplete v-model="query" :suggestions="suggestions" optionLabel="label" @complete="onComplete"
-        @item-select="onSelect" @input="onInput" class="w-full" />
+        @option-select="onSelect" @input="onInput" class="w-full" />
 </template>

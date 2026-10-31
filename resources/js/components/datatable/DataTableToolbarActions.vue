@@ -56,7 +56,7 @@ function getLabel(
     action: ActionDef<IBaseModel>,
 ): string {
     return (
-        action.label?.trim() ||
+        (typeof action.label === 'function' ? action.label(getContext()) : action.label)?.trim() ||
         getTooltip(action) ||
         action.key ||
         'Akcia'
@@ -91,18 +91,23 @@ function isDisabled(
 
 <template>
     <template v-if="actions?.length">
-        <AppButton
+        <span
             v-for="action in actions"
             :key="action.key"
-            :variant="action.variant ?? 'dark'"
-            :class="getClass(action)"
-            expand-on-hover
-            :icon="getIcon(action)"
-            :label="getLabel(action)"
-            :aria-label="getLabel(action)"
-            :disabled="isDisabled(action)"
-            :initial-expand-ms="0"
-            @click="emits('action', action)"
-        />
+            v-tooltip.top="getTooltip(action)"
+            class="inline-flex"
+        >
+            <AppButton
+                :variant="action.variant ?? 'dark'"
+                :class="getClass(action)"
+                expand-on-hover
+                :icon="getIcon(action)"
+                :label="getLabel(action)"
+                :aria-label="getLabel(action)"
+                :disabled="isDisabled(action)"
+                :initial-expand-ms="0"
+                @click="emits('action', action)"
+            />
+        </span>
     </template>
 </template>

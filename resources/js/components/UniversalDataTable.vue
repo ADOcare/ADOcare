@@ -908,6 +908,7 @@ watch(
             min-h-0
             max-h-full
             overflow-auto
+            mb-8
         "
     >
         <Toolbar

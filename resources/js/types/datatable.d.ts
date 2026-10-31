@@ -30,7 +30,7 @@ interface ColumnDef<T = any> {
 
 interface ActionDef<T = any> {
     key: string;
-    label?: string;
+    label?: string | ((params: { rows: T[]; selectedRows: T[]; remote: RemoteTableReturn }) => string);
     position?: 'start' | 'end';
     bordered?: boolean;
     adonis?: boolean;

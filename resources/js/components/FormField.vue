@@ -7,7 +7,6 @@ import DatePicker from 'primevue/datepicker'
 import InputMask from 'primevue/inputmask'
 import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
-import MultiSelect from 'primevue/multiselect'
 import Password from 'primevue/password'
 import RadioButton from 'primevue/radiobutton'
 import Select from 'primevue/select'
@@ -107,7 +106,7 @@ const controlComponents: Record<FormControl, Component> = {
     checkbox: Checkbox,
     date: DatePicker,
     mask: InputMask,
-    multiselect: MultiSelect,
+    multiselect: Select,
     number: InputNumber,
     password: Password,
     radio: RadioButton,
@@ -170,6 +169,7 @@ function updateModelValue(value: T) {
             :id="fieldId"
             :input-id="fieldId"
             :model-value="modelValue"
+            :multiple="control === 'multiselect' ? true : undefined"
             :type="control === 'text' ? type : undefined"
             :disabled="disabled"
             :readonly="readonly"

@@ -11,7 +11,7 @@
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",
-        "@primevue/auto-import-resolver": "^4.4.1",
+        "@primevue/auto-import-resolver": "^5.0.4",
         "@tailwindcss/vite": "^4.1.17",
         "@types/node": "^24.10.0",
         "@vitejs/plugin-vue": "^6.0.1",
@@ -39,8 +39,7 @@
     "dependencies": {
         "@heroicons/vue": "^2.2.0",
         "@inertiajs/vue3": "^2.1.0",
-        "@primeuix/themes": "^1.2.5",
-        "@primevue/themes": "^4.4.1",
+        "@primeuix/themes": "^3.1.0",
         "@types/leaflet": "^1.9.21",
         "@vueuse/core": "^12.8.2",
         "axios": "^1.13.2",
@@ -54,7 +53,7 @@
         "libphonenumber-js": "^1.13.15",
         "pinia": "^3.0.4",
         "primeicons": "^7.0.0",
-        "primevue": "^4.4.1",
+        "primevue": "^5.0.4",
         "sass-embedded": "^1.93.3",
         "scss": "^0.2.4",
         "tailwind-merge": "^3.2.0",

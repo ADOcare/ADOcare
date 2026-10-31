@@ -352,6 +352,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         Route::get('nurse-diagnoses', [ClinicalSuggestionController::class, 'nurseDiagnoses']);
         Route::get('procedures', [ClinicalSuggestionController::class, 'procedures']);
     });
+    Route::patch('patient-points/bulk', [PatientPointController::class, 'bulkUpdate'])->middleware('role:any');
+    Route::get('patient-points/{patient_point}/matching', [PatientPointController::class, 'matching'])->middleware('role:any');
     Route::apiResourceComplete('patient-points', PatientPointController::class, 'role:any');
     Route::apiResourceComplete('report-months', ReportMonthController::class, 'role:any');
     Route::group(['prefix' => 'roles', 'middleware' => 'role:any'], function () {

@@ -19,9 +19,12 @@ type Option = {
 
 const props = defineProps<{
     point?: any
+    bulkIds?: number[]
+    bulkSelectionValid?: boolean
     modalResolve?: (value?: any) => void
 }>()
 
+const emit = defineEmits<{ 'saving-change': [value: boolean] }>()
 const toast = useToast()
 
 const editPoint = ref<any>(
@@ -215,6 +218,9 @@ async function searchProcedures(
 }
 
 async function savePoint() {
+    if (saving.value || (props.bulkIds && (props.bulkIds.length < 1 || !props.bulkSelectionValid))) {
+        return
+    }
     if (!editPoint.value) {
         return
     }
@@ -222,7 +228,7 @@ async function savePoint() {
     submitted.value = true
 
     if (
-        !editPoint.value.date ||
+        (!props.bulkIds && !editPoint.value.date) ||
         !editPoint.value.referralDate ||
         !diagnosis.value ||
         !procedure.value ||
@@ -233,14 +239,15 @@ async function savePoint() {
     }
 
     saving.value = true
+    emit('saving-change', true)
 
     try {
         const payload = {
-            date: toApiDate(
+            ...(!props.bulkIds ? { date: toApiDate(
                 parseDateInput(
                     editPoint.value.date,
                 ) ?? new Date(),
-            ),
+            ) } : {}),
 
             diagnosis_code:
                 diagnosis.value.code,
@@ -258,15 +265,25 @@ async function savePoint() {
                 Number(editPoint.value.quantity),
         }
 
-        await api.put(
-            `v1/patient-points/${editPoint.value.id}`,
-            payload,
-        )
+        if (props.bulkIds) {
+            await api.patch('v1/patient-points/bulk', {
+                ids: props.bulkIds,
+                diagnosis_id: diagnosis.value.id,
+                procedure_id: procedure.value.id,
+                quantity: payload.quantity,
+                reference_date: payload.reference_date,
+            })
+        } else {
+            await api.put(
+                `v1/patient-points/${editPoint.value.id}`,
+                payload,
+            )
+        }
 
         toast.add({
             severity: 'success',
             summary: 'Uložené',
-            detail: 'Záznam bol upravený',
+            detail: props.bulkIds ? `${props.bulkIds.length} záznamov bolo upravených` : 'Záznam bol upravený',
             life: 3000,
         })
 
@@ -283,6 +300,7 @@ async function savePoint() {
         })
     } finally {
         saving.value = false
+        emit('saving-change', false)
     }
 }
 
@@ -307,6 +325,7 @@ function close() {
             "
         >
             <FormField
+                v-if="!bulkIds"
                 label="Dátum"
                 required
                 :error="dateError()"
@@ -493,8 +512,9 @@ function close() {
 
             <AppButton
                 type="submit"
-                label="Uložiť"
+                :label="bulkIds ? `Uložiť ${bulkIds.length} záznamov` : 'Uložiť'"
                 :loading="saving"
+                :disabled="bulkIds !== undefined && !bulkSelectionValid"
             />
         </div>
     </form>

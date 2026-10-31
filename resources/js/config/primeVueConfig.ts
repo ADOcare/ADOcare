@@ -33,6 +33,7 @@ const baseNoOutline =
     'focus:outline-none! focus:ring-0! focus:shadow-none!';
 
 export default {
+    license: import.meta.env.VITE_PRIMEVUE_LICENSE_KEY,
     theme: {
         preset: ADOPreset,
         options: {
@@ -132,7 +133,7 @@ export default {
         select: {
             root: ({ props }) => ({
                 class: `
-            ${baseField}
+            ${props.multiple ? baseField.replace('h-7!', 'min-h-7! h-auto!') : baseField}
             flex! items-center! gap-1!
             ${props.disabled ? 'bg-transparent! opacity-50!' : ''}
         `
@@ -356,8 +357,8 @@ export default {
             root: {
                 class: 'rounded-md! text-white! px-2! flex items-center gap-1! h-7! text-normal!'
             }
-        }
-
+        },
+            
 
     },
 

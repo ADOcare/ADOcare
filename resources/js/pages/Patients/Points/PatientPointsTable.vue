@@ -14,27 +14,13 @@ import api from '@/services/api'
 import useModal from '@/composables/useModal'
 
 import PatientPointForm from './PatientPointForm.vue'
+import PatientPointBulkEditForm from './PatientPointBulkEditForm.vue'
+import { canBatchEdit, type PatientPointApi } from './patientPointBatch'
 
 import type {
     DataTableOptions,
     RemoteTableReturn,
 } from '@/types/datatable'
-
-type PatientPointApi = {
-    id: number
-    date: string | null
-    patient_personal_number: string | null
-    patient_name: string | null
-    patient_id: number
-    diagnosis_code: string | null
-    diagnosis_id: number | null
-    procedure_code: string | null
-    procedure_id: number | null
-    reference_date: string | null
-    user_id: number
-    branch_id: number
-    quantity: number | null
-}
 
 const patientStore = usePatientStore()
 patientStore.loadFromStorage()
@@ -164,8 +150,25 @@ const options = computed<DataTableOptions<PatientPointApi>>(() => ({
 
     actions: [
         {
+            key: 'bulk-edit',
+            variant: 'accent',
+            label: ({ selectedRows }) => `Upraviť vybrané (${selectedRows.length})`,
+            icon: 'bi bi-pencil',
+            disabled: ({ selectedRows }) => !canBatchEdit(selectedRows),
+            handler: async ({ selectedRows, remote }) => {
+                if (!canBatchEdit(selectedRows)) return
+                const result = await openModal(markRaw(PatientPointBulkEditForm), {
+                    rows: selectedRows,
+                }, {
+                    header: `Upraviť záznamy`,
+                    style: { width: '600px', maxWidth: 'calc(100vw - 2rem)' },
+                })
+                if (result) await remote.reload()
+            },
+        },
+        {
             key: 'delete',
-            label: 'Vymazať',
+            label: `Vymazať`,
             icon: 'bi bi-eraser',
             variant: 'danger',
 

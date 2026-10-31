@@ -6,6 +6,25 @@ IMPORTANT: Developers and automated agents should read `STYLE_GUIDE.md` in the r
 
 The guide contains functional (architectural) and stylistic rules in a single, unified document. See `STYLE_GUIDE.md` for details.
 
+## Frontend and PrimeVue licensing
+
+Use `npm ci` to install the locked frontend dependencies and `npm run build` to
+build the application. The application uses PrimeVue 5 with matching v5 auto-import
+metadata and PrimeUIX themes.
+
+PrimeVue 5 requires a valid Community or Commercial license. Obtain a key from
+[PrimeUI](https://primeui.dev/licenses/community) and set
+`VITE_PRIMEVUE_LICENSE_KEY` in your local environment or build environment, then
+restart Vite or rebuild. This frontend key is embedded in the browser bundle;
+do not commit it or use a server-side secret here. Without a valid key, PrimeVue
+may show a license notice. Community eligibility must be renewed annually.
+
+Multiple selection uses `Select multiple` with custom value/header/option slots.
+The shared `FormField` keeps `control="multiselect"` as a compatibility alias for
+this API. Existing v5-compatible deprecated APIs, such as `Password`, `InputMask`
+and `AutoComplete multiple`, remain supported until v6; migrate them before a
+future v6 upgrade.
+
 ## Document preview PDF downloads
 
 The preview viewer captures its HTML pages with html2canvas and assembles the

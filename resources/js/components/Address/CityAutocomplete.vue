@@ -34,5 +34,5 @@ function onInput(v: string) {
 </script>
 
 <template>
-  <AutoComplete v-model="query" :suggestions="suggestions" optionLabel="name" @complete="onComplete" @item-select="onSelect" @input="onInput" class="w-full" />
+  <AutoComplete v-model="query" :suggestions="suggestions" optionLabel="name" @complete="onComplete" @option-select="onSelect" @input="onInput" class="w-full" />
 </template>

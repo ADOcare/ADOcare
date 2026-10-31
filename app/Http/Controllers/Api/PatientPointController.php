@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Filters\ApiQuery;
+use App\Http\Requests\BulkUpdatePatientPointRequest;
 use App\Http\Requests\DestroyManyPatientPointRequest;
 use App\Http\Requests\StorePatientPointRequest;
 use App\Http\Requests\UpdatePatientPointRequest;
@@ -13,6 +14,7 @@ use App\Models\PatientPoint;
 use App\Services\BulkDeletionResponder;
 use App\Services\BulkDeletionService;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
+use App\Services\PatientPointBulkEditService;
 use App\Services\VisitTimelineFreshnessService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -209,5 +211,43 @@ class PatientPointController extends Controller
         // original user's id for logging/audit purposes. Message overrides can
         // be passed as the final argument if caller wants custom texts.
         return $this->bulkDeletionResponder->respond($result, PatientPoint::class, $ids, $request->user()?->id ?? null);
+    }
+
+    /**
+     * Update shared values on compatible selected points without changing execution dates.
+     *
+     * @group Patient points
+     *
+     * @bodyParam ids int[] required IDs vybraných záznamov.
+     * @bodyParam diagnosis_id int required ID diagnózy.
+     * @bodyParam procedure_id int required ID výkonu.
+     * @bodyParam quantity int required Počet.
+     * @bodyParam reference_date string required Dátum odporučenia (YYYY-MM-DD).
+     *
+     * @response 200 {"message":"Vybrané záznamy boli upravené.","data":{"count":2}}
+     */
+    public function bulkUpdate(BulkUpdatePatientPointRequest $request, PatientPointBulkEditService $service)
+    {
+        $points = $service->update($request->user(), $request->validated());
+
+        return $this->success(['count' => $points->count()], 'Vybrané záznamy boli upravené.');
+    }
+
+    /**
+     * List matching dates within the bulk-edit baseline's calendar month.
+     *
+     * @group Patient points
+     *
+     * @urlParam patient_point int required ID východiskového záznamu.
+     *
+     * @queryParam page int Strana výsledkov.
+     *
+     * @response 200 {"message":"Zhodné záznamy boli načítané.","data":{"items":[],"meta":{"last_page":1}}}
+     */
+    public function matching(Request $request, PatientPoint $patientPoint, PatientPointBulkEditService $service)
+    {
+        $points = $service->matching($request->user(), $patientPoint)->paginate(100);
+
+        return $this->success(new BaseCollection($points), 'Zhodné záznamy boli načítané.');
     }
 }

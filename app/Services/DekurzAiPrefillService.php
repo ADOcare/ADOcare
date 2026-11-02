@@ -298,8 +298,8 @@ class DekurzAiPrefillService
         );
 
         $url = sprintf(
-            'https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/%s:generateContent',
-            rawurlencode($location),
+            '%s/v1/projects/%s/locations/%s/endpoints/%s:generateContent',
+            $this->vertexApiBaseUrl($location),
             rawurlencode($projectId),
             rawurlencode($location),
             rawurlencode($endpointId)
@@ -486,12 +486,7 @@ class DekurzAiPrefillService
             $credentialsPath
         );
 
-        $baseUrl = $location === 'global'
-            ? 'https://aiplatform.googleapis.com'
-            : sprintf(
-                'https://%s-aiplatform.googleapis.com',
-                $location
-            );
+        $baseUrl = $this->vertexApiBaseUrl($location);
 
         $url = sprintf(
             '%s/v1/projects/%s/locations/%s/publishers/google/models/%s:generateContent',
@@ -994,5 +989,22 @@ class DekurzAiPrefillService
         }
 
         return null;
+    }
+
+    private function vertexApiBaseUrl(string $location): string
+    {
+        return match ($location) {
+            'global' => 'https://aiplatform.googleapis.com',
+
+            'eu', 'us' => sprintf(
+                'https://aiplatform.%s.rep.googleapis.com',
+                $location
+            ),
+
+            default => sprintf(
+                'https://%s-aiplatform.googleapis.com',
+                $location
+            ),
+        };
     }
 }

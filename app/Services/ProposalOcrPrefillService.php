@@ -277,8 +277,8 @@ class ProposalOcrPrefillService
         );
 
         $url = sprintf(
-            'https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/%s:generateContent',
-            rawurlencode($config['location']),
+            '%s/v1/projects/%s/locations/%s/endpoints/%s:generateContent',
+            $this->vertexApiBaseUrl($config['location']),
             rawurlencode($config['project_id']),
             rawurlencode($config['location']),
             rawurlencode($config['endpoint_id'])
@@ -665,5 +665,22 @@ class ProposalOcrPrefillService
             'expected_duration' => $duration,
             'procedures' => $procedures,
         ];
+    }
+
+    private function vertexApiBaseUrl(string $location): string
+    {
+        return match ($location) {
+            'global' => 'https://aiplatform.googleapis.com',
+
+            'eu', 'us' => sprintf(
+                'https://aiplatform.%s.rep.googleapis.com',
+                $location
+            ),
+
+            default => sprintf(
+                'https://%s-aiplatform.googleapis.com',
+                $location
+            ),
+        };
     }
 }

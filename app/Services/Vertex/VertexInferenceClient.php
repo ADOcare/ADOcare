@@ -14,23 +14,36 @@ class VertexInferenceClient
     /**
      * @return array<string, mixed>
      */
-    public function invokeEndpoint(string $location, string $endpointId, string $prompt, ?string $systemInstruction = null): array
-    {
-        $projectId = trim((string) config('services.vertex_ai.project_id'));
-        $credentialsPath = trim((string) config('services.vertex_ai.credentials_path'));
+    public function invokeEndpoint(
+        string $location,
+        string $endpointId,
+        string $prompt,
+        ?string $systemInstruction = null
+    ): array {
+        $projectId = trim(
+            (string) config('services.vertex_ai.project_id')
+        );
+
+        $credentialsPath = trim(
+            (string) config('services.vertex_ai.credentials_path')
+        );
 
         if ($projectId === '' || $credentialsPath === '') {
-            throw new \RuntimeException('Vertex inference konfigurácia je neúplná.');
+            throw new \RuntimeException(
+                'Vertex inference konfigurácia je neúplná.'
+            );
         }
 
-        $token = $this->authService->getAccessToken($credentialsPath);
+        $token = $this->authService->getAccessToken(
+            $credentialsPath
+        );
 
         $url = sprintf(
-            'https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/endpoints/%s:generateContent',
-            $location,
-            $projectId,
-            $location,
-            $endpointId
+            '%s/v1/projects/%s/locations/%s/endpoints/%s:generateContent',
+            $this->apiBaseUrl($location),
+            rawurlencode($projectId),
+            rawurlencode($location),
+            rawurlencode($endpointId)
         );
 
         $response = Http::timeout(45)
@@ -39,16 +52,23 @@ class VertexInferenceClient
             ->acceptJson()
             ->post($url, [
                 'systemInstruction' => [
-                    'parts' => [[
-                        'text' => $systemInstruction ?? 'You are a nursing documentation assistant. Return valid JSON only.',
-                    ]],
+                    'parts' => [
+                        [
+                            'text' => $systemInstruction
+                                ?? 'You are a nursing documentation assistant. Return valid JSON only.',
+                        ],
+                    ],
                 ],
-                'contents' => [[
-                    'role' => 'user',
-                    'parts' => [[
-                        'text' => $prompt,
-                    ]],
-                ]],
+                'contents' => [
+                    [
+                        'role' => 'user',
+                        'parts' => [
+                            [
+                                'text' => $prompt,
+                            ],
+                        ],
+                    ],
+                ],
                 'generationConfig' => [
                     'temperature' => 0.05,
                     'maxOutputTokens' => 2048,
@@ -57,13 +77,20 @@ class VertexInferenceClient
             ]);
 
         if (! $response->successful()) {
-            throw new \RuntimeException('Vertex endpoint vrátil chybu HTTP ' . $response->status() . '.');
+            throw new \RuntimeException(
+                'Vertex endpoint vrátil chybu HTTP '
+                . $response->status()
+                . '. '
+                . mb_substr((string) $response->body(), 0, 500)
+            );
         }
 
         $decoded = $response->json();
 
         if (! is_array($decoded)) {
-            throw new \RuntimeException('Vertex endpoint vrátil neplatnú odpoveď.');
+            throw new \RuntimeException(
+                'Vertex endpoint vrátil neplatnú odpoveď.'
+            );
         }
 
         return $decoded;
@@ -72,27 +99,35 @@ class VertexInferenceClient
     /**
      * @return array<string, mixed>
      */
-    public function invokePublisherModel(string $location, string $model, string $prompt): array
-    {
-        $projectId = trim((string) config('services.vertex_ai.project_id'));
-        $credentialsPath = trim((string) config('services.vertex_ai.credentials_path'));
+    public function invokePublisherModel(
+        string $location,
+        string $model,
+        string $prompt
+    ): array {
+        $projectId = trim(
+            (string) config('services.vertex_ai.project_id')
+        );
+
+        $credentialsPath = trim(
+            (string) config('services.vertex_ai.credentials_path')
+        );
 
         if ($projectId === '' || $credentialsPath === '') {
-            throw new \RuntimeException('Vertex publisher konfigurácia je neúplná.');
+            throw new \RuntimeException(
+                'Vertex publisher konfigurácia je neúplná.'
+            );
         }
 
-        $token = $this->authService->getAccessToken($credentialsPath);
-
-        $baseUrl = $location === 'global'
-            ? 'https://aiplatform.googleapis.com'
-            : sprintf('https://%s-aiplatform.googleapis.com', $location);
+        $token = $this->authService->getAccessToken(
+            $credentialsPath
+        );
 
         $url = sprintf(
             '%s/v1/projects/%s/locations/%s/publishers/google/models/%s:generateContent',
-            $baseUrl,
-            $projectId,
-            $location,
-            $model
+            $this->apiBaseUrl($location),
+            rawurlencode($projectId),
+            rawurlencode($location),
+            rawurlencode($model)
         );
 
         $response = Http::timeout(45)
@@ -100,12 +135,16 @@ class VertexInferenceClient
             ->withToken($token)
             ->acceptJson()
             ->post($url, [
-                'contents' => [[
-                    'role' => 'user',
-                    'parts' => [[
-                        'text' => $prompt,
-                    ]],
-                ]],
+                'contents' => [
+                    [
+                        'role' => 'user',
+                        'parts' => [
+                            [
+                                'text' => $prompt,
+                            ],
+                        ],
+                    ],
+                ],
                 'generationConfig' => [
                     'temperature' => 0.05,
                     'maxOutputTokens' => 2048,
@@ -114,16 +153,39 @@ class VertexInferenceClient
             ]);
 
         if (! $response->successful()) {
-            throw new \RuntimeException('Vertex publisher model vrátil chybu HTTP ' . $response->status() . '.');
+            throw new \RuntimeException(
+                'Vertex publisher model vrátil chybu HTTP '
+                . $response->status()
+                . '. '
+                . mb_substr((string) $response->body(), 0, 500)
+            );
         }
 
         $decoded = $response->json();
 
         if (! is_array($decoded)) {
-            throw new \RuntimeException('Vertex publisher model vrátil neplatnú odpoveď.');
+            throw new \RuntimeException(
+                'Vertex publisher model vrátil neplatnú odpoveď.'
+            );
         }
 
         return $decoded;
     }
 
+    private function apiBaseUrl(string $location): string
+    {
+        return match ($location) {
+            'global' => 'https://aiplatform.googleapis.com',
+
+            'eu', 'us' => sprintf(
+                'https://aiplatform.%s.rep.googleapis.com',
+                $location
+            ),
+
+            default => sprintf(
+                'https://%s-aiplatform.googleapis.com',
+                $location
+            ),
+        };
+    }
 }

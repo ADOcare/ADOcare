@@ -29,8 +29,8 @@ class VertexTuningService
         $accessToken = $this->authService->getAccessToken($credentialsPath);
 
         $url = sprintf(
-            'https://%s-aiplatform.googleapis.com/v1/projects/%s/locations/%s/%s',
-            $location,
+            '%s/projects/%s/locations/%s/%s',
+            $this->apiBaseUrl($location),
             $projectId,
             $location,
             ltrim($endpoint, '/')
@@ -91,7 +91,11 @@ class VertexTuningService
             ->retry(2, 1000, throw: false)
             ->withToken($accessToken)
             ->acceptJson()
-            ->get(sprintf('https://%s-aiplatform.googleapis.com/v1/%s', $location, ltrim($jobName, '/')));
+            ->get(sprintf(
+                '%s/%s',
+                $this->apiBaseUrl($location),
+                ltrim($jobName, '/')
+            ));
 
         if (! $response->successful()) {
             throw new \RuntimeException('Nepodarilo sa načítať Vertex tuning job. HTTP ' . $response->status() . '.');
@@ -120,7 +124,11 @@ class VertexTuningService
         Http::timeout(30)
             ->retry(1, 500, throw: false)
             ->withToken($accessToken)
-            ->post(sprintf('https://%s-aiplatform.googleapis.com/v1/%s:cancel', $location, ltrim($jobName, '/')));
+            ->post(sprintf(
+                '%s/%s:cancel',
+                $this->apiBaseUrl($location),
+                ltrim($jobName, '/')
+            ));
     }
 
     /**
@@ -174,5 +182,20 @@ class VertexTuningService
         preg_match('/locations\/([^\/]+)/', $name, $match);
 
         return trim((string) ($match[1] ?? ''));
+    }
+
+    private function apiBaseUrl(string $location): string
+    {
+        if (in_array($location, ['eu', 'us'], true)) {
+            return sprintf(
+                'https://aiplatform.%s.rep.googleapis.com/v1',
+                $location
+            );
+        }
+
+        return sprintf(
+            'https://%s-aiplatform.googleapis.com/v1',
+            $location
+        );
     }
 }

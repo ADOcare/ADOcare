@@ -12,6 +12,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Carbon;
 
 class EvaluateVertexCandidateJob implements ShouldQueue
 {
@@ -23,6 +24,8 @@ class EvaluateVertexCandidateJob implements ShouldQueue
 
     public int $tries = 3;
 
+    public int $timeout = 600;
+
     public function __construct(public int $runId)
     {
     }
@@ -31,12 +34,20 @@ class EvaluateVertexCandidateJob implements ShouldQueue
     {
         $run = VertexTrainingRun::query()->find($this->runId);
 
-        if (! $run || $run->status !== VertexTrainingRunStatus::TrainingSucceeded->value) {
+        if (
+            ! $run
+            || ! in_array($run->status, [
+                VertexTrainingRunStatus::TrainingSucceeded->value,
+                VertexTrainingRunStatus::Evaluating->value,
+            ], true)
+        ) {
             return;
         }
 
-        $run->status = VertexTrainingRunStatus::Evaluating->value;
-        $run->save();
+        if ($run->status !== VertexTrainingRunStatus::Evaluating->value) {
+            $run->status = VertexTrainingRunStatus::Evaluating->value;
+            $run->save();
+        }
 
         try {
             $evaluation = $evaluationService->evaluate($run);
@@ -44,7 +55,7 @@ class EvaluateVertexCandidateJob implements ShouldQueue
             $run->status = VertexTrainingRunStatus::Failed->value;
             $run->failure_stage = 'evaluation';
             $run->failure_message = $e->getMessage();
-            $run->failed_at = now();
+            $run->failed_at = Carbon::now();
             $run->save();
             $notifier->notify('evaluation_failed', $run);
             return;
@@ -63,7 +74,7 @@ class EvaluateVertexCandidateJob implements ShouldQueue
             $run->status = VertexTrainingRunStatus::EvaluationFailed->value;
             $run->failure_stage = 'evaluation';
             $run->failure_message = 'Kandidát neprešiel bezpečnostnými a kvalitativnými prahmi.';
-            $run->failed_at = now();
+            $run->failed_at = Carbon::now();
             $run->save();
             $notifier->notify('evaluation_rejected', $run);
             return;

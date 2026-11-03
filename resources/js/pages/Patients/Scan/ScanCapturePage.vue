@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
     computed,
+    defineAsyncComponent,
     onBeforeUnmount,
     onMounted,
     ref,
@@ -15,6 +16,9 @@ import FormField from '@/components/FormField.vue'
 import { toApiDate } from '@/utils/dateUtils'
 
 const route = useRoute()
+const DocumentScanner = defineAsyncComponent(
+    () => import('@/components/DocumentScanner.vue'),
+)
 
 const sessionToken = computed(
     () => route.params.token as string,
@@ -84,6 +88,8 @@ const galleryInputRef =
     ref<HTMLInputElement | null>(
         null,
     )
+
+const scannerOpen = ref(false)
 
 /* -------------------------------------------------------------------------- */
 /* Final screen                                                               */
@@ -482,6 +488,23 @@ function openGallery() {
 
     galleryInputRef.value
         ?.click()
+}
+
+function openScanner() {
+    if (
+        !sessionValid.value ||
+        isUploading.value ||
+        isProcessingFiles.value
+    ) {
+        return
+    }
+
+    scannerOpen.value = true
+}
+
+async function handleScannedFile(file: File) {
+    scannerOpen.value = false
+    await addFiles([file])
 }
 
 async function handleGallerySelected(
@@ -1208,7 +1231,7 @@ onBeforeUnmount(() => {
                             isUploading
                         "
                         @click="
-                            openGallery
+                            openScanner
                         "
                     >
                         <div
@@ -1232,6 +1255,18 @@ onBeforeUnmount(() => {
                         </div>
                     </button>
                 </div>
+
+                <button
+                    type="button"
+                    class="self-start text-mini text-darkgrey underline underline-offset-2"
+                    :disabled="
+                        isProcessingFiles ||
+                        isUploading
+                    "
+                    @click="openGallery"
+                >
+                    Vybrať z galérie
+                </button>
                 </FormField>
 
                 <div
@@ -1324,6 +1359,12 @@ onBeforeUnmount(() => {
             </div>
         </form>
     </div>
+
+    <DocumentScanner
+        v-if="scannerOpen"
+        @close="scannerOpen = false"
+        @captured="handleScannedFile"
+    />
 </template>
 
 <style scoped>

@@ -79,6 +79,10 @@ export default defineConfig({
 
                     if (id.includes('node_modules')) {
 
+                        if (id.includes('@techstark/opencv-js')) {
+                            return 'vendor_opencv'
+                        }
+
                         if (id.includes('@primevue') || id.includes('@primeuix')) {
                             return 'vendor_@primevue'
                         }

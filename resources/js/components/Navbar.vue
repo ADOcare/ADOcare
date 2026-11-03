@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
 
@@ -35,6 +35,7 @@ const isAuthenticated = computed(() => authStore.isAuthenticated)
 /* ------------ INFO / NOTIFICATION POPOVERS ------------ */
 
 const notificationPopover = ref<InstanceType<typeof Popover> | null>(null)
+const notificationList = ref<HTMLElement | null>(null)
 
 const {
     notifications,
@@ -51,6 +52,7 @@ const {
 async function toggleNotificationPopover(event: Event) {
     notificationPopover.value?.toggle(event)
     await loadNotifications()
+    await ensureNotificationListFilled()
 }
 
 function refreshNotifications(event: Event) {
@@ -64,13 +66,35 @@ function refreshNotifications(event: Event) {
     }
 }
 
-function handleNotificationScroll(event: Event) {
+async function ensureNotificationListFilled() {
+    await nextTick()
+
+    const element = notificationList.value
+    if (
+        !element
+        || notificationsLoadingMore.value
+        || !hasMoreNotifications.value
+        || element.scrollHeight > element.clientHeight + 1
+    ) {
+        return
+    }
+
+    await loadMoreNotifications()
+    await ensureNotificationListFilled()
+}
+
+async function handleNotificationScroll(event: Event) {
     const element = event.currentTarget as HTMLElement
     const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
 
     if (remaining <= 80) {
-        void loadMoreNotifications()
+        await loadMoreNotifications()
     }
+}
+
+async function dismissNotificationSmooth(id: string) {
+    await dismissNotification(id)
+    await ensureNotificationListFilled()
 }
 
 async function openNotification(notification: AppNotification) {
@@ -399,9 +423,12 @@ watch(branchOptions, async (newOpts) => {
     </nav>
 
     <!-- Notification centre -->
-    <Popover ref="notificationPopover">
+    <Popover
+        ref="notificationPopover"
+        @show="ensureNotificationListFilled"
+    >
         <div
-            class="w-[400px] max-w-[calc(100vw-2rem)] max-h-[34rem] flex flex-col gap-10"
+            class="w-[400px] max-w-[calc(100vw-2rem)] h-[34rem] max-h-[calc(100vh-2rem)] min-h-0 flex flex-col gap-4"
         >
             <!-- Header -->
             <div class="flex items-center gap-3">
@@ -441,7 +468,10 @@ watch(branchOptions, async (newOpts) => {
             <!-- Notifications -->
             <div
                 v-else
+                ref="notificationList"
                 class="
+                    flex-1
+                    min-h-0
                     overflow-y-auto
                     flex
                     flex-col
@@ -492,7 +522,7 @@ watch(branchOptions, async (newOpts) => {
                                     class="shrink-0 w-6 h-6 flex items-center justify-center cursor-pointer hover:text-darkgrey transition-colors"
                                     aria-label="Skryť upozornenie"
                                     title="Skryť upozornenie"
-                                    @click.stop="dismissNotification(notification.id)"
+                                    @click.stop="dismissNotificationSmooth(notification.id)"
                                 >
                                     <i class="bi bi-x-lg text-mini" />
                                 </button>

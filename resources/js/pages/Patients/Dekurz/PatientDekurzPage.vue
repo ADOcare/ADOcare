@@ -164,7 +164,14 @@ let pendingDraftSaves = 0
 let loadToken = 0
 const draftSectionSaving = ref(false)
 
-const hasDraft = computed(() => snapshotEditMode.value || !!builder.value?.draft)
+const hasDraft = computed(
+    () =>
+        snapshotEditMode.value ||
+        (
+            !!builder.value?.draft &&
+            builder.value.days.length > 0
+        ),
+)
 const sectionSaveState = computed<SaveState>(() => {
     const draftState = builder.value?.draft ? saveStates.value[`sections-${builder.value.draft.id}`] : undefined
     if (patientTextSaveState.value === 'saving' || snapshotSaveState.value === 'saving' || draftSectionSaving.value) return 'saving'
@@ -931,6 +938,20 @@ async function loadAndInitialize() {
             await initializeDraft()
         }
 
+        if (
+            token === loadToken &&
+            !builder.value?.days.length
+        ) {
+            sections.value = [makeSection()]
+            draftInitializationError.value =
+                'Pre tento mesiac neexistuje vygenerovaný Dekurz ani bodovanie, z ktorého by sa dal vytvoriť.'
+            previewHtml.value = ''
+            previewError.value = draftInitializationError.value
+            patientTextSaveState.value = 'idle'
+
+            return
+        }
+
         const patientTexts = await fetchPatientTexts(id)
         if (token !== loadToken) return
         applySections(patientTexts)
@@ -1347,7 +1368,7 @@ onBeforeUnmount(() => {
                             </div>
 
                             <div
-                                v-if="!builder?.draft"
+                                v-if="!hasDraft"
                                 class="flex items-start gap-3 rounded-md bg-danger p-4"
                             >
                                 <i class="bi bi-clock-history mt-0.5 text-white" />
@@ -1357,7 +1378,6 @@ onBeforeUnmount(() => {
                                     </p>
                                     <p class="mt-1 text-mini text-white">
                                         {{ draftInitializationError || 'Kontrolujem vypočítané časy návštev.' }}
-                                        Texty môžete upravovať, ukladajú sa k pacientovi.
                                     </p>
                                 </div>
                             </div>

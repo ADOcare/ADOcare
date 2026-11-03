@@ -214,6 +214,54 @@ class PatientAuditServiceTest extends TestCase
         self::assertSame(0, $patients[0]->fresh()->loadCount('openPatientAuditIssues')->open_patient_audit_issues_count);
     }
 
+    public function test_audit_uses_category_specific_identification_and_address_rules(): void
+    {
+        $this->insertPatient(1, ['personal_number' => null, 'sex' => 'F']);
+        DB::table('patient_coverages')->where('patient_id', 1)->update([
+            'category' => 'eu',
+            'identification_method' => 'foreign_triad',
+            'member_state_code' => 'CZ',
+            'foreign_insured_id' => 'CZ001',
+        ]);
+
+        $this->insertPatient(2, [
+            'personal_number' => null,
+            'sex' => null,
+        ]);
+        DB::table('patient_coverages')->where('patient_id', 2)->update([
+            'category' => 'eu',
+            'identification_method' => 'foreign_triad',
+            'member_state_code' => null,
+            'foreign_insured_id' => null,
+        ]);
+
+        $this->insertPatient(3, [
+            'address' => null,
+            'city' => null,
+            'zip' => null,
+            'latitude' => null,
+            'longitude' => null,
+        ]);
+        DB::table('patient_coverages')->where('patient_id', 3)->update([
+            'category' => 'special',
+            'identification_method' => 'slovak_identifier',
+            'special_category' => 'homeless',
+        ]);
+
+        $audit = new PatientAuditService(
+            new PatientPersonalNumberValidator,
+            new PatientAuditNotificationService(new PatientNotificationService),
+        );
+        $audit->run();
+
+        self::assertSame([], PatientAuditIssue::query()->where('patient_id', 1)->pluck('code')->all());
+        self::assertSame(
+            ['PAT-014', 'PAT-015', 'PAT-016'],
+            PatientAuditIssue::query()->where('patient_id', 2)->orderBy('code')->pluck('code')->all(),
+        );
+        self::assertSame([], PatientAuditIssue::query()->where('patient_id', 3)->pluck('code')->all());
+    }
+
     private function insertPatient(int $id, array $attributes = []): void
     {
         DB::table('patients')->insert(array_merge([
@@ -221,6 +269,7 @@ class PatientAuditServiceTest extends TestCase
             'first_name' => "Patient {$id}",
             'last_name' => 'Test',
             'personal_number' => '8001010006',
+            'sex' => 'M',
             'address' => 'Hlavná 1',
             'city' => 'Bratislava',
             'zip' => '81101',
@@ -232,6 +281,19 @@ class PatientAuditServiceTest extends TestCase
             'created_at' => '2026-01-01 00:00:00',
             'updated_at' => '2026-01-01 00:00:00',
         ], $attributes));
+
+        DB::table('patient_coverages')->insert([
+            'patient_id' => $id,
+            'insurance_company_id' => 1,
+            'category' => 'domestic',
+            'identification_method' => 'slovak_identifier',
+            'member_state_code' => null,
+            'foreign_insured_id' => null,
+            'special_category' => null,
+            'is_verified' => false,
+            'created_at' => '2026-01-01 00:00:00',
+            'updated_at' => '2026-01-01 00:00:00',
+        ]);
     }
 
     private function createTables(): void
@@ -252,6 +314,7 @@ class PatientAuditServiceTest extends TestCase
             $table->string('first_name')->nullable();
             $table->string('last_name')->nullable();
             $table->string('personal_number')->nullable();
+            $table->string('sex')->nullable();
             $table->string('address')->nullable();
             $table->string('city')->nullable();
             $table->string('zip')->nullable();
@@ -262,6 +325,18 @@ class PatientAuditServiceTest extends TestCase
             $table->unsignedInteger('nurse_id')->nullable();
             $table->timestamps();
             $table->softDeletes();
+        });
+        Schema::create('patient_coverages', function ($table): void {
+            $table->id();
+            $table->unsignedInteger('patient_id')->unique();
+            $table->unsignedInteger('insurance_company_id')->nullable();
+            $table->string('category');
+            $table->string('identification_method');
+            $table->string('member_state_code')->nullable();
+            $table->string('foreign_insured_id')->nullable();
+            $table->string('special_category')->nullable();
+            $table->boolean('is_verified')->default(false);
+            $table->timestamps();
         });
         Schema::create('app_notifications', function ($table): void {
             $table->id();

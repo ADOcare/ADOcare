@@ -2,7 +2,10 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\PatientCoverageCategory;
+use App\Enums\PatientIdentificationMethod;
 use App\Models\Patient;
+use App\Models\PatientCoverage;
 use App\Services\EoverenieInsuranceService;
 use App\Services\PatientNotificationService;
 use App\Services\UdzsDeathService;
@@ -27,7 +30,6 @@ class CheckPatientStatuses extends Command
 
         $query = Patient::query()
             ->living()
-            ->whereNotNull('personal_number')
             ->with(['branch', 'latestCoverage.insuranceCompany']);
 
         $patientId = (int) $this->option('patient');
@@ -37,56 +39,35 @@ class CheckPatientStatuses extends Command
         }
 
         $query->chunkById(50, function ($patients) use (
-                $deathService,
-                $insuranceService,
-                $notificationService,
-                &$checked,
-                &$dead,
-                &$insuranceIssues,
-            ): void {
-                foreach ($patients as $patient) {
-                    if (! $patient instanceof Patient) {
-                        continue;
-                    }
+            $deathService,
+            $insuranceService,
+            $notificationService,
+            &$checked,
+            &$dead,
+            &$insuranceIssues,
+        ): void {
+            foreach ($patients as $patient) {
+                if (! $patient instanceof Patient) {
+                    continue;
+                }
 
-                    $checked++;
+                $checked++;
 
-                    try {
-                        if (! $patient->death_date) {
-                            $deathResult = $deathService->checkPersonalNumber(
-                                (string) $patient->personal_number,
-                            );
+                try {
+                    $coverage = $patient->latestCoverage;
 
-                            if (($deathResult['status'] ?? null) === 'dead') {
-                                $deathDate = $this->deathDate($deathResult['data'] ?? []);
+                    if ($this->canCheckDeath($patient, $coverage)) {
+                        $deathResult = $deathService->checkPersonalNumber(
+                            (string) $patient->personal_number,
+                        );
 
-                                $patient->update([
-                                    'death_date' => $deathDate,
-                                ]);
+                        if (($deathResult['status'] ?? null) === 'dead') {
+                            $deathDate = $this->deathDate($deathResult['data'] ?? []);
 
-                                $notificationService->resolveIssue(
-                                    $patient,
-                                    "patient:{$patient->id}:insurance",
-                                );
+                            $patient->update([
+                                'death_date' => $deathDate,
+                            ]);
 
-                                $notificationService->createEvent(
-                                    $patient,
-                                    "patient:{$patient->id}:dead",
-                                    'patient_dead',
-                                    'Pacient je zosnulý',
-                                    $this->patientName($patient) . ($deathDate
-                                        ? ' - dátum úmrtia ' . Carbon::parse($deathDate)->format('d.m.Y')
-                                        : ''),
-                                    [
-                                        'patient_id' => $patient->id,
-                                        'death_date' => $deathDate,
-                                    ],
-                                );
-
-                                $dead++;
-                                continue;
-                            }
-                        } else {
                             $notificationService->resolveIssue(
                                 $patient,
                                 "patient:{$patient->id}:insurance",
@@ -97,86 +78,100 @@ class CheckPatientStatuses extends Command
                                 "patient:{$patient->id}:dead",
                                 'patient_dead',
                                 'Pacient je zosnulý',
-                                $this->patientName($patient) . ' - dátum úmrtia '
-                                    . Carbon::parse($patient->death_date)->format('d.m.Y'),
+                                $this->patientName($patient).($deathDate
+                                    ? ' - dátum úmrtia '.Carbon::parse($deathDate)->format('d.m.Y')
+                                    : ''),
                                 [
                                     'patient_id' => $patient->id,
-                                    'death_date' => $patient->death_date,
+                                    'death_date' => $deathDate,
                                 ],
                             );
 
+                            $dead++;
+
                             continue;
                         }
+                    }
 
-                        $coverage = $patient->latestCoverage;
-                        $insuranceResult = $insuranceService->verify($patient, $coverage);
-                        $status = $insuranceResult['status'] ?? 'unknown';
-                        $issueKey = "patient:{$patient->id}:insurance";
-
-                        if ($status === 'verified') {
-                            $coverage?->update(['is_verified' => true]);
-                            $notificationService->resolveIssue($patient, $issueKey);
-                            continue;
-                        }
-
-                        if (! in_array($status, [
-                            'mismatch',
-                            'not_insured',
-                            'duplicity',
-                            'identity_mismatch',
-                        ], true)) {
-                            continue;
-                        }
-
-                        $coverage?->update(['is_verified' => false]);
-
-                        $registeredCompany = $insuranceResult['registered_insurance_company'] ?? [];
-
-                        if ($status === 'mismatch') {
-                            $notificationService->resolveIssue($patient, $issueKey);
-
-                            $companyIdentifier = $registeredCompany['code']
-                                ?? $registeredCompany['id']
-                                ?? md5(json_encode($registeredCompany));
-
-                            $notificationService->createEvent(
-                                $patient,
-                                "patient:{$patient->id}:insurance-changed:{$companyIdentifier}",
-                                'patient_insurance_changed',
-                                'Pacient zmenil poisťovňu',
-                                $this->patientName($patient) . ' - evidovaná poisťovňa: '
-                                    . ($registeredCompany['name'] ?? 'neznáma'),
-                                [
-                                    'patient_id' => $patient->id,
-                                    'registered_insurance_company' => $registeredCompany,
-                                    'saved_insurance_company' => $insuranceResult['saved_insurance_company'] ?? null,
-                                ],
-                            );
-
-                            $insuranceIssues++;
-                            continue;
-                        }
-
-                        $notificationService->reportIssue(
+                    if (! $this->canCheckInsurance($coverage)) {
+                        $notificationService->resolveIssue(
                             $patient,
-                            $issueKey,
-                            'patient_insurance_issue',
-                            'Problém s poistením pacienta',
-                            $this->patientName($patient) . ' - poistný vzťah vyžaduje kontrolu',
+                            "patient:{$patient->id}:insurance",
+                        );
+
+                        continue;
+                    }
+
+                    $insuranceResult = $insuranceService->verify($patient, $coverage);
+                    $status = $insuranceResult['status'] ?? 'unknown';
+                    $issueKey = "patient:{$patient->id}:insurance";
+
+                    if ($status === 'verified') {
+                        $coverage?->update(['is_verified' => true]);
+                        $notificationService->resolveIssue($patient, $issueKey);
+
+                        continue;
+                    }
+
+                    if (! in_array($status, [
+                        'mismatch',
+                        'not_insured',
+                        'duplicity',
+                        'identity_mismatch',
+                    ], true)) {
+                        continue;
+                    }
+
+                    $coverage?->update(['is_verified' => false]);
+
+                    $registeredCompany = $insuranceResult['registered_insurance_company'] ?? [];
+
+                    if ($status === 'mismatch') {
+                        $notificationService->resolveIssue($patient, $issueKey);
+
+                        $companyIdentifier = $registeredCompany['code']
+                            ?? $registeredCompany['id']
+                            ?? md5(json_encode($registeredCompany));
+
+                        $notificationService->createEvent(
+                            $patient,
+                            "patient:{$patient->id}:insurance-changed:{$companyIdentifier}",
+                            'patient_insurance_changed',
+                            'Pacient zmenil poisťovňu',
+                            $this->patientName($patient).' - evidovaná poisťovňa: '
+                                .($registeredCompany['name'] ?? 'neznáma'),
                             [
                                 'patient_id' => $patient->id,
-                                'status' => $status,
                                 'registered_insurance_company' => $registeredCompany,
                                 'saved_insurance_company' => $insuranceResult['saved_insurance_company'] ?? null,
                             ],
                         );
 
                         $insuranceIssues++;
-                    } catch (Throwable $exception) {
-                        report($exception);
+
+                        continue;
                     }
+
+                    $notificationService->reportIssue(
+                        $patient,
+                        $issueKey,
+                        'patient_insurance_issue',
+                        'Problém s poistením pacienta',
+                        $this->patientName($patient).' - poistný vzťah vyžaduje kontrolu',
+                        [
+                            'patient_id' => $patient->id,
+                            'status' => $status,
+                            'registered_insurance_company' => $registeredCompany,
+                            'saved_insurance_company' => $insuranceResult['saved_insurance_company'] ?? null,
+                        ],
+                    );
+
+                    $insuranceIssues++;
+                } catch (Throwable $exception) {
+                    report($exception);
                 }
-            });
+            }
+        });
 
         $this->info("Checked {$checked} patient(s); found {$dead} deceased and {$insuranceIssues} insurance issue(s).");
 
@@ -201,5 +196,25 @@ class CheckPatientStatuses extends Command
     private function patientName(Patient $patient): string
     {
         return trim("{$patient->first_name} {$patient->last_name}");
+    }
+
+    private function canCheckDeath(Patient $patient, ?PatientCoverage $coverage): bool
+    {
+        if (blank($patient->personal_number)) {
+            return false;
+        }
+
+        if ($coverage === null) {
+            return true;
+        }
+
+        return $coverage->getRawOriginal('identification_method')
+            === PatientIdentificationMethod::SLOVAK_IDENTIFIER->value;
+    }
+
+    private function canCheckInsurance(?PatientCoverage $coverage): bool
+    {
+        return $coverage?->getRawOriginal('category')
+            === PatientCoverageCategory::DOMESTIC->value;
     }
 }

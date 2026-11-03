@@ -19,6 +19,7 @@ class DekurzBuilderService
         private DekurzProcedureClassifier $classifier,
         private DekurzTextResolver $textResolver,
         private DekurzSupportingDocumentService $supportingDocuments,
+        private DekurzDocumentService $legacyDocuments,
     ) {}
 
     /** @return array<string, mixed> */
@@ -46,9 +47,22 @@ class DekurzBuilderService
         $existingDocuments = Document::query()
             ->where('patient_id', $patient->id)
             ->where('type', 'dekurz')
-            ->where('period', $month)
+            ->where(function ($query) use ($month): void {
+                $query->where('period', $month)->orWhereNull('period');
+            })
             ->orderByDesc('id')
-            ->get();
+            ->get()
+            ->filter(function (Document $document) use ($month): bool {
+                if ($document->period === $month) {
+                    return true;
+                }
+
+                $payload = $this->legacyDocuments->findDekurzFileForDocument($document);
+                $payloadMonth = substr((string) ($payload['month'] ?? $payload['period'] ?? ''), 0, 7);
+
+                return $payloadMonth === $month;
+            })
+            ->values();
 
         $suggestedDekurzNumber = $draft?->final_document_id
             ? $draft->dekurz_number

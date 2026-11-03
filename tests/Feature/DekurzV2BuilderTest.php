@@ -140,6 +140,17 @@ class DekurzV2BuilderTest extends TestCase
     public function test_builder_discovers_historical_document_without_a_v2_draft(): void
     {
         $this->createDocument(300, 'dekurz', '2026-06', 'dekurz/june.json', '2026-06-30');
+        DB::table('documents')->where('id', 300)->update(['period' => null]);
+        $storage = $this->useInMemoryStorage();
+        $storage->put('dekurz/june.json', json_encode([
+            'document_id' => 300,
+            'patient_id' => 1,
+            'month' => '2026-06-01',
+            'sections' => [
+                ['text' => 'Historický text', 'dates' => ['2026-06-03']],
+            ],
+            'days' => [],
+        ], JSON_THROW_ON_ERROR));
 
         $result = $this->builder()->build(Patient::findOrFail(1), '2026-06');
 
@@ -820,6 +831,7 @@ class DekurzV2BuilderTest extends TestCase
             $classifier,
             new DekurzTextResolver,
             new DekurzSupportingDocumentService,
+            new DekurzDocumentService,
         );
     }
 

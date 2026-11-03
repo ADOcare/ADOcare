@@ -2,8 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\PatientCoverageCategory;
+use App\Enums\PatientIdentificationMethod;
+use App\Enums\PatientSpecialCoverageCategory;
 use App\Models\Patient;
 use App\Models\PatientAuditIssue;
+use App\Models\PatientCoverage;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +49,7 @@ class PatientAuditService
                 'first_name',
                 'last_name',
                 'personal_number',
+                'sex',
                 'address',
                 'city',
                 'zip',
@@ -53,6 +58,7 @@ class PatientAuditService
                 'death_date',
                 'branch_id',
             ])
+            ->with('latestCoverage')
             ->chunkById(500, function (Collection $patients) use (&$stats, $duplicatePatientIds, $today): void {
                 $patientIds = $patients->modelKeys();
                 $findings = [];
@@ -96,9 +102,13 @@ class PatientAuditService
 
         Patient::query()
             ->select(['id', 'branch_id', 'personal_number'])
-            ->with('branch:id,company_id')
+            ->with(['branch:id,company_id', 'latestCoverage'])
             ->chunkById(500, function (Collection $patients) use (&$groups): void {
                 foreach ($patients as $patient) {
+                    if (! $this->usesSlovakIdentifier($patient->latestCoverage)) {
+                        continue;
+                    }
+
                     $companyId = $patient->branch?->company_id;
                     $normalized = $this->personalNumberValidator->normalize($patient->personal_number);
                     if ($companyId === null || $normalized === null) {
@@ -131,25 +141,79 @@ class PatientAuditService
     private function issuesFor(Patient $patient, array $duplicatePatientIds, CarbonImmutable $today): array
     {
         $issues = [];
+        $coverage = $patient->latestCoverage;
+        $category = $this->coverageValue($coverage, 'category');
+        $identificationMethod = $this->coverageValue($coverage, 'identification_method');
+        $specialCategory = $this->coverageValue($coverage, 'special_category');
         $rawPersonalNumber = (string) $patient->personal_number;
 
-        if (trim($rawPersonalNumber) === '') {
-            $this->addIssue($issues, $patient, 'PAT-001', PatientAuditIssue::SEVERITY_ERROR, 'Pacient nemá vyplnené rodné číslo.');
+        if ($coverage === null) {
+            $this->addIssue($issues, $patient, 'PAT-010', PatientAuditIssue::SEVERITY_ERROR, 'Pacient nemá nastavený typ poistenia.');
         } else {
-            $validation = $this->personalNumberValidator->validate($rawPersonalNumber);
-            if (! $validation['valid']) {
+            if (! in_array($category, PatientCoverageCategory::values(), true)) {
+                $this->addIssue($issues, $patient, 'PAT-011', PatientAuditIssue::SEVERITY_ERROR, 'Pacient má neplatný typ poistenia.');
+            }
+
+            $validIdentificationMethods = match ($category) {
+                PatientCoverageCategory::DOMESTIC->value => [PatientIdentificationMethod::SLOVAK_IDENTIFIER->value],
+                PatientCoverageCategory::EU->value => [PatientIdentificationMethod::FOREIGN_TRIAD->value],
+                PatientCoverageCategory::SPECIAL->value => PatientIdentificationMethod::values(),
+                default => [],
+            };
+
+            if (! in_array($identificationMethod, $validIdentificationMethods, true)) {
                 $this->addIssue(
                     $issues,
                     $patient,
-                    'PAT-002',
+                    'PAT-012',
                     PatientAuditIssue::SEVERITY_ERROR,
-                    'Pacient má neplatné rodné číslo.',
-                    ['personal_number' => $rawPersonalNumber, 'reason' => $validation['reason']],
+                    'Spôsob identifikácie pacienta nezodpovedá typu poistenia.',
                 );
+            }
+
+            if ($coverage->insurance_company_id === null) {
+                $this->addIssue($issues, $patient, 'PAT-013', PatientAuditIssue::SEVERITY_ERROR, 'Pacient nemá nastavenú slovenskú vykazujúcu poisťovňu.');
+            }
+
+            if ($identificationMethod === PatientIdentificationMethod::FOREIGN_TRIAD->value) {
+                if (blank($coverage->member_state_code)) {
+                    $this->addIssue($issues, $patient, 'PAT-014', PatientAuditIssue::SEVERITY_ERROR, 'Pacient nemá vyplnený štát poistenia.');
+                }
+                if (blank($coverage->foreign_insured_id)) {
+                    $this->addIssue($issues, $patient, 'PAT-015', PatientAuditIssue::SEVERITY_ERROR, 'Pacient nemá vyplnené zahraničné identifikačné číslo poistenca.');
+                }
+                if (! in_array($patient->sex, ['M', 'F'], true)) {
+                    $this->addIssue($issues, $patient, 'PAT-016', PatientAuditIssue::SEVERITY_ERROR, 'Pacient so zahraničnou identifikáciou nemá vyplnené pohlavie M alebo F.');
+                }
+            }
+
+            if (
+                $category === PatientCoverageCategory::SPECIAL->value
+                && ! in_array($specialCategory, PatientSpecialCoverageCategory::values(), true)
+            ) {
+                $this->addIssue($issues, $patient, 'PAT-017', PatientAuditIssue::SEVERITY_ERROR, 'Pacient v osobitnej skupine nemá nastavenú kategóriu nároku.');
             }
         }
 
-        if ($duplicatePatientIds !== []) {
+        if ($this->usesSlovakIdentifier($coverage)) {
+            if (trim($rawPersonalNumber) === '') {
+                $this->addIssue($issues, $patient, 'PAT-001', PatientAuditIssue::SEVERITY_ERROR, 'Pacient nemá vyplnené rodné číslo alebo pridelený BIČ.');
+            } else {
+                $validation = $this->personalNumberValidator->validate($rawPersonalNumber);
+                if (! $validation['valid']) {
+                    $this->addIssue(
+                        $issues,
+                        $patient,
+                        'PAT-002',
+                        PatientAuditIssue::SEVERITY_ERROR,
+                        'Pacient má neplatné rodné číslo alebo pridelený BIČ.',
+                        ['personal_number' => $rawPersonalNumber, 'reason' => $validation['reason']],
+                    );
+                }
+            }
+        }
+
+        if ($this->usesSlovakIdentifier($coverage) && $duplicatePatientIds !== []) {
             $this->addIssue(
                 $issues,
                 $patient,
@@ -160,20 +224,26 @@ class PatientAuditService
             );
         }
 
-        if (trim((string) $patient->address) === '') {
-            $this->addIssue($issues, $patient, 'PAT-004', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá vyplnenú adresu.');
-        }
-        if (trim((string) $patient->city) === '') {
-            $this->addIssue($issues, $patient, 'PAT-005', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá vyplnené mesto.');
-        }
-        if (trim((string) $patient->zip) === '') {
-            $this->addIssue($issues, $patient, 'PAT-006', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá vyplnené PSČ.');
-        }
-
         $latitude = $patient->latitude;
         $longitude = $patient->longitude;
-        if ($latitude === null || $longitude === null) {
-            $this->addIssue($issues, $patient, 'PAT-007', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá kompletné GPS súradnice.');
+        $requiresAddress = ! (
+            $category === PatientCoverageCategory::SPECIAL->value
+            && $specialCategory === PatientSpecialCoverageCategory::HOMELESS->value
+        );
+
+        if ($requiresAddress) {
+            if (trim((string) $patient->address) === '') {
+                $this->addIssue($issues, $patient, 'PAT-004', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá vyplnenú adresu.');
+            }
+            if (trim((string) $patient->city) === '') {
+                $this->addIssue($issues, $patient, 'PAT-005', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá vyplnené mesto.');
+            }
+            if (trim((string) $patient->zip) === '') {
+                $this->addIssue($issues, $patient, 'PAT-006', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá vyplnené PSČ.');
+            }
+            if ($latitude === null || $longitude === null) {
+                $this->addIssue($issues, $patient, 'PAT-007', PatientAuditIssue::SEVERITY_WARNING, 'Pacient nemá kompletné GPS súradnice.');
+            }
         }
 
         if (
@@ -188,6 +258,23 @@ class PatientAuditService
         }
 
         return $issues;
+    }
+
+    private function usesSlovakIdentifier(?PatientCoverage $coverage): bool
+    {
+        return $coverage === null
+            || $this->coverageValue($coverage, 'identification_method') === PatientIdentificationMethod::SLOVAK_IDENTIFIER->value;
+    }
+
+    private function coverageValue(?PatientCoverage $coverage, string $attribute): ?string
+    {
+        if ($coverage === null) {
+            return null;
+        }
+
+        $value = $coverage->getRawOriginal($attribute);
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**

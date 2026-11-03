@@ -31,6 +31,7 @@ class LeaveDocumentService
             'name' => 'prepustacia_sprava_'.now()->format('d.m.Y'),
             'path' => $filePath,
             'period' => $period,
+            'reference_date' => $data['date'],
             'branch_id' => $data['branch_id'] ?? null,
         ]);
 
@@ -73,6 +74,7 @@ class LeaveDocumentService
         );
         $document->update([
             'period' => date('Y-m', strtotime((string) $data['date'])),
+            'reference_date' => $data['date'],
         ]);
         $this->immediateAudit->documentsChanged([$previous, $document]);
 

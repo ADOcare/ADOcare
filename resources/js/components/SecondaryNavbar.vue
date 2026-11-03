@@ -91,7 +91,7 @@ function linkClass(key: string) {
           v-if="isEditingDocument"
           class="ml-1 inline-flex rounded-md bg-darkgrey px-2 py-1 text-mini font-medium text-white"
         >
-          Upravujete
+          Upravujete dokument 
         </span>
       </div>
     </template>

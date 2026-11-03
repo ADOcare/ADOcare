@@ -131,7 +131,7 @@ class DocumentController extends Controller
         $results = ApiQuery::apply(
             $request,
             $query,
-            ['name', 'type', 'created_at'],
+            ['name', 'type', 'reference_date', 'created_at', 'updated_at'],
             [],
             ['sort' => '-created_at']
         );

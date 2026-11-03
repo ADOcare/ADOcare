@@ -17,7 +17,7 @@ class StoreRecordDocumentRequest extends FormRequest
         return [
             'patient_id' => 'required|exists:patients,id',
             'branch_id' => 'nullable|exists:branches,id',
-            'date' => 'nullable|date_format:Y-m-d',
+            'date' => 'required|date_format:Y-m-d',
             'record_data' => 'required|array',
             'form_spec' => 'nullable|array',
         ];

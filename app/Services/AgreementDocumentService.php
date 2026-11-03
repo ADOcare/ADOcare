@@ -36,6 +36,7 @@ class AgreementDocumentService
             'path' => 'agreements/'.now()->timestamp.'.json',
             'branch_id' => $branch->id,
             'period' => date('Y-m', strtotime($data['date'])),
+            'reference_date' => $data['date'],
         ]);
 
         $agreementData = $this->buildAgreementData($data, $patient, $branch, $document->id);
@@ -65,6 +66,7 @@ class AgreementDocumentService
         );
         $document->update([
             'period' => date('Y-m', strtotime($data['date'])),
+            'reference_date' => $data['date'],
         ]);
         $this->immediateAudit->documentsChanged([$previous, $document]);
 

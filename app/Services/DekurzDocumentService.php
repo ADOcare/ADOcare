@@ -378,6 +378,8 @@ class DekurzDocumentService
             throw new RuntimeException('Dekurz sa nepodarilo uložiť.');
         }
 
+        $document->touch();
+
         return $payload;
     }
 

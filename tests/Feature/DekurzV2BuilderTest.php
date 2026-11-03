@@ -721,6 +721,7 @@ class DekurzV2BuilderTest extends TestCase
     {
         $this->createDocument(300, 'dekurz', '2026-06', 'dekurz/june.json', '2026-06-30');
         $document = Document::findOrFail(300);
+        $originalUpdatedAt = $document->updated_at;
         $storage = $this->useInMemoryStorage();
         $storage->put($document->path, json_encode([
             'schema_version' => 1,
@@ -756,6 +757,10 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame('Upravený historický text', $payload['days'][0]['text']);
         self::assertSame('07:15:00', $payload['days'][0]['terrain_time']);
         self::assertSame('12:45:00', $payload['days'][0]['administrative_time']);
+        self::assertNotSame(
+            $originalUpdatedAt->format('Y-m-d H:i:s'),
+            $document->fresh()->updated_at->format('Y-m-d H:i:s'),
+        );
         self::assertSame(
             $payload,
             json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR),

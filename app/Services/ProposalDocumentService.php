@@ -36,6 +36,7 @@ class ProposalDocumentService
             'name' => 'navrh_'.now()->format('d.m.Y'),
             'path' => 'proposals/'.now()->timestamp.'.json',
             'period' => date('Y-m', strtotime($data['date'])),
+            'reference_date' => $data['date'],
             'branch_id' => $data['branch_id'],
             'insurance_company_id' => $insuranceCompany?->id,
         ]);
@@ -102,6 +103,7 @@ class ProposalDocumentService
         );
         $document->update([
             'period' => date('Y-m', strtotime($data['date'])),
+            'reference_date' => $data['date'],
         ]);
 
         DB::table('proposal_nurse_diagnoses')->where('document_id', $document->id)->delete();

@@ -25,6 +25,7 @@ class RecordDocumentService
             'name' => 'zaznam_'.now()->format('d.m.Y'),
             'path' => 'records/'.now()->timestamp.'.json',
             'period' => $period,
+            'reference_date' => $data['date'] ?? null,
             'branch_id' => $data['branch_id'] ?? null,
         ]);
 
@@ -60,6 +61,7 @@ class RecordDocumentService
         );
         $document->update([
             'period' => ! empty($data['date']) ? date('Y-m', strtotime((string) $data['date'])) : null,
+            'reference_date' => $data['date'] ?? null,
         ]);
         $this->immediateAudit->documentsChanged([$previous, $document]);
 

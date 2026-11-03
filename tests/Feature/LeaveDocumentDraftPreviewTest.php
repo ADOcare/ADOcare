@@ -59,6 +59,7 @@ class LeaveDocumentDraftPreviewTest extends TestCase
             $table->string('name');
             $table->string('path');
             $table->string('period')->nullable();
+            $table->date('reference_date')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });
@@ -173,6 +174,43 @@ class LeaveDocumentDraftPreviewTest extends TestCase
         self::assertSame($document->id, $updated->id);
         self::assertSame(1, Document::query()->count());
         self::assertSame('2026-10', $updated->fresh()->period);
+        self::assertSame('2026-10-22', $updated->fresh()->reference_date->toDateString());
         self::assertSame(3, $updated->fresh()->branch_id);
+    }
+
+    public function test_legacy_document_reference_date_is_backfilled_from_its_exact_payload_date(): void
+    {
+        $document = Document::query()->create([
+            'patient_id' => 10,
+            'user_id' => 20,
+            'branch_id' => 3,
+            'type' => 'leave',
+            'mime_type' => 'application/json',
+            'name' => 'leave.json',
+            'path' => 'leave/legacy.json',
+            'period' => '2026-10',
+            'created_at' => '2026-10-01 08:00:00',
+            'updated_at' => '2026-10-01 08:00:00',
+        ]);
+        DB::table('documents')->where('id', $document->id)->update([
+            'created_at' => '2026-10-01 08:00:00',
+            'updated_at' => '2026-10-01 08:00:00',
+        ]);
+        $disk = \Mockery::mock();
+        $disk->shouldReceive('exists')->once()->with($document->path)->andReturnTrue();
+        $disk->shouldReceive('get')->once()->with($document->path)->andReturn(json_encode([
+            'document_id' => $document->id,
+            'date' => '2026-10-22 10:30:00',
+        ]));
+        $storage = \Mockery::mock();
+        $storage->shouldReceive('disk')->once()->with('local')->andReturn($disk);
+        Storage::swap($storage);
+
+        $migration = require __DIR__.'/../../database/migrations/2026_11_03_211000_backfill_patient_document_reference_dates.php';
+        $migration->up();
+
+        $document->refresh();
+        self::assertSame('2026-10-22', $document->reference_date->toDateString());
+        self::assertSame('2026-10-01 08:00:00', $document->updated_at->format('Y-m-d H:i:s'));
     }
 }

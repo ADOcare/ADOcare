@@ -66,6 +66,7 @@ class RecordDocumentDraftPreviewTest extends TestCase
             $table->string('name');
             $table->string('path');
             $table->string('period')->nullable();
+            $table->date('reference_date')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });
@@ -212,6 +213,7 @@ class RecordDocumentDraftPreviewTest extends TestCase
         self::assertSame($document->id, $updated->id);
         self::assertSame(1, Document::query()->count());
         self::assertSame('2026-10', $updated->fresh()->period);
+        self::assertSame('2026-10-22', $updated->fresh()->reference_date->toDateString());
         self::assertSame(3, $updated->fresh()->branch_id);
     }
 }

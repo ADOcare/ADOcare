@@ -302,7 +302,13 @@ class PatientController extends Controller
     {
         $query = Document::where('patient_id', $patient->id);
 
-        $results = ApiQuery::apply($request, $query, ['name', 'type'], 'all', ['sort' => '-created_at']);
+        $results = ApiQuery::apply(
+            $request,
+            $query,
+            ['name', 'type', 'reference_date', 'created_at', 'updated_at'],
+            'all',
+            ['sort' => '-updated_at'],
+        );
 
         return $this->success(new BaseCollection($results), 'Dokumenty pacienta boli uspesne nacitane.');
     }

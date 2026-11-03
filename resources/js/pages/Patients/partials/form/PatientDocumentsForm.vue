@@ -24,7 +24,10 @@ type PatientDocument = {
     mime_type?: string;
     path?: string;
     url?: string;
+    period?: string;
+    reference_date?: string;
     created_at?: string;
+    updated_at?: string;
 };
 
 const loading = ref(false);
@@ -116,6 +119,24 @@ const formatDateWithTime = (dateStr?: string) => {
     return `${datePart} ${timePart}`;
 };
 
+const formatReferenceDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+
+    const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[3]}.${match[2]}.${match[1]}` : dateStr;
+};
+
+const formatPeriod = (period?: string) => {
+    const match = period?.match(/^(\d{4})-(\d{2})/);
+    return match ? `${match[2]}/${match[1]}` : period || '';
+};
+
+const formatIssuedDate = (doc: PatientDocument) => (
+    doc.type === 'dekurz'
+        ? formatPeriod(doc.period)
+        : formatReferenceDate(doc.reference_date)
+);
+
 const options = computed<DataTableOptions<PatientDocument>>(() => ({
     rowKey: 'id',
     endpointUrl: `v1/patients/${props.patientId}/documents`,
@@ -125,7 +146,7 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
 
     afterInit: ({ remote }) => {
         documentRemote.value = remote
-        remote.setSort?.('-created_at')
+        remote.setSort?.('-updated_at')
         remote.loadPage?.(1)
     },
 
@@ -137,10 +158,10 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
             render: (v: string | undefined) => formatDocumentType(v)
         },
         {
-            field: 'period',
-            header: 'Obdobie',
-            sortable: true,
-            render: (v: string | undefined) => v || ''
+            field: 'reference_date',
+            header: 'Dátum vystavenia / obdobie',
+            sortable: false,
+            render: (_value: string | undefined, row: PatientDocument) => formatIssuedDate(row)
         },
         {
             field: 'updated_at',
@@ -150,9 +171,9 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
         },
 
         {
-            field: 'actions',
+            field: 'edit_action',
             header: '',
-            width: '6rem',
+            width: '3rem',
             component: ActionButtons,
             componentOptions: [
                 {
@@ -164,6 +185,14 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
                         void editDocument(row);
                     },
                 },
+            ],
+        },
+        {
+            field: 'view_action',
+            header: '',
+            width: '3rem',
+            component: ActionButtons,
+            componentOptions: [
                 {
                     icon: 'bi bi-eye',
                     color: 'info',

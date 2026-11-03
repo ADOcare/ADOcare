@@ -23,6 +23,7 @@ const video = ref<HTMLVideoElement | null>(null)
 const preview = ref<HTMLCanvasElement | null>(null)
 const detection = ref<HTMLCanvasElement | null>(null)
 const loading = ref(true)
+const cameraReady = ref(false)
 const capturing = ref(false)
 const error = ref('')
 const status = ref('Pripravujem skener...')
@@ -36,10 +37,18 @@ let detectionTimer: number | null = null
 let detectedCorners: Corners | null = null
 let stopped = false
 
-const canCapture = computed(() => !loading.value && !capturing.value && !error.value)
+const canCapture = computed(() => cameraReady.value && !capturing.value && !error.value)
 
 async function loadOpenCv() {
-    const module = await cvModule
+    const module = await Promise.race([
+        Promise.resolve(cvModule),
+        new Promise<never>((_resolve, reject) => {
+            window.setTimeout(
+                () => reject(new Error('OpenCV sa nepodarilo načítať.')),
+                20_000,
+            )
+        }),
+    ])
 
     if (typeof module.Mat === 'function') {
         return module
@@ -58,6 +67,33 @@ async function loadOpenCv() {
     })
 
     return module
+}
+
+function waitForVideoDimensions(videoElement: HTMLVideoElement) {
+    return new Promise<void>((resolve, reject) => {
+        const startedAt = Date.now()
+
+        const check = () => {
+            if (stopped) {
+                reject(new Error('Skenovanie bolo zrušené.'))
+                return
+            }
+
+            if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
+                resolve()
+                return
+            }
+
+            if (Date.now() - startedAt >= 10_000) {
+                reject(new Error('Fotoaparát neposkytol obraz.'))
+                return
+            }
+
+            window.setTimeout(check, 100)
+        }
+
+        check()
+    })
 }
 
 async function startCamera() {
@@ -86,20 +122,13 @@ async function startCamera() {
         videoElement.srcObject = stream
         videoElement.muted = true
         videoElement.playsInline = true
-        await videoElement.play()
+        loading.value = false
+        status.value = 'Spúšťam obraz z fotoaparátu...'
+        void videoElement.play().catch((reason) => {
+            console.error('Could not play camera stream', reason)
+        })
 
-        if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
-            await new Promise<void>((resolve, reject) => {
-                const timeout = window.setTimeout(
-                    () => reject(new Error('Fotoaparát neposkytol obraz.')),
-                    10_000,
-                )
-                videoElement.addEventListener('loadeddata', () => {
-                    window.clearTimeout(timeout)
-                    resolve()
-                }, { once: true })
-            })
-        }
+        await waitForVideoDimensions(videoElement)
 
         setupCanvases()
 
@@ -108,7 +137,7 @@ async function startCamera() {
             torch?: boolean
         }
         torchAvailable.value = capabilities?.torch === true
-        loading.value = false
+        cameraReady.value = true
         status.value = 'Pripravujem rozpoznávanie dokumentu...'
         drawPreview()
         void startDocumentDetection()
@@ -458,12 +487,12 @@ onBeforeUnmount(stopCamera)
                 autoplay
                 muted
                 playsinline
-                class="absolute inset-0 h-full w-full object-contain"
+                class="absolute inset-0 h-full w-full object-cover"
             />
 
             <canvas
                 ref="preview"
-                class="absolute inset-0 h-full w-full object-contain"
+                class="absolute inset-0 h-full w-full object-cover"
             />
 
             <canvas ref="detection" class="hidden" />

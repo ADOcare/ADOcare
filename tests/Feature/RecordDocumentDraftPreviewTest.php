@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Models\Document;
 use App\Models\User;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use App\Services\RecordDocumentService;
@@ -12,6 +13,7 @@ use Illuminate\Database\Capsule\Manager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\TestCase;
 
 class RecordDocumentDraftPreviewTest extends TestCase
@@ -20,9 +22,9 @@ class RecordDocumentDraftPreviewTest extends TestCase
     {
         parent::setUp();
 
-        $app = new Container();
+        $app = new Container;
         Container::setInstance($app);
-        $app->instance('config', new Repository());
+        $app->instance('config', new Repository);
 
         $database = new Manager($app);
         $database->addConnection([
@@ -50,6 +52,20 @@ class RecordDocumentDraftPreviewTest extends TestCase
             $table->string('zip')->nullable();
             $table->unsignedBigInteger('doctor_id')->nullable();
             $table->unsignedBigInteger('insurance_company_id')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+        });
+
+        Schema::create('documents', function ($table): void {
+            $table->id();
+            $table->unsignedBigInteger('patient_id');
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('branch_id')->nullable();
+            $table->string('type');
+            $table->string('mime_type');
+            $table->string('name');
+            $table->string('path');
+            $table->string('period')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });
@@ -83,7 +99,7 @@ class RecordDocumentDraftPreviewTest extends TestCase
         $audit = $this->createMock(ImmediateDocumentationAuditService::class);
         $audit->expects(self::never())->method('documentsChanged');
 
-        $company = new Company();
+        $company = new Company;
         $company->forceFill([
             'id' => 7,
             'name' => 'ADOS Test',
@@ -92,7 +108,7 @@ class RecordDocumentDraftPreviewTest extends TestCase
             'psc' => '91701',
         ]);
 
-        $user = new User();
+        $user = new User;
         $user->forceFill([
             'id' => 20,
             'company_id' => 7,
@@ -119,5 +135,83 @@ class RecordDocumentDraftPreviewTest extends TestCase
         self::assertSame('Bc. Eva Sestra', $payload['user_name']);
         self::assertSame([], $payload['form_data']['diagnosis']);
         self::assertSame([], $payload['form_data']['nursingDiagnoses.list']);
+    }
+
+    public function test_update_replaces_existing_record_payload_without_creating_a_document(): void
+    {
+        $audit = $this->createMock(ImmediateDocumentationAuditService::class);
+        $audit->expects(self::once())->method('documentsChanged');
+
+        $company = new Company;
+        $company->forceFill(['id' => 7, 'name' => 'ADOS Test']);
+
+        $user = new User;
+        $user->forceFill([
+            'id' => 20,
+            'company_id' => 7,
+            'title' => 'Bc.',
+            'first_name' => 'Eva',
+            'last_name' => 'Sestra',
+        ]);
+        $user->setRelation('company', $company);
+
+        $document = Document::query()->create([
+            'patient_id' => 10,
+            'user_id' => 20,
+            'branch_id' => 3,
+            'type' => 'record',
+            'mime_type' => 'application/json',
+            'name' => 'record.json',
+            'path' => 'documents/record/1.json',
+            'period' => '2026-09',
+        ]);
+
+        $disk = \Mockery::mock();
+        $disk->shouldReceive('files')
+            ->once()
+            ->with('records')
+            ->andReturn([$document->path]);
+        $disk->shouldReceive('get')
+            ->once()
+            ->with($document->path)
+            ->andReturn(json_encode([
+                'document_id' => $document->id,
+                'user_name' => 'Pôvodný používateľ',
+                'form_data' => [
+                    'legacyField' => 'Zachovať',
+                    'recommendedPharmacy' => 'Pôvodné',
+                ],
+            ]));
+        $disk->shouldReceive('put')
+            ->once()
+            ->with($document->path, \Mockery::on(function (string $json): bool {
+                $payload = json_decode($json, true);
+
+                return $payload['form_data']['recommendedPharmacy'] === 'Aktualizované'
+                    && $payload['form_data']['legacyField'] === 'Zachovať'
+                    && $payload['document_id'] === 1
+                    && $payload['user_name'] === 'Pôvodný používateľ';
+            }))
+            ->andReturnTrue();
+        $storage = \Mockery::mock();
+        $storage->shouldReceive('disk')->times(3)->with('local')->andReturn($disk);
+        Storage::swap($storage);
+
+        $updated = (new RecordDocumentService($audit))->update($document, [
+            'patient_id' => 10,
+            'branch_id' => 4,
+            'date' => '2026-10-22',
+            'form_spec' => ['sections' => []],
+            'record_data' => [
+                'recommendedPharmacy' => 'Aktualizované',
+                'diagnosis' => [],
+                'nursingDiagnoses.list' => [],
+            ],
+        ], $user);
+
+        self::assertSame($document->id, $updated->id);
+        self::assertSame(1, Document::query()->count());
+        self::assertSame('2026-10', $updated->fresh()->period);
+        self::assertSame(3, $updated->fresh()->branch_id);
     }
 }

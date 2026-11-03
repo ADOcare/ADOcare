@@ -191,6 +191,21 @@ export function useDekurzV2(
         }
     }
 
+    function syncDekurzNumber() {
+        if (!builder.value) return
+
+        const completedDraftNumber = builder.value.draft?.status === 'completed'
+            ? builder.value.draft.dekurz_number
+            : null
+        const number = completedDraftNumber
+            ?? builder.value.patient.dekurz_number
+            ?? builder.value.draft?.dekurz_number
+
+        if (number) {
+            dekurzNumber.value = String(number)
+        }
+    }
+
     async function load() {
         if (!patientId.value || !month.value) return
         loading.value = true
@@ -201,11 +216,7 @@ export function useDekurzV2(
                 params: { month: month.value },
             })
             builder.value = normalize(response.data.data as DekurzRawBuilderPayload)
-            if (builder.value.draft?.dekurz_number) {
-                dekurzNumber.value = String(builder.value.draft.dekurz_number)
-            } else if (builder.value.patient.dekurz_number) {
-                dekurzNumber.value = String(builder.value.patient.dekurz_number)
-            }
+            syncDekurzNumber()
         } catch (errorValue) {
             error.value = messageFrom(errorValue, 'Podklady pre Dekurz sa nepodarilo načítať.')
         } finally {
@@ -238,11 +249,7 @@ export function useDekurzV2(
                 month: month.value,
             })
             builder.value = normalize(response.data.data as DekurzRawBuilderPayload)
-            if (builder.value.draft?.dekurz_number) {
-                dekurzNumber.value = String(builder.value.draft.dekurz_number)
-            } else if (builder.value.patient.dekurz_number) {
-                dekurzNumber.value = String(builder.value.patient.dekurz_number)
-            }
+            syncDekurzNumber()
             return true
         } catch (errorValue) {
             const response = (errorValue as {
@@ -491,11 +498,13 @@ export function useDekurzV2(
                 `/v1/patients/${patientId.value}/dekurz-drafts/${draftId.value}/finalize`,
                 {
                     page_count: pageCount,
+                    dekurz_number: dekurzNumber.value,
                 },
             )
             builder.value.draft.status = 'completed'
             builder.value.draft.completed_at = new Date().toISOString()
             builder.value.draft.final_document_id = Number(response.data.data.document_id)
+            builder.value.draft.dekurz_number = Number(dekurzNumber.value)
             toast.add({
                 severity: 'success',
                 summary: 'Dekurz bol finalizovaný',

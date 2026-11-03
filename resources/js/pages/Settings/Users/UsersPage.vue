@@ -39,6 +39,7 @@ const { openModal } = useModal()
 const roleNameMap: Record<string, string> = {
     manager: 'Manažér',
     nurse: 'Sestra',
+    physiotherapist: 'Fyzioterapeut',
     branch_manager: 'Manažér pobočky',
     admin: 'Administrátor',
     superadmin: 'Superadministrátor',

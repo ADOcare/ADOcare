@@ -500,6 +500,11 @@ class DocumentService
         return sprintf('documents/pdf/%s/%d.pdf', $document->type, $document->id);
     }
 
+    public function invalidateTravelDocumentPdfCache(Document $document): void
+    {
+        $this->deleteTravelDocumentPdfCache($document);
+    }
+
     private function deleteTravelDocumentPdfCache(Document $document): void
     {
         $cachePath = $this->getTravelDocumentPdfCachePath($document);

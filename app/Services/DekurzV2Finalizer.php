@@ -23,19 +23,27 @@ class DekurzV2Finalizer
         private VertexFeedbackRecorder $feedbackRecorder,
     ) {}
 
-    public function finalize(Patient $patient, DekurzDraft $draft, User $actor, ?int $previewPageCount = null): Document
-    {
+    public function finalize(
+        Patient $patient,
+        DekurzDraft $draft,
+        User $actor,
+        ?int $previewPageCount = null,
+        ?int $requestedDekurzNumber = null,
+    ): Document {
         $jsonPath = null;
         $pdfPath = null;
         $snapshot = null;
 
         try {
-            $document = DB::transaction(function () use ($patient, $draft, $actor, $previewPageCount, &$jsonPath, &$pdfPath, &$snapshot): Document {
+            $document = DB::transaction(function () use ($patient, $draft, $actor, $previewPageCount, $requestedDekurzNumber, &$jsonPath, &$pdfPath, &$snapshot): Document {
                 $lockedPatient = Patient::query()->lockForUpdate()->findOrFail($patient->id);
                 $lockedDraft = DekurzDraft::query()->lockForUpdate()->findOrFail($draft->id);
                 $previousDocumentId = $lockedDraft->final_document_id;
 
-                if (! $previousDocumentId) {
+                if ($requestedDekurzNumber !== null) {
+                    $lockedDraft->dekurz_number = $requestedDekurzNumber;
+                    $lockedDraft->save();
+                } elseif (! $lockedDraft->dekurz_number) {
                     $lockedDraft->dekurz_number = max(1, (int) $lockedPatient->dekurz_number);
                     $lockedDraft->save();
                 }
@@ -88,6 +96,15 @@ class DekurzV2Finalizer
                     $numberedPageCount = $previewPageCount ?? $pageCount;
                     $nextNumber = (int) $lockedDraft->dekurz_number + max(1, (int) $numberedPageCount);
                     $lockedPatient->update(['dekurz_number' => (string) $nextNumber]);
+                    DekurzDraft::query()
+                        ->where('patient_id', $lockedPatient->id)
+                        ->whereKeyNot($lockedDraft->id)
+                        ->where('status', DekurzDraft::STATUS_DRAFT)
+                        ->whereNull('final_document_id')
+                        ->update([
+                            'dekurz_number' => $nextNumber,
+                            'updated_by' => $actor->id,
+                        ]);
                 }
                 $document->next_dekurz_number = $nextNumber;
 

@@ -27,6 +27,7 @@ import LoadingOverlay from '@/components/LoadingOverlay.vue'
 import ReferenceDocumentDrawer from '@/components/ReferenceDocumentDrawer.vue'
 import A4DocumentFrame from '@/components/documents/A4DocumentFrame.vue'
 import ScanDocumentContent from '@/components/documents/ScanDocumentContent.vue'
+import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 import PresetMultiDatePicker from '@/components/Date/PresetMultiDatePicker.vue'
 import Popover from 'primevue/popover'
@@ -45,6 +46,10 @@ const router =
 
 const toast =
     useToast()
+const {
+    editDocumentId,
+    isEditingDocument,
+} = useDocumentEditMode()
 
 patientStore.loadFromStorage?.()
 
@@ -280,7 +285,9 @@ async function persistSections(): Promise<boolean> {
     if (!patientId.value) return false
     const payload = sectionPayload()
     const results = await Promise.all([
-        savePatientTexts(patientId.value, payload.map(section => section.text)),
+        ...(isEditingDocument.value
+            ? []
+            : [savePatientTexts(patientId.value, payload.map(section => section.text))]),
         saveDraftSections(payload),
     ])
     return results.every(Boolean)
@@ -862,10 +869,29 @@ watch(
 
 onMounted(
     async () => {
-        await Promise.all([
-            loadAndInitialize(),
-            loadMacros(),
-        ])
+        let selectedDocumentChangedMonth = false
+
+        if (editDocumentId.value) {
+            const previousMonth = monthKey.value
+            const response = await api.get(`/v1/dekurz/${editDocumentId.value}`)
+            const documentMonth = String(
+                response.data?.data?.dekurz_data?.month ??
+                response.data?.data?.dekurz_data?.period ??
+                '',
+            ).slice(0, 7)
+
+            if (/^\d{4}-\d{2}$/.test(documentMonth)) {
+                const [year, month] = documentMonth.split('-').map(Number)
+                selectedMonth.value = new Date(year, month - 1, 1)
+                selectedDocumentChangedMonth = previousMonth !== monthKey.value
+            }
+        }
+
+        await loadMacros()
+
+        if (!selectedDocumentChangedMonth) {
+            await loadAndInitialize()
+        }
     },
 )
 

@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\Document;
 use App\Models\Patient;
-use App\Models\Branch;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use Illuminate\Support\Facades\Storage;
 
@@ -13,9 +13,7 @@ use Illuminate\Support\Facades\Storage;
  */
 class AgreementDocumentService
 {
-    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
-    {
-    }
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit) {}
 
     /**
      * Create document DB record and persist agreement JSON to storage.
@@ -34,8 +32,8 @@ class AgreementDocumentService
             'user_id' => $actor->id,
             'type' => 'agreement',
             'mime_type' => 'application/json',
-            'name' => 'dohoda_' . now()->format('d.m.Y'),
-            'path' => 'agreements/' . now()->timestamp . '.json',
+            'name' => 'dohoda_'.now()->format('d.m.Y'),
+            'path' => 'agreements/'.now()->timestamp.'.json',
             'branch_id' => $branch->id,
             'period' => date('Y-m', strtotime($data['date'])),
         ]);
@@ -47,6 +45,30 @@ class AgreementDocumentService
         $this->immediateAudit->documentsChanged([$document]);
 
         return [$document, $agreementData];
+    }
+
+    public function updateAgreement(Document $document, array $data): array
+    {
+        $patient = Patient::findOrFail($data['patient_id']);
+        $branch = Branch::findOrFail($document->branch_id ?? $data['branch_id']);
+        $previous = $document->replicate();
+        $existingPayload = $this->getAgreementPayload($document) ?? [];
+        $updatedPayload = $this->buildAgreementData($data, $patient, $branch, $document->id);
+        $payload = array_replace($existingPayload, [
+            'date' => $updatedPayload['date'],
+            'document_id' => $document->id,
+        ]);
+
+        Storage::disk('local')->put(
+            $document->path,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        );
+        $document->update([
+            'period' => date('Y-m', strtotime($data['date'])),
+        ]);
+        $this->immediateAudit->documentsChanged([$previous, $document]);
+
+        return [$document, $payload];
     }
 
     /** Build an agreement payload without persisting a document. */
@@ -72,12 +94,12 @@ class AgreementDocumentService
             'company_city' => $branch->company?->city ?? '',
             'company_stamp_path' => $branch->company?->stamp_path,
             'branch_city' => $branch->city ?? '',
-            'user_name' => trim(($representative?->title ?? '') . ' ' . ($representative?->first_name ?? '') . ' ' . ($representative?->last_name ?? '')),
+            'user_name' => trim(($representative?->title ?? '').' '.($representative?->first_name ?? '').' '.($representative?->last_name ?? '')),
             'user_contact' => $representative?->phone_number ?? '',
             'representative_signature_path' => $representative?->signature_path,
-            'patient_name' => trim(($patient->first_name ?? '') . ' ' . ($patient->last_name ?? '') . ' ' . ($patient->title ?? '')),
+            'patient_name' => trim(($patient->first_name ?? '').' '.($patient->last_name ?? '').' '.($patient->title ?? '')),
             'patient_birth_number' => $patient->personal_number ?? '',
-            'patient_address' => trim(($patient->address ?? '') . ', ' . ($patient->city ?? '') . ', ' . ($patient->postal_code ?? '')),
+            'patient_address' => trim(($patient->address ?? '').', '.($patient->city ?? '').', '.($patient->postal_code ?? '')),
             'date' => $data['date'],
             'document_id' => $documentId,
             'created_at' => now(),
@@ -94,6 +116,7 @@ class AgreementDocumentService
         }
 
         $content = Storage::disk('local')->get($document->path);
+
         return json_decode($content, true);
     }
 }

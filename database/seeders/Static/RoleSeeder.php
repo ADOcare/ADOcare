@@ -3,7 +3,6 @@
 namespace Database\Seeders\Static;
 
 use App\Models\Role;
-use App\Models\User;
 use Illuminate\Database\Seeder;
 
 class RoleSeeder extends Seeder
@@ -14,7 +13,7 @@ class RoleSeeder extends Seeder
         $roles = [
             ['id' => 0, 'position' => 'superadmin', 'scope' => 'global'],
             ['id' => 1, 'position' => 'manager', 'scope' => 'company'],
-            ['id' => 2, 'position' => 'nurse', 'scope' => 'branch']
+            ['id' => 2, 'position' => 'nurse', 'scope' => 'branch'],
         ];
         foreach ($roles as $role) {
             Role::updateOrCreate(
@@ -22,5 +21,10 @@ class RoleSeeder extends Seeder
                 ['position' => $role['position'], 'scope' => $role['scope']]
             );
         }
+
+        Role::updateOrCreate(
+            ['position' => 'physiotherapist'],
+            ['scope' => 'branch'],
+        );
     }
 }

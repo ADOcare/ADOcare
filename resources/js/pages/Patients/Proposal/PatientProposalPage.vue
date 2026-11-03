@@ -23,6 +23,7 @@ import FormField from '@/components/FormField.vue'
 import ReferenceDocumentDrawer from '@/components/ReferenceDocumentDrawer.vue'
 import ScanDocumentContent from '@/components/documents/ScanDocumentContent.vue'
 import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
+import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 interface Diagnosis {
     id: number
@@ -45,6 +46,7 @@ interface ProcedureOption {
 interface SelectedProcedure {
     procedure: ProcedureOption | null
     frequency: string
+    details?: unknown[]
 }
 
 interface ProposalValidationIssue {
@@ -106,6 +108,10 @@ const toast =
 
 const patientStore =
     usePatientStore()
+const {
+    editDocumentId,
+    isEditingDocument,
+} = useDocumentEditMode()
 
 patientStore.loadFromStorage?.()
 
@@ -933,10 +939,9 @@ async function preloadFromLatestProposal() {
         true
 
     try {
-        const response =
-            await api.get(
-                `/v1/patients/${patientId.value}/proposals/latest`,
-            )
+        const response = editDocumentId.value
+            ? await api.get(`/v1/proposals/${editDocumentId.value}`)
+            : await api.get(`/v1/patients/${patientId.value}/proposals/latest`)
 
         const proposal =
             response.data
@@ -1104,6 +1109,13 @@ async function preloadFromLatestProposal() {
                                 '',
                             ),
                         ),
+
+                    details:
+                        Array.isArray(
+                            item?.details,
+                        )
+                            ? [...item.details]
+                            : [],
                 })
             }
 
@@ -1129,7 +1141,9 @@ async function preloadFromLatestProposal() {
                 'Načítané',
 
             detail:
-                'Texty načítané z histórie.',
+                editDocumentId.value
+                    ? 'Načítaný vybraný dokument na úpravu.'
+                    : 'Texty načítané z histórie.',
 
             life:
                 2500,
@@ -2383,6 +2397,10 @@ function buildProposalPayload() {
 
                         frequency:
                             procedure.frequency,
+
+                        details:
+                            procedure.details ??
+                            [],
                     }),
                 ),
     }
@@ -2674,6 +2692,7 @@ async function generateDocument(
 
     try {
         if (
+            !isEditingDocument.value &&
             options
                 .duplicateConfirmed !==
             true
@@ -2692,11 +2711,9 @@ async function generateDocument(
         const payload =
             buildProposalPayload()
 
-        const response =
-            await api.post(
-                '/v1/proposals',
-                payload,
-            )
+        const response = isEditingDocument.value
+            ? await api.put(`/v1/proposals/${editDocumentId.value}`, payload)
+            : await api.post('/v1/proposals', payload)
 
         const generatedDocumentId =
             response.data
@@ -2719,7 +2736,9 @@ async function generateDocument(
                 'Úspešne',
 
             detail:
-                'Návrh ošetrovateľskej starostlivosti bol vytvorený.',
+                isEditingDocument.value
+                    ? 'Návrh ošetrovateľskej starostlivosti bol aktualizovaný.'
+                    : 'Návrh ošetrovateľskej starostlivosti bol vytvorený.',
 
             life:
                 3000,
@@ -2910,6 +2929,7 @@ onBeforeUnmount(() => {
 
 <template>
     <DocumentAlert
+        v-if="!isEditingDocument"
         :visible="dialogVisible"
         :document-id="documentId"
         document-url="/documents/proposal/{id}"
@@ -4086,7 +4106,7 @@ onBeforeUnmount(() => {
                                 <AppButton
                                     type="submit"
                                     variant="accent"
-                                    label="Generovať dokument"
+                                    :label="isEditingDocument ? 'Aktualizovať dokument' : 'Generovať dokument'"
                                     :loading="isGenerating"
                                     loading-label="Generujem"
                                     :disabled="!patientId"

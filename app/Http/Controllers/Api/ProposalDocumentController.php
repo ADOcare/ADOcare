@@ -62,6 +62,35 @@ class ProposalDocumentController extends Controller
         ], 'Návrh ošetrovateľskej starostlivosti bol úspešne vytvorený', 201);
     }
 
+    public function update(StoreProposalRequest $request, Document $document)
+    {
+        abort_unless($document->type === 'proposal', 404);
+        $data = $request->validated();
+        abort_unless(
+            (int) $document->patient_id === (int) $data['patient_id'],
+            422,
+            'Pacienta existujúceho dokumentu nie je možné zmeniť.',
+        );
+        $validation = $this->proposalValidationService->validate(
+            Patient::query()->findOrFail($data['patient_id']),
+            $data,
+        );
+        if ($validation['errors'] !== []) {
+            return response()->json([
+                'message' => 'Návrh obsahuje chyby podľa pravidiel ADOS.',
+                'data' => $validation,
+            ], 422);
+        }
+
+        [$document, $payload] = $this->service->updateProposal($document, $data, $request->user());
+        app(DocumentService::class)->invalidateTravelDocumentPdfCache($document);
+
+        return $this->success([
+            'document_id' => $document->id,
+            'proposal' => $payload,
+        ], 'Návrh bol aktualizovaný.');
+    }
+
     public function validateRules(ValidateProposalRulesRequest $request)
     {
         $data = $request->validated();

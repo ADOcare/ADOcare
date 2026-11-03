@@ -21,6 +21,7 @@ import api from '@/services/api'
 
 import { useAuthStore } from '@/stores/auth'
 import { usePatientStore } from '@/stores/patientStore'
+import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 /* -------------------------------------------------------------------------- */
 /* Stores                                                                     */
@@ -37,6 +38,10 @@ const authStore =
 
 const patientStore =
     usePatientStore()
+const {
+    editDocumentId,
+    isEditingDocument,
+} = useDocumentEditMode()
 
 patientStore.loadFromStorage()
 
@@ -565,6 +570,7 @@ async function generateDocument(
 
     try {
         if (
+            !isEditingDocument.value &&
             options
                 .duplicateConfirmed !==
             true
@@ -580,10 +586,7 @@ async function generateDocument(
             }
         }
 
-        const response =
-            await api.post(
-                '/v1/agreements',
-                {
+        const payload = {
                     patient_id:
                         patientId.value,
 
@@ -594,8 +597,10 @@ async function generateDocument(
                         toLocalYMD(
                             date.value,
                         ),
-                },
-            )
+                }
+        const response = isEditingDocument.value
+            ? await api.put(`/v1/agreements/${editDocumentId.value}`, payload)
+            : await api.post('/v1/agreements', payload)
 
         const generatedDocumentId =
             response.data
@@ -618,7 +623,9 @@ async function generateDocument(
                 'Úspešne vytvorené',
 
             detail:
-                'Dohoda o poskytovaní zdravotnej starostlivosti bola úspešne vytvorená.',
+                isEditingDocument.value
+                    ? 'Dohoda bola aktualizovaná.'
+                    : 'Dohoda o poskytovaní zdravotnej starostlivosti bola úspešne vytvorená.',
 
             life:
                 3000,
@@ -713,7 +720,7 @@ watch(
 /* Lifecycle                                                                  */
 /* -------------------------------------------------------------------------- */
 
-onMounted(() => {
+onMounted(async () => {
     if (
         !currentPatient.value
     ) {
@@ -730,6 +737,14 @@ onMounted(() => {
             life:
                 3000,
         })
+    }
+
+    if (editDocumentId.value) {
+        const response = await api.get(`/v1/agreements/${editDocumentId.value}`)
+        const payload = response.data?.data?.agreement_data
+        if (payload?.date) {
+            date.value = new Date(`${String(payload.date).slice(0, 10)}T00:00:00`)
+        }
     }
 })
 
@@ -748,6 +763,7 @@ onBeforeUnmount(() => {
 
 <template>
     <DocumentAlert
+        v-if="!isEditingDocument"
         :visible="
             dialogVisible
         "
@@ -895,9 +911,7 @@ onBeforeUnmount(() => {
                                     <AppButton
                                         type="submit"
                                         variant="accent"
-                                        label="
-                                            Generovať dokument
-                                        "
+                                        :label="isEditingDocument ? 'Aktualizovať dokument' : 'Generovať dokument'"
                                         :loading="
                                             isGenerating
                                         "

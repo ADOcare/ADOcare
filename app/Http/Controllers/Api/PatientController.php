@@ -1,6 +1,8 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use App\Http\Filters\ApiQuery;
 use App\Http\Requests\PatientDeleteManyRequest;
 use App\Http\Requests\PatientPointIndexRequest;
@@ -14,7 +16,6 @@ use App\Models\Document;
 use App\Models\Patient;
 use App\Models\PatientPoint;
 use App\Models\Procedure;
-use App\Http\Controllers\Controller;
 use App\Services\PatientService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,14 +29,14 @@ class PatientController extends Controller
         $this->service = $service;
     }
 
-
-
     /**
      * List patients for a branch.
      *
      * @group Patients
+     *
      * @queryParam branch_id int required Branch ID to filter patients. Example: 1
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data": [{"id":1, "first_name":"John", "last_name":"Doe"}], "meta": {"total":1}}
      */
     public function index(Request $request): JsonResponse
@@ -58,14 +59,15 @@ class PatientController extends Controller
         return $this->success(new PatientCollection($results), 'Pacienti boli uspesne nacitani.');
     }
 
-
     /**
      * Create a patient.
      *
      * @group Patients
+     *
      * @bodyParam first_name string required Example: "John"
      * @bodyParam last_name string required Example: "Doe"
      * @bodyParam branch_id int required Branch ID. Example: 1
+     *
      * @response 201 {"data": {"id":1, "first_name":"John", "last_name":"Doe"}}
      */
     public function store(PatientStoreRequest $request): JsonResponse
@@ -81,7 +83,9 @@ class PatientController extends Controller
      * Get patient detail.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @response 200 {"data": {"id":1, "first_name":"John", "last_name":"Doe"}}
      */
     public function show(Patient $patient): JsonResponse
@@ -92,14 +96,16 @@ class PatientController extends Controller
         return $this->success(new PatientResource($patient), 'Pacient bol uspesne nacitany.');
     }
 
-
     /**
      * Update patient detail.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @bodyParam first_name string Example: "Jane"
      * @bodyParam last_name string Example: "Doe"
+     *
      * @response 200 {"data": {"id":1, "first_name":"Jane", "last_name":"Doe"}}
      */
     public function update(PatientUpdateRequest $request, Patient $patient): JsonResponse
@@ -111,13 +117,13 @@ class PatientController extends Controller
         return $this->success(new PatientResource($patient), 'Pacient bol uspesne aktualizovany.');
     }
 
-
-
     /**
      * Delete a patient.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @response 200 {"success":true}
      */
     public function destroy(Patient $patient): JsonResponse
@@ -131,7 +137,9 @@ class PatientController extends Controller
      * Delete multiple patients.
      *
      * @group Patients
+     *
      * @bodyParam ids array required Array of patient IDs to delete. Example: [1,2,3]
+     *
      * @response 200 {"success":true}
      */
     public function destroyMany(PatientDeleteManyRequest $request): JsonResponse
@@ -145,13 +153,15 @@ class PatientController extends Controller
      * Restore one or more soft-deleted patients.
      *
      * @group Patients
+     *
      * @bodyParam ids array required Array of patient IDs to restore. Example: [1,2,3]
+     *
      * @response 200 {"success":true}
      */
     public function restoreMany(Request $request): JsonResponse
     {
         $ids = $request->input('ids', []);
-        if (!is_array($ids)) {
+        if (! is_array($ids)) {
             return $this->error('Neplatny payload.', 422);
         }
 
@@ -164,13 +174,15 @@ class PatientController extends Controller
      * Get patient's insurance company.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @response 200 {"data":{"id":1,"name":"Insurance Co"}}
      */
     public function insuranceCompany(Patient $patient): JsonResponse
     {
         $insuranceCompany = $patient->insuranceCompany;
-        if (!$insuranceCompany) {
+        if (! $insuranceCompany) {
             return $this->notFound();
         }
 
@@ -181,13 +193,15 @@ class PatientController extends Controller
      * Get patient's doctor.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @response 200 {"data":{"id":1,"first_name":"John","last_name":"Doe"}}
      */
     public function doctor(Patient $patient): JsonResponse
     {
         $doctor = $patient->doctor;
-        if (!$doctor) {
+        if (! $doctor) {
             return $this->notFound();
         }
 
@@ -198,8 +212,11 @@ class PatientController extends Controller
      * List diagnoses for a patient.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data":[{"id":1,"code":"A01","description":"Diagnosis"}],"meta":{"total":1}}
      */
     public function diagnoses(Request $request, Patient $patient): JsonResponse
@@ -214,13 +231,18 @@ class PatientController extends Controller
      * List procedures for a patient.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data":[{"id":1,"code":"X123","description":"Procedure"}],"meta":{"total":1}}
      */
     public function procedures(Request $request, Patient $patient): JsonResponse
     {
         $query = Procedure::query();
+        app(\App\Services\ProcedureRoleService::class)
+            ->scopeForUser($query, $request->user(), (int) $patient->branch_id);
         $results = ApiQuery::apply($request, $query, searchable: ['code', 'description']);
 
         return $this->success(new BaseCollection($results), 'Vykony boli uspesne nacitane.');
@@ -230,11 +252,14 @@ class PatientController extends Controller
      * List patient points (time series).
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @queryParam date_from date optional Start date. Example: 2025-01-01
      * @queryParam date_to date optional End date. Example: 2025-01-31
      * @queryParam branch_id int optional Branch ID to filter. Example: 1
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data":[],"meta":{"total":0}}
      */
     public function points(PatientPointIndexRequest $request, Patient $patient): JsonResponse
@@ -258,6 +283,7 @@ class PatientController extends Controller
             allowedFilters: ['reference_date', 'branch_id'],
             defaults: ['sort' => 'reference_date']
         );
+
         return $this->success(new BaseCollection($results), 'Body pacienta boli uspesne nacitane.');
     }
 
@@ -265,8 +291,11 @@ class PatientController extends Controller
      * List patient documents.
      *
      * @group Patients
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data":[],"meta":{"total":0}}
      */
     public function documents(Request $request, Patient $patient): JsonResponse
@@ -277,5 +306,4 @@ class PatientController extends Controller
 
         return $this->success(new BaseCollection($results), 'Dokumenty pacienta boli uspesne nacitane.');
     }
-
 }

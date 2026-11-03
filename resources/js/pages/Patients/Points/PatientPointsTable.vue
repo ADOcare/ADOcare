@@ -12,6 +12,7 @@ import ActionButtons from '@/components/table-columns/ActionButtons.vue'
 import { usePatientStore } from '@/stores/patientStore'
 import api from '@/services/api'
 import useModal from '@/composables/useModal'
+import { useToast } from 'primevue/usetoast'
 
 import PatientPointForm from './PatientPointForm.vue'
 import PatientPointBulkEditForm from './PatientPointBulkEditForm.vue'
@@ -23,6 +24,7 @@ import type {
 } from '@/types/datatable'
 
 const patientStore = usePatientStore()
+const toast = useToast()
 patientStore.loadFromStorage()
 
 const pointRemote = ref<RemoteTableReturn>(
@@ -182,20 +184,34 @@ const options = computed<DataTableOptions<PatientPointApi>>(() => ({
                 selectedRows,
                 remote,
             }) => {
-                await api.delete(
-                    'v1/patient-points',
-                    {
-                        data: {
-                            ids: selectedRows.map(
-                                (row) => row.id,
-                            ),
+                try {
+                    await api.delete(
+                        'v1/patient-points',
+                        {
+                            data: {
+                                ids: selectedRows.map(
+                                    (row) => row.id,
+                                ),
+                            },
                         },
-                    },
-                )
+                    )
 
-                await remote.loadPage(
-                    remote.page.value,
-                )
+                    await remote.reload()
+                    toast.add({
+                        severity: 'success',
+                        summary: 'Vymazané',
+                        detail: 'Vybrané záznamy boli vymazané.',
+                        life: 3000,
+                    })
+                } catch (error: any) {
+                    toast.add({
+                        severity: 'error',
+                        summary: 'Záznamy sa nepodarilo vymazať',
+                        detail: error?.response?.data?.message ?? 'Skúste operáciu zopakovať.',
+                        life: 5000,
+                    })
+                    throw error
+                }
             },
         },
     ],

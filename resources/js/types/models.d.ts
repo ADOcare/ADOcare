@@ -848,12 +848,14 @@ export interface Procedure {
   created_at: string | null
   updated_at: string | null
   default_dekurz_text: string | null
+  role_ids?: number[]
   // relations
   patient_dekurz_templates: PatientProcedureDekurzTemplate[]
   dekurz_entries: DekurzEntry[]
   insurance_rules: InsuranceRule[]
   insurance_companies_prices: InsuranceCompany[]
   insurance_companies_prices_minimal: InsuranceCompany[]
+  roles: Role[]
   // counts
   patient_dekurz_templates_count: number
   dekurz_entries_count: number

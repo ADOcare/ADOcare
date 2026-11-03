@@ -41,7 +41,7 @@ async function redirectAfterLogin() {
 
     if (redirect) {
         await router.replace(redirect);
-    } else if (authStore.currentRole === 'nurse') {
+    } else if (authStore.isClinical) {
         await router.replace({ name: 'patients' });
     } else {
         await router.dashboard();

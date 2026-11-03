@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import api from '@/services/api'
-import type { InsuranceCompany } from '@/types/models'
+import type { InsuranceCompany, Role } from '@/types/models'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps({
@@ -30,6 +30,7 @@ const labelClass = computed(() =>
 
 const loading = ref(false)
 const insuranceCompanies = ref<InsuranceCompany[]>([])
+const branchRoles = ref<Role[]>([])
 const _originalSnapshot = ref<string | null>(null)
 const priceValues = ref<Record<number, number>>({})
 
@@ -38,6 +39,7 @@ const model = ref({
     code: '',
     description: '',
     prices: [] as Array<{ insurance_company_id: number; price: number }>,
+    role_ids: [] as number[],
 })
 
 function normalizePrice(value: unknown): number {
@@ -59,6 +61,7 @@ function makeSnapshot() {
     return JSON.stringify({
         code: model.value.code,
         description: model.value.description,
+        role_ids: [...model.value.role_ids].sort((a, b) => a - b),
         prices: buildPricesPayload().map((p) => ({
             insurance_company_id: Number(p.insurance_company_id),
             price: Number(p.price),
@@ -70,7 +73,12 @@ onMounted(async () => {
     let companies: InsuranceCompany[] = []
 
     try {
-        companies = await api.fetchEntities('v1/insurance-companies')
+        const [loadedCompanies, loadedRoles] = await Promise.all([
+            api.fetchEntities<InsuranceCompany>('v1/insurance-companies'),
+            api.fetchEntities<Role>('v1/roles/branch'),
+        ])
+        companies = loadedCompanies
+        branchRoles.value = loadedRoles
     } catch {
         companies = []
     }
@@ -82,6 +90,7 @@ onMounted(async () => {
     model.value.id = props.procedure?.id ?? null
     model.value.code = props.procedure?.code ?? ''
     model.value.description = props.procedure?.description ?? ''
+    model.value.role_ids = (props.procedure?.roles ?? []).map((role: Role) => Number(role.id))
 
     model.value.prices = companies.map((ic: any) => {
         const found = existing.find((p: any) => Number(p.id) === Number(ic.id))
@@ -121,6 +130,7 @@ async function save() {
         if (authStore.isSuperadmin) {
             payload.code = model.value.code?.toString().trim()
             payload.description = model.value.description?.toString().trim()
+            payload.role_ids = model.value.role_ids
         }
 
         if (authStore.isManager) {
@@ -133,6 +143,7 @@ async function save() {
             await api.post('/v1/procedures', {
                 code: model.value.code?.toString().trim(),
                 description: model.value.description?.toString().trim(),
+                role_ids: model.value.role_ids,
                 prices: buildPricesPayload(),
             })
         }
@@ -168,6 +179,16 @@ async function save() {
                     :class="baseFieldClass"
                     :disabled="!canEditBaseFields"
                 />
+            </div>
+
+            <div v-if="canEditBaseFields" class="mt-4">
+                <label class="block text-normal text-dark mb-2">Povolené roly</label>
+                <div class="flex flex-col gap-2">
+                    <label v-for="role in branchRoles" :key="role.id" class="flex items-center gap-2">
+                        <Checkbox v-model="model.role_ids" :value="Number(role.id)" />
+                        <span>{{ role.name || role.position }}</span>
+                    </label>
+                </div>
             </div>
 
             <div class="col-span-6">

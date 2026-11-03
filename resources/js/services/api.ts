@@ -18,6 +18,10 @@ api.interceptors.request.use((config) => {
         if (token && config.headers) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+        if (config.headers) {
+            if (store.currentRole) config.headers['X-Current-Role'] = store.currentRole;
+            if (store.currentBranch?.id) config.headers['X-Current-Branch'] = String(store.currentBranch.id);
+        }
         // Convert all true/false query params to 1/0 and if there is a 'q' param, trim it and make sure its a string
         if (config.params) {
             for (const key in config.params) {

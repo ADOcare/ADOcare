@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/auth'
 import AppButton from '@/components/AppButton.vue'
 import FormField from '@/components/FormField.vue'
 import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
+import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 type Option = { label: string; value: string }
 
@@ -1750,6 +1751,10 @@ const router = useRouter()
 const toast = useToast()
 const patientStore = usePatientStore()
 const authStore = useAuthStore()
+const {
+  editDocumentId,
+  isEditingDocument,
+} = useDocumentEditMode()
 
 patientStore.loadFromStorage?.()
 
@@ -1855,7 +1860,9 @@ async function preloadFromLatestRecord() {
   if (!patientId.value) return
 
   try {
-    const res = await api.get(`/v1/patients/${patientId.value}/records/latest`)
+    const res = editDocumentId.value
+      ? await api.get(`/v1/records/${editDocumentId.value}`)
+      : await api.get(`/v1/patients/${patientId.value}/records/latest`)
     const recordData = res?.data?.data?.record_data?.form_data ?? res?.data?.record_data?.form_data
 
     if (!recordData) return
@@ -1930,7 +1937,9 @@ async function preloadFromLatestRecord() {
     toast.add({
       severity: 'info',
       summary: 'Načítané',
-      detail: 'Texty načítané z histórie.',
+      detail: editDocumentId.value
+        ? 'Načítaný vybraný dokument na úpravu.'
+        : 'Texty načítané z histórie.',
       life: 2500,
     })
   } catch (e: any) {
@@ -2023,12 +2032,16 @@ async function saveRecord() {
   try {
     const payload = buildRecordPayload()
 
-    const res = await api.post('/v1/records', payload)
+    const res = isEditingDocument.value
+      ? await api.put(`/v1/records/${editDocumentId.value}`, payload)
+      : await api.post('/v1/records', payload)
 
     toast.add({
       severity: 'success',
       summary: 'Úspešne',
-      detail: 'Ošetrovateľský záznam bol vytvorený',
+      detail: isEditingDocument.value
+        ? 'Ošetrovateľský záznam bol aktualizovaný'
+        : 'Ošetrovateľský záznam bol vytvorený',
       life: 3000
     })
 
@@ -2487,7 +2500,7 @@ onBeforeUnmount(() => {
               v-else
               type="submit"
               variant="accent"
-              label="Generovať dokument"
+              :label="isEditingDocument ? 'Aktualizovať dokument' : 'Generovať dokument'"
               :disabled="!patientId"
             />
           </div>

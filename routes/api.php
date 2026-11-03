@@ -456,6 +456,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('proposals', ProposalDocumentController::class);
+    Route::put('/proposals/{document}', [ProposalDocumentController::class, 'update'])
+        ->middleware(['role:any', 'can:update,document']);
 
     // Patient-specific proposal routes
     Route::get('/patients/{patient}/proposals', [ProposalDocumentController::class, 'getByPatient'])
@@ -471,6 +473,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('agreements', AgreementDocumentController::class);
+    Route::put('/agreements/{document}', [AgreementDocumentController::class, 'update'])
+        ->middleware(['role:any', 'can:update,document']);
 
     Route::documentRoutes('cps', CPDocumentController::class);
     Route::documentRoutes('dzcs', DZCDocumentController::class);
@@ -534,6 +538,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('leave-documents', LeaveDocumentController::class);
+    Route::put('/leave-documents/{document}', [LeaveDocumentController::class, 'update'])
+        ->middleware(['role:any', 'can:update,document']);
     Route::get('/patients/{patient}/leave/latest', [LeaveDocumentController::class, 'latestByPatient'])
         ->middleware(['role:any', 'can:view,patient']);
 
@@ -541,6 +547,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class);
     Route::documentRoutes('records', RecordDocumentController::class);
+    Route::put('/records/{document}', [RecordDocumentController::class, 'update'])
+        ->middleware(['role:any', 'can:update,document']);
     Route::get('/patients/{patient}/records/latest', [RecordDocumentController::class, 'latestByPatient'])
         ->middleware(['role:any', 'can:view,patient']);
 

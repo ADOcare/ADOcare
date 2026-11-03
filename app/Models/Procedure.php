@@ -15,6 +15,11 @@ class Procedure extends Model
         'default_dekurz_text',
     ];
 
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class, 'procedure_role');
+    }
+
     public function patientDekurzTemplates()
     {
         return $this->hasMany(PatientProcedureDekurzTemplate::class);
@@ -30,7 +35,6 @@ class Procedure extends Model
         return $this->hasMany(InsuranceRule::class);
     }
 
-
     // Procedure prices based on insurance companies
     public function insuranceCompaniesPrices()
     {
@@ -39,7 +43,7 @@ class Procedure extends Model
             ->withTimestamps();
 
         $user = auth()->user();
-        if ($user && !$user->hasGlobalRole('superadmin') && $user->company_id) {
+        if ($user && ! $user->hasGlobalRole('superadmin') && $user->company_id) {
             $relation->wherePivot('company_id', $user->company_id);
         }
 
@@ -54,11 +58,10 @@ class Procedure extends Model
             ->withTimestamps();
 
         $user = auth()->user();
-        if ($user && !$user->hasGlobalRole('superadmin') && $user->company_id) {
+        if ($user && ! $user->hasGlobalRole('superadmin') && $user->company_id) {
             $relation->wherePivot('company_id', $user->company_id);
         }
 
         return $relation;
     }
-
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Document;
 use App\Models\User;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use App\Services\LeaveDocumentService;
@@ -11,6 +12,7 @@ use Illuminate\Database\Capsule\Manager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\TestCase;
 
 class LeaveDocumentDraftPreviewTest extends TestCase
@@ -19,9 +21,9 @@ class LeaveDocumentDraftPreviewTest extends TestCase
     {
         parent::setUp();
 
-        $app = new Container();
+        $app = new Container;
         Container::setInstance($app);
-        $app->instance('config', new Repository());
+        $app->instance('config', new Repository);
 
         $database = new Manager($app);
         $database->addConnection([
@@ -43,6 +45,20 @@ class LeaveDocumentDraftPreviewTest extends TestCase
             $table->string('first_name')->nullable();
             $table->string('last_name')->nullable();
             $table->string('personal_number')->nullable();
+            $table->timestamps();
+            $table->softDeletes();
+        });
+
+        Schema::create('documents', function ($table): void {
+            $table->id();
+            $table->unsignedBigInteger('patient_id');
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('branch_id')->nullable();
+            $table->string('type');
+            $table->string('mime_type');
+            $table->string('name');
+            $table->string('path');
+            $table->string('period')->nullable();
             $table->timestamps();
             $table->softDeletes();
         });
@@ -72,7 +88,7 @@ class LeaveDocumentDraftPreviewTest extends TestCase
         $audit = $this->createMock(ImmediateDocumentationAuditService::class);
         $audit->expects(self::never())->method('documentsChanged');
 
-        $user = new User();
+        $user = new User;
         $user->forceFill([
             'id' => 20,
             'company_id' => 7,
@@ -93,5 +109,70 @@ class LeaveDocumentDraftPreviewTest extends TestCase
         self::assertSame('9001011234', $payload['patient_birth_number']);
         self::assertSame('Bc. Eva Sestra', $payload['user_name']);
         self::assertSame(['mobility'], $payload['problems']);
+    }
+
+    public function test_update_replaces_existing_leave_payload_without_creating_a_document(): void
+    {
+        $audit = $this->createMock(ImmediateDocumentationAuditService::class);
+        $audit->expects(self::once())->method('documentsChanged');
+
+        $user = new User;
+        $user->forceFill([
+            'id' => 20,
+            'company_id' => 7,
+            'title' => 'Bc.',
+            'first_name' => 'Eva',
+            'last_name' => 'Sestra',
+        ]);
+
+        $document = Document::query()->create([
+            'patient_id' => 10,
+            'user_id' => 20,
+            'branch_id' => 3,
+            'type' => 'leave',
+            'mime_type' => 'application/json',
+            'name' => 'leave.json',
+            'path' => 'documents/leave/1.json',
+            'period' => '2026-09',
+        ]);
+
+        $disk = \Mockery::mock();
+        $disk->shouldReceive('exists')
+            ->once()
+            ->with($document->path)
+            ->andReturnTrue();
+        $disk->shouldReceive('get')
+            ->once()
+            ->with($document->path)
+            ->andReturn(json_encode([
+                'document_id' => $document->id,
+                'user_name' => 'Pôvodný používateľ',
+                'results' => 'Pôvodný výsledok',
+            ]));
+        $disk->shouldReceive('put')
+            ->once()
+            ->with($document->path, \Mockery::on(function (string $json): bool {
+                $payload = json_decode($json, true);
+
+                return $payload['results'] === 'Aktualizovaný výsledok'
+                    && $payload['document_id'] === 1
+                    && $payload['user_name'] === 'Pôvodný používateľ';
+            }))
+            ->andReturnTrue();
+        $storage = \Mockery::mock();
+        $storage->shouldReceive('disk')->times(3)->with('local')->andReturn($disk);
+        Storage::swap($storage);
+
+        $updated = (new LeaveDocumentService($audit))->update($document, [
+            'patient_id' => 10,
+            'branch_id' => 4,
+            'date' => '2026-10-22',
+            'results' => 'Aktualizovaný výsledok',
+        ], $user);
+
+        self::assertSame($document->id, $updated->id);
+        self::assertSame(1, Document::query()->count());
+        self::assertSame('2026-10', $updated->fresh()->period);
+        self::assertSame(3, $updated->fresh()->branch_id);
     }
 }

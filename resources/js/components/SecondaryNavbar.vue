@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 const route = useRoute()
 const router = useRouter()
+const { isEditingDocument } = useDocumentEditMode()
 
 // section root: define which part of the route tree to scan
 const sectionRootName = computed(() => {
@@ -85,6 +87,12 @@ function linkClass(key: string) {
         <h2 v-if="h2Title" class="px-2! text-normal!">
           {{ h2Title }}
         </h2>
+        <span
+          v-if="isEditingDocument"
+          class="ml-1 inline-flex rounded-md bg-darkgrey px-2 py-1 text-mini font-medium text-white"
+        >
+          Upravujete
+        </span>
       </div>
     </template>
 
@@ -109,4 +117,3 @@ function linkClass(key: string) {
 
   </Menubar>
 </template>
-

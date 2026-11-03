@@ -73,6 +73,61 @@ class ProposalDocumentService
         return [$document, $payload];
     }
 
+    public function updateProposal(Document $document, array $data, $actor): array
+    {
+        $patient = Patient::findOrFail($data['patient_id']);
+        $branch = Branch::findOrFail($document->branch_id ?? $data['branch_id']);
+        $previous = $document->replicate();
+        $existingPayload = $this->getProposalPayload($document) ?? [];
+        $updatedPayload = $this->buildProposalData($data, $actor, $patient, $branch, $document->id);
+        $editableKeys = [
+            'diagnosis',
+            'nurse_diagnosis',
+            'epicrisis',
+            'care_plan',
+            'mobility',
+            'expected_duration',
+            'date',
+            'procedures',
+        ];
+        $payload = array_replace(
+            $existingPayload,
+            array_intersect_key($updatedPayload, array_flip($editableKeys)),
+            ['document_id' => $document->id],
+        );
+
+        Storage::disk('local')->put(
+            $document->path,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        );
+        $document->update([
+            'period' => date('Y-m', strtotime($data['date'])),
+        ]);
+
+        DB::table('proposal_nurse_diagnoses')->where('document_id', $document->id)->delete();
+        $nurseDiagnosisIds = collect($data['nurse_diagnosis_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique();
+        if ($nurseDiagnosisIds->isNotEmpty()) {
+            $now = now();
+            DB::table('proposal_nurse_diagnoses')->insert(
+                $nurseDiagnosisIds->map(fn ($nurseDiagnosisId) => [
+                    'document_id' => $document->id,
+                    'company_id' => (int) $branch->getAttribute('company_id'),
+                    'nurse_diagnosis_id' => $nurseDiagnosisId,
+                    'active' => true,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ])->all(),
+            );
+        }
+
+        $this->immediateAudit->documentsChanged([$previous, $document]);
+
+        return [$document, $payload];
+    }
+
     public function previewProposal(array $data, $actor): array
     {
         return $this->buildProposalData(

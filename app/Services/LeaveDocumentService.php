@@ -13,16 +13,14 @@ use Illuminate\Support\Facades\Storage;
  */
 class LeaveDocumentService
 {
-    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
-    {
-    }
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit) {}
 
     /**
      * Create a leave document and persist its JSON payload.
      */
     public function create(array $data, User $user): Document
     {
-        $filePath = 'leave/' . now()->timestamp . '.json';
+        $filePath = 'leave/'.now()->timestamp.'.json';
         $period = date('Y-m', strtotime((string) $data['date']));
 
         $document = Document::create([
@@ -30,7 +28,7 @@ class LeaveDocumentService
             'user_id' => $user->id,
             'type' => 'leave',
             'mime_type' => 'application/json',
-            'name' => 'prepustacia_sprava_' . now()->format('d.m.Y'),
+            'name' => 'prepustacia_sprava_'.now()->format('d.m.Y'),
             'path' => $filePath,
             'period' => $period,
             'branch_id' => $data['branch_id'] ?? null,
@@ -45,6 +43,38 @@ class LeaveDocumentService
         );
 
         $this->immediateAudit->documentsChanged([$document]);
+
+        return $document;
+    }
+
+    public function update(Document $document, array $data, User $user): Document
+    {
+        $patient = Patient::findOrFail((int) $data['patient_id']);
+        $previous = $document->replicate();
+        $existingPayload = $this->findLeaveFileForDocument($document) ?? [];
+        $updatedPayload = $this->buildPayload($data, $document, $patient, $user);
+        $editableKeys = [
+            'date',
+            'problems',
+            'other_findings',
+            'results',
+            'education',
+            'received',
+        ];
+        $payload = array_replace(
+            $existingPayload,
+            array_intersect_key($updatedPayload, array_flip($editableKeys)),
+            ['document_id' => $document->id],
+        );
+
+        Storage::disk('local')->put(
+            $document->path,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        );
+        $document->update([
+            'period' => date('Y-m', strtotime((string) $data['date'])),
+        ]);
+        $this->immediateAudit->documentsChanged([$previous, $document]);
 
         return $document;
     }

@@ -2,10 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\RoleScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Enums\RoleScope;
-
 
 class Role extends Model
 {
@@ -30,6 +29,11 @@ class Role extends Model
     public function users()
     {
         return $this->hasMany(User::class, 'role_id');
+    }
+
+    public function procedures()
+    {
+        return $this->belongsToMany(Procedure::class, 'procedure_role');
     }
 
     public function assignUser(User $user)
@@ -61,16 +65,21 @@ class Role extends Model
      */
     public function getNameAttribute(): string
     {
+        if ($this->position === 'physiotherapist') {
+            return 'Fyzioterapeut';
+        }
+
         // translate the position into Slovak; use the `lang` files so
         // translators can override or improve the wording.  fall back to
         // a humanized version if no translation exists.
-        $key = 'roles.' . $this->position;
+        $key = 'roles.'.$this->position;
         $translated = __($key);
         if ($translated === $key) {
             // no translation found, so humanize the position string
             $translated = str_replace('_', ' ', $this->position);
             $translated = ucwords($translated);
         }
+
         return $translated;
     }
 }

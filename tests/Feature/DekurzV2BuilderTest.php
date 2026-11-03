@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\DekurzDraft;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Models\PatientDekurzCustomTrack;
@@ -159,6 +160,7 @@ class DekurzV2BuilderTest extends TestCase
             'source' => 'manual',
             'edited_at' => now(),
         ]);
+        $draft->update(['dekurz_number' => 42]);
         PatientProcedureDekurzTemplate::create([
             'patient_id' => $patient->id,
             'procedure_id' => 10,
@@ -168,6 +170,7 @@ class DekurzV2BuilderTest extends TestCase
         $reopened = $initializer->initialize($patient, '2026-10', $actor);
         self::assertSame(4, $reopened->days->count());
         self::assertSame(4, $reopened->days->sum(fn ($day): int => $day->entries->count()));
+        self::assertSame(42, $reopened->dekurz_number);
         self::assertSame('Individuálne upravený denný text.', $editedEntry->fresh()->text);
         self::assertSame('', $untouchedEntry->fresh()->text);
         self::assertSame('empty', $untouchedEntry->fresh()->source);
@@ -338,6 +341,38 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame([101], array_column($changes['removed'], 'patient_point_id'));
         self::assertSame(100, $changes['changed'][0]['patient_point_id']);
         self::assertSame(['draft' => 10, 'current' => 11], $changes['changed'][0]['differences']['procedure_id']);
+    }
+
+    public function test_reinitialization_removes_stale_entries_and_reconciles_changed_scoring_rows(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $initializer = $this->initializer();
+        $draft = $initializer->initialize($patient, '2026-10', $actor);
+
+        PatientPoint::findOrFail(100)->update([
+            'procedure_id' => 11,
+            'procedure_code' => '3423B',
+        ]);
+        PatientPoint::findOrFail(101)->delete();
+        PatientPoint::findOrFail(102)->delete();
+
+        $draft = $initializer->initialize($patient, '2026-10', $actor);
+        $entries = $draft->days->flatMap->entries->whereNull('custom_track_id');
+        $snapshotIds = $entries
+            ->flatMap(fn ($entry) => $entry->patient_point_snapshot_ids ?? [])
+            ->sort()
+            ->values()
+            ->all();
+
+        self::assertSame([100, 104], $snapshotIds);
+        self::assertSame(2, $draft->days->count());
+        self::assertSame(2, $entries->firstWhere('patient_point_snapshot_id', 100)?->quantity);
+
+        $changes = $this->builder()->build($patient, '2026-10')['scoring_changes'];
+        self::assertSame([], $changes['added']);
+        self::assertSame([], $changes['removed']);
+        self::assertSame([], $changes['changed']);
     }
 
     public function test_supporting_documents_always_use_latest_document_period(): void
@@ -611,6 +646,15 @@ class DekurzV2BuilderTest extends TestCase
         $patient->update(['dekurz_number' => '5']);
         $actor = User::findOrFail(1);
         $draft = $this->initializer()->initialize($patient, '2026-10', $actor);
+        $nextMonthDraft = DekurzDraft::query()->create([
+            'patient_id' => $patient->id,
+            'branch_id' => $patient->branch_id,
+            'period' => '2026-11-01',
+            'dekurz_number' => 5,
+            'status' => DekurzDraft::STATUS_DRAFT,
+            'created_by' => $actor->id,
+            'updated_by' => $actor->id,
+        ]);
         $draft->days->flatMap->entries->each(fn ($entry) => $entry->update(['text' => 'Text pri finalizácii.']));
         $storage = $this->useInMemoryStorage();
         $documentService = $this->createMock(DocumentService::class);
@@ -629,17 +673,19 @@ class DekurzV2BuilderTest extends TestCase
             ->method('recordDekurz')
             ->with(self::isInstanceOf(Document::class), self::callback(fn (array $snapshot): bool => $snapshot['source'] === 'dekurz_v2'));
 
-        $document = $this->finalizer($documentService, $feedbackRecorder)->finalize($patient, $draft, $actor, 2);
+        $document = $this->finalizer($documentService, $feedbackRecorder)->finalize($patient, $draft, $actor, 2, 42);
         $payload = json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR);
 
         self::assertSame(3, $payload['schema_version']);
         self::assertSame('dekurz_v2', $payload['source']);
         self::assertSame($draft->id, $payload['draft_id']);
         self::assertSame('Text pri finalizácii.', $payload['days'][0]['entries'][0]['text']);
-        self::assertSame(5, $payload['dekurz_number']);
+        self::assertSame(42, $payload['dekurz_number']);
+        self::assertSame(42, $draft->fresh()->dekurz_number);
         self::assertSame('completed', $draft->fresh()->status);
         self::assertSame($document->id, $draft->fresh()->final_document_id);
-        self::assertSame('7', $patient->fresh()->dekurz_number);
+        self::assertSame('44', $patient->fresh()->dekurz_number);
+        self::assertSame(44, $nextMonthDraft->fresh()->dekurz_number);
         self::assertTrue($storage->exists("documents/pdf/dekurz/{$document->id}.pdf"));
 
         PatientPoint::findOrFail(102)->update(['quantity' => 9]);

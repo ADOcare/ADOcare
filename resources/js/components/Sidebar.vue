@@ -21,8 +21,14 @@ const fullName = computed(() => user.value
     ? `${user.value.title ?? ''} ${user.value.first_name ?? ''} ${user.value.last_name ?? ''}`.trim()
     : '');
 const currentRoleLabel = computed(() => {
-    if (auth.isSuperadmin) return 'Superadministrátor';
-    return auth.isManager ? 'Manažér' : 'Zdravotná sestra';
+    const labels: Record<string, string> = {
+        superadmin: 'Superadministrátor',
+        manager: 'Manažér',
+        nurse: 'Zdravotná sestra',
+        physiotherapist: 'Fyzioterapeut',
+    };
+
+    return labels[auth.currentRole ?? ''] ?? user.value?.role?.name ?? auth.currentRole ?? '';
 });
 const companyAddress = computed(() => {
     if (!company.value) return '';
@@ -175,13 +181,13 @@ watch(
 <template>
     <aside class="flex h-full w-64 flex-col bg-darkgrey! p-4 py-2 text-tag2! border-y border-l border-tag2!">
         <div class="flex-1 space-y-4 overflow-y-auto">
-            <RouterLink v-if="auth.currentRole === 'nurse'" :to="{ name: 'patients' }"
+            <RouterLink v-if="auth.isClinical" :to="{ name: 'patients' }"
                 class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-white hover:text-darkgrey! text-normal">
                 Pacienti
                 <i class="bi bi-chevron-right"></i>
             </RouterLink>
 
-            <RouterLink v-if="auth.currentRole === 'nurse'" to="/data/monthly-export"
+            <RouterLink v-if="auth.isClinical" to="/data/monthly-export"
                 class="w-full flex items-center justify-between px-3 py-1 rounded-md bg-tag2 text-white! hover:bg-white hover:text-darkgrey! text-normal">
                 Mesačná uzávierka
                 <i class="bi bi-chevron-right"></i>
@@ -293,6 +299,7 @@ watch(
             </div>
 
             <div class="flex flex-col gap-3">
+                <FormField label="Rola" :model-value="currentRoleLabel" disabled />
                 <FormField v-if="user.email" label="E-mail" :model-value="user.email" disabled />
                 <FormField v-if="user.phone_number" label="Telefón" :model-value="user.phone_number" disabled />
                 <FormField v-if="user.code" label="Kód pracovníka" :model-value="user.code" disabled />

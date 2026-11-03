@@ -6,9 +6,16 @@ import ActionButtons from '@/components/table-columns/ActionButtons.vue';
 import useEmailDocumentsDialog from '@/composables/useEmailDocumentsDialog';
 import type { DataTableOptions, RemoteTableReturn } from '@/types/datatable'
 import { openDocumentInNewTab } from '@/utils/documentWindow'
+import { useRouter } from 'vue-router'
+import { usePatientStore } from '@/stores/patientStore'
 
 
 const props = defineProps<{ patientId: number }>();
+const emit = defineEmits<{
+    (event: 'update:visible', visible: boolean): void;
+}>();
+const router = useRouter();
+const patientStore = usePatientStore();
 
 type PatientDocument = {
     id: number;
@@ -61,6 +68,31 @@ const openDocument = (doc: PatientDocument) => {
         const target = doc.url || doc.path;
         if (target) window.open(target, '_blank', 'noopener,noreferrer');
     }
+};
+
+const editRouteNames: Record<string, string> = {
+    proposal: 'proposal',
+    agreement: 'agreement',
+    dekurz: 'dekurz',
+    leave: 'leave',
+    record: 'record',
+};
+
+const canEditDocument = (doc: PatientDocument) => Boolean(doc.type && editRouteNames[doc.type]);
+
+const editDocument = async (doc: PatientDocument) => {
+    if (!doc.id || !doc.type || !editRouteNames[doc.type]) return;
+
+    if (patientStore.current?.id !== props.patientId) {
+        await patientStore.fetchPatient(props.patientId);
+    }
+
+    emit('update:visible', false);
+
+    await router.push({
+        name: editRouteNames[doc.type],
+        query: { editDocumentId: String(doc.id) },
+    });
 };
 
 const formatDocumentType = (type?: string) => {
@@ -118,11 +150,20 @@ const options = computed<DataTableOptions<PatientDocument>>(() => ({
         },
 
         {
-            field: 'preview',
+            field: 'actions',
             header: '',
-            width: '3rem',
+            width: '6rem',
             component: ActionButtons,
             componentOptions: [
+                {
+                    icon: 'bi bi-pencil',
+                    color: 'accent',
+                    tooltip: 'Upraviť dokument',
+                    when: (row: PatientDocument) => canEditDocument(row),
+                    action: (row: PatientDocument) => {
+                        void editDocument(row);
+                    },
+                },
                 {
                     icon: 'bi bi-eye',
                     color: 'info',
@@ -177,13 +218,7 @@ onMounted(loadDocuments);
 
 <template>
     <div class="p-3">
-        <UniversalDataTable :options="options">
-            <template #actions="{ row }">
-                <button @click.stop="openDocument(row)" class="btn btn-sm btn-link p-0" title="View document">
-                    <i class="bi bi-eye"></i>
-                </button>
-            </template>
-        </UniversalDataTable>
+        <UniversalDataTable :options="options" />
     </div>
 </template>
 

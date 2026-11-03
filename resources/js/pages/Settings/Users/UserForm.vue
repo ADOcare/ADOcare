@@ -23,6 +23,7 @@ const roleNameMap: Record<string, string> = {
     superadmin: 'Superadministrátor',
     manager: 'Manažér',
     nurse: 'Sestra',
+    physiotherapist: 'Fyzioterapeut',
     branch_manager: 'Manažér pobočky',
 }
 
@@ -441,7 +442,7 @@ const save = async () => {
                     .map(assign => ({
                         branch_id: assign.branch_id ?? null,
                         working_time: assign.working_time ?? null,
-                        role_id: toNumberOrNull(nurseRole.value?.id ?? assign.role_id),
+                        role_id: toNumberOrNull(assign.role_id ?? nurseRole.value?.id),
                     }))
             }
         } else {
@@ -673,10 +674,13 @@ const save = async () => {
 
                     <div class="col-span-3">
                         <label class="block text-sm mb-1">Rola</label>
-                        <InputText
-                            :modelValue="nurseRole ? getRoleName(nurseRole) : 'Sestra'"
+                        <Select
+                            v-model="assign.role_id"
+                            :options="branchRoles"
+                            :optionLabel="getRoleName"
+                            optionValue="id"
                             class="w-full"
-                            disabled
+                            placeholder="Vyberte rolu"
                         />
                     </div>
 

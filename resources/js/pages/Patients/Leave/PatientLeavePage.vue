@@ -20,6 +20,7 @@ import DocumentAlert from '@/components/DocumentAlert.vue'
 import DocumentPreviewViewer from '@/components/DocumentPreviewViewer.vue'
 import FormField from '@/components/FormField.vue'
 import LoadingOverlay from '@/components/LoadingOverlay.vue'
+import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 /* -------------------------------------------------------------------------- */
 /* Stores                                                                     */
@@ -36,6 +37,10 @@ const patientStore =
 
 const authStore =
     useAuthStore()
+const {
+    editDocumentId,
+    isEditingDocument,
+} = useDocumentEditMode()
 
 patientStore.loadFromStorage?.()
 
@@ -803,6 +808,7 @@ async function generateDocument(
 
     try {
         if (
+            !isEditingDocument.value &&
             options
                 .duplicateConfirmed !==
             true
@@ -818,11 +824,9 @@ async function generateDocument(
             }
         }
 
-        const response =
-            await api.post(
-                '/v1/leave-documents',
-                buildLeavePayload(),
-            )
+        const response = isEditingDocument.value
+            ? await api.put(`/v1/leave-documents/${editDocumentId.value}`, buildLeavePayload())
+            : await api.post('/v1/leave-documents', buildLeavePayload())
 
         const result =
             unwrapApiData(
@@ -843,7 +847,9 @@ async function generateDocument(
                 'Úspešne',
 
             detail:
-                'Dokument bol vytvorený.',
+                isEditingDocument.value
+                    ? 'Dokument bol aktualizovaný.'
+                    : 'Dokument bol vytvorený.',
 
             life:
                 3000,
@@ -907,13 +913,36 @@ watch(
         patientId.value,
 
     () => {
-        void loadLastPatientPointDate()
+        if (!isEditingDocument.value) {
+            void loadLastPatientPointDate()
+        }
     },
 
     {
         immediate:
             true,
     },
+)
+
+watch(
+    editDocumentId,
+    async id => {
+        if (!id) return
+
+        const response = await api.get(`/v1/leave-documents/${id}`)
+        const payload = response.data?.data?.leave_data
+        if (!payload) return
+
+        if (payload.date) {
+            date.value = new Date(`${String(payload.date).slice(0, 10)}T00:00:00`)
+        }
+        selectedProblems.value = Array.isArray(payload.problems) ? [...payload.problems] : []
+        otherFindings.value = String(payload.other_findings ?? '')
+        results.value = String(payload.results ?? '')
+        education.value = String(payload.education ?? '')
+        received.value = String(payload.received ?? '')
+    },
+    { immediate: true },
 )
 
 watch(
@@ -1420,9 +1449,7 @@ onBeforeUnmount(
                                     <AppButton
                                         type="submit"
                                         variant="accent"
-                                        label="
-                                            Generovať dokument
-                                        "
+                                        :label="isEditingDocument ? 'Aktualizovať dokument' : 'Generovať dokument'"
                                         :loading="
                                             isGenerating
                                         "

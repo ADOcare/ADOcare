@@ -19,6 +19,7 @@ export const useAuthStore = defineStore('auth', {
         isAuthenticated: (state) => !!state.user,
         isManager: (state) => state.currentRole === 'manager',
         isSuperadmin: (state) => state.currentRole === 'superadmin',
+        isClinical: (state) => ['nurse', 'physiotherapist'].includes(state.currentRole ?? ''),
     },
     actions: {
         async waitUntilInitialized() {

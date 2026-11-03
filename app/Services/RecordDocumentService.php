@@ -6,26 +6,24 @@ use App\Models\Document;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class RecordDocumentService
 {
-    public function __construct(private ImmediateDocumentationAuditService $immediateAudit)
-    {
-    }
+    public function __construct(private ImmediateDocumentationAuditService $immediateAudit) {}
 
     public function create(array $data, User $user): Document
     {
-        $period = !empty($data['date']) ? date('Y-m', strtotime((string) $data['date'])) : null;
+        $period = ! empty($data['date']) ? date('Y-m', strtotime((string) $data['date'])) : null;
 
         $document = Document::create([
             'patient_id' => $data['patient_id'],
             'user_id' => $user->id,
             'type' => 'record',
             'mime_type' => 'application/json',
-            'name' => 'zaznam_' . now()->format('d.m.Y'),
-            'path' => 'records/' . now()->timestamp . '.json',
+            'name' => 'zaznam_'.now()->format('d.m.Y'),
+            'path' => 'records/'.now()->timestamp.'.json',
             'period' => $period,
             'branch_id' => $data['branch_id'] ?? null,
         ]);
@@ -35,6 +33,35 @@ class RecordDocumentService
         $this->storeRecordFile($document->id, $recordData);
 
         $this->immediateAudit->documentsChanged([$document]);
+
+        return $document;
+    }
+
+    public function update(Document $document, array $data, User $user): Document
+    {
+        $previous = $document->replicate();
+        $existingPayload = $this->findRecordFileForDocument($document) ?? [];
+        $updatedPayload = $this->buildPayload($data, $user, $document->id);
+        $existingFormData = is_array($existingPayload['form_data'] ?? null)
+            ? $existingPayload['form_data']
+            : [];
+        $payload = array_replace($existingPayload, [
+            'form_data' => array_replace(
+                $existingFormData,
+                $updatedPayload['form_data'],
+            ),
+            'form_spec' => $updatedPayload['form_spec'],
+            'document_id' => $document->id,
+        ]);
+
+        Storage::disk('local')->put(
+            $document->path,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
+        );
+        $document->update([
+            'period' => ! empty($data['date']) ? date('Y-m', strtotime((string) $data['date'])) : null,
+        ]);
+        $this->immediateAudit->documentsChanged([$previous, $document]);
 
         return $document;
     }
@@ -54,13 +81,13 @@ class RecordDocumentService
         $companyAddress = $company
             ? trim(implode(', ', array_filter([$company->address, $company->city, $company->psc])))
             : '';
-        $patientName = $patient->title . ' ' . $patient->first_name . ' ' . $patient->last_name;
+        $patientName = $patient->title.' '.$patient->first_name.' '.$patient->last_name;
         $patientBirthNumber = $patient->personal_number;
         $patientContact = $patient->contact;
-        $patientAddress = $patient->address . ', ' . $patient->city . ', ' . $patient->zip;
+        $patientAddress = $patient->address.', '.$patient->city.', '.$patient->zip;
         $insuranceCode = $patient->insuranceCompany->branch_code ?? '';
-        $userName = trim((string) (($user->title ?? '') . ' ' . ($user->first_name ?? '') . ' ' . ($user->last_name ?? '')));
-        $doctorName = $doctor ? trim((string) (($doctor->title ?? '') . ' ' . ($doctor->first_name ?? '') . ' ' . ($doctor->last_name ?? ''))) : '';
+        $userName = trim((string) (($user->title ?? '').' '.($user->first_name ?? '').' '.($user->last_name ?? '')));
+        $doctorName = $doctor ? trim((string) (($doctor->title ?? '').' '.($doctor->first_name ?? '').' '.($doctor->last_name ?? ''))) : '';
 
         $diagnosis = $this->resolveDiagnosis($data['record_data'] ?? []);
         $nurseDiagnoses = $this->resolveNurseDiagnoses($data['record_data'] ?? []);
@@ -90,22 +117,22 @@ class RecordDocumentService
 
     protected function storeRecordFile(int $documentId, array $recordData): void
     {
-        $filename = 'records/' . now()->timestamp . '.json';
+        $filename = 'records/'.now()->timestamp.'.json';
         Storage::disk('local')->put($filename, json_encode($recordData, JSON_PRETTY_PRINT));
     }
 
     protected function resolveDiagnosis(array $recordData): array
     {
         $result = [];
-        if (empty($recordData['diagnosis']) || !is_array($recordData['diagnosis'])) {
+        if (empty($recordData['diagnosis']) || ! is_array($recordData['diagnosis'])) {
             return $result;
         }
 
         foreach ($recordData['diagnosis'] as $d) {
-            if (!empty($d['id'])) {
+            if (! empty($d['id'])) {
                 $diagnosisRecord = DB::table('diagnoses')->find((int) $d['id']);
                 if ($diagnosisRecord) {
-                    $result[] = $diagnosisRecord->code . ' - ' . $diagnosisRecord->description;
+                    $result[] = $diagnosisRecord->code.' - '.$diagnosisRecord->description;
                 }
             }
         }
@@ -118,16 +145,16 @@ class RecordDocumentService
         $result = [];
         // Check for flat key first (from frontend), then nested structure
         $nurseDiagData = $recordData['nursingDiagnoses.list'] ?? $recordData['nursingDiagnoses']['list'] ?? null;
-        
-        if (empty($nurseDiagData) || !is_array($nurseDiagData)) {
+
+        if (empty($nurseDiagData) || ! is_array($nurseDiagData)) {
             return $result;
         }
 
         foreach ($nurseDiagData as $nd) {
-            if (!empty($nd['id'])) {
+            if (! empty($nd['id'])) {
                 $nrec = DB::table('nurse_diagnoses')->find((int) $nd['id']);
                 if ($nrec) {
-                    $result[] = $nrec->code . ' - ' . $nrec->description;
+                    $result[] = $nrec->code.' - '.$nrec->description;
                 }
             }
         }

@@ -27,35 +27,38 @@ class PatientPointPolicy extends BasePolicy
     public function view(User $user, PatientPoint $point): bool
     {
         // Managers can view points for patients in their company
-        if ($this->isManager($user) && $user->isInCompany($point->branch_id)) {
-            return true;
+        if ($this->isManager($user)) {
+            return $this->managerCanAccessPoint($user, $point);
         }
 
         // Allow branch-assigned users to view points in their branch.
-        $patient = \App\Models\Patient::find($point->patient_id);
+        $patient = $point->patient;
+
         return $patient ? $user->isInBranch((int) $patient->branch_id) : false;
     }
 
     public function update(User $user, PatientPoint $point): bool
     {
         // Managers can update points in their company
-        if ($this->isManager($user) && $user->isInCompany($point->branch_id)) {
-            return true;
+        if ($this->isManager($user)) {
+            return $this->managerCanAccessPoint($user, $point);
         }
 
         // Allow branch-assigned users to update points in their branch.
-        $patient = \App\Models\Patient::find($point->patient_id);
+        $patient = $point->patient;
+
         return $patient ? $user->isInBranch((int) $patient->branch_id) : false;
     }
 
     public function delete(User $user, PatientPoint $point): bool
     {
         // Only managers (company) or branch-assigned users may delete
-        if ($this->isManager($user) && $user->isInCompany($point->branch_id)) {
-            return true;
+        if ($this->isManager($user)) {
+            return $this->managerCanAccessPoint($user, $point);
         }
 
-        $patient = \App\Models\Patient::find($point->patient_id);
+        $patient = $point->patient;
+
         return $patient ? $user->isInBranch((int) $patient->branch_id) : false;
     }
 
@@ -67,5 +70,14 @@ class PatientPointPolicy extends BasePolicy
     {
         // Restrict to admins and super-admins by default
         return $this->isAdmin($user);
+    }
+
+    private function managerCanAccessPoint(User $user, PatientPoint $point): bool
+    {
+        $companyId = $point->branch?->company_id;
+
+        return $this->isManager($user)
+            && $companyId !== null
+            && $user->isInCompany((int) $companyId);
     }
 }

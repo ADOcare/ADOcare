@@ -7,8 +7,8 @@ use App\Http\Requests\StoreLeaveDocumentRequest;
 use App\Models\Document;
 use App\Models\Patient;
 use App\Models\User;
-use App\Services\LeaveDocumentService;
 use App\Services\DocumentService;
+use App\Services\LeaveDocumentService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -20,9 +20,7 @@ class LeaveDocumentController extends Controller
     /**
      * Create a new controller instance.
      */
-    public function __construct(private LeaveDocumentService $service)
-    {
-    }
+    public function __construct(private LeaveDocumentService $service) {}
 
     /**
      * Store a new leave document.
@@ -30,7 +28,7 @@ class LeaveDocumentController extends Controller
     public function store(StoreLeaveDocumentRequest $request)
     {
         $user = $request->user();
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             return $this->error('Používateľ nie je autentifikovaný', 401);
         }
 
@@ -41,13 +39,30 @@ class LeaveDocumentController extends Controller
         ], 'Prepúšťacia správa bola úspešne vytvorená', 201);
     }
 
+    public function update(StoreLeaveDocumentRequest $request, Document $document)
+    {
+        abort_unless($document->type === 'leave', 404);
+        $data = $request->validated();
+        abort_unless(
+            (int) $document->patient_id === (int) $data['patient_id'],
+            422,
+            'Pacienta existujúceho dokumentu nie je možné zmeniť.',
+        );
+        $user = $request->user();
+        abort_unless($user instanceof User, 401);
+        $document = $this->service->update($document, $data, $user);
+        app(DocumentService::class)->invalidateTravelDocumentPdfCache($document);
+
+        return $this->success(['document_id' => $document->id], 'Prepúšťacia správa bola aktualizovaná.');
+    }
+
     /**
      * Preview a leave document from unsaved form data.
      */
     public function previewDraft(StoreLeaveDocumentRequest $request)
     {
         $user = $request->user();
-        if (!$user instanceof User) {
+        if (! $user instanceof User) {
             return $this->error('Používateľ nie je autentifikovaný', 401);
         }
 
@@ -71,7 +86,7 @@ class LeaveDocumentController extends Controller
         $document->loadMissing(['patient']);
         $leaveFile = $this->service->findLeaveFileForDocument($document);
 
-        if (!$leaveFile) {
+        if (! $leaveFile) {
             return $this->error('Dáta prepúšťacej správy sa nenašli', 404);
         }
 
@@ -90,13 +105,13 @@ class LeaveDocumentController extends Controller
 
         $document = $this->service->findLatestDocumentByPatientId($patient->id);
 
-        if (!$document) {
+        if (! $document) {
             return $this->error('Prepúšťacia správa sa nenašla', 404);
         }
 
         $leaveFile = $this->service->findLeaveFileForDocument($document);
 
-        if (!$leaveFile) {
+        if (! $leaveFile) {
             return $this->error('Dáta prepúšťacej správy sa nenašli', 404);
         }
 
@@ -116,7 +131,7 @@ class LeaveDocumentController extends Controller
         $document->loadMissing('user');
 
         $leaveData = $this->service->findLeaveFileForDocument($document);
-        if (!$leaveData) {
+        if (! $leaveData) {
             return $this->error('Dáta prepúšťacej správy sa nenašli', 404);
         }
 
@@ -138,11 +153,11 @@ class LeaveDocumentController extends Controller
         $document->loadMissing('user');
 
         $pdfPath = app(DocumentService::class)->getTravelDocumentPdfPath($document);
-        if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
+        if (! $pdfPath || ! Storage::disk('local')->exists($pdfPath)) {
             return $this->error('PDF prepúšťacej správy sa nenašlo', 500);
         }
 
-        $downloadName = pathinfo($document->name, PATHINFO_FILENAME) . '.pdf';
+        $downloadName = pathinfo($document->name, PATHINFO_FILENAME).'.pdf';
 
         return response()->download(Storage::disk('local')->path($pdfPath), $downloadName, [
             'Content-Type' => 'application/pdf',

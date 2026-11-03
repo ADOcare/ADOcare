@@ -37,7 +37,7 @@ const PatientProposal = defineAsyncComponent(() => import('@/pages/Patients/Prop
 
 
 function showOnSidebar() {
-    return useAuthStore().currentRole === 'nurse';
+    return useAuthStore().isClinical;
 }
 
 const generalRoutes: Readonly<RouteRecordRaw[]> = [

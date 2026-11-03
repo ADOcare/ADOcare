@@ -15,6 +15,7 @@ use App\Services\BulkDeletionResponder;
 use App\Services\BulkDeletionService;
 use App\Services\DocumentationAudit\ImmediateDocumentationAuditService;
 use App\Services\PatientPointBulkEditService;
+use App\Services\ProcedureRoleService;
 use App\Services\VisitTimelineFreshnessService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -36,6 +37,7 @@ class PatientPointController extends Controller
         BulkDeletionResponder $bulkDeletionResponder,
         ImmediateDocumentationAuditService $immediateAudit,
         VisitTimelineFreshnessService $timelineFreshness,
+        private ProcedureRoleService $procedureRoles,
     ) {
         $this->bulkDeletionService = $bulkDeletionService;
         $this->bulkDeletionResponder = $bulkDeletionResponder;
@@ -105,6 +107,13 @@ class PatientPointController extends Controller
             if ($procedureId) {
                 $validated['procedure_id'] = $procedureId;
             }
+            if (! empty($validated['procedure_id'])) {
+                $this->procedureRoles->ensureAllowed(
+                    $request->user(),
+                    (int) $validated['procedure_id'],
+                    (int) $validated['branch_id'],
+                );
+            }
         }
 
         // Look up diagnosis_id from diagnosis_code if not provided
@@ -154,6 +163,11 @@ class PatientPointController extends Controller
         $this->authorize('update', $patientPoint);
         $validated = $request->validated();
         $previous = $patientPoint->only(['patient_id', 'date', 'user_id', 'branch_id']);
+        $this->procedureRoles->ensureAllowed(
+            $request->user(),
+            (int) ($validated['procedure_id'] ?? $patientPoint->procedure_id),
+            (int) ($validated['branch_id'] ?? $patientPoint->branch_id),
+        );
 
         $patientPoint->update($validated);
 

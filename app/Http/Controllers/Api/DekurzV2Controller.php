@@ -243,12 +243,14 @@ class DekurzV2Controller extends Controller
         $this->assertDraftPatientRelation($patient, $draft);
         $validated = $request->validate([
             'page_count' => ['nullable', 'integer', 'min:1', 'max:500'],
+            'dekurz_number' => ['required', 'integer', 'min:1'],
         ]);
         $document = $this->finalizer->finalize(
             $patient,
             $draft,
             $request->user(),
             isset($validated['page_count']) ? (int) $validated['page_count'] : null,
+            (int) $validated['dekurz_number'],
         );
 
         return $this->success([

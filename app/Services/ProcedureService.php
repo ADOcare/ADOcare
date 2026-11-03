@@ -14,12 +14,13 @@ class ProcedureService
                 'code' => $data['code'],
                 'description' => $data['description'],
             ]);
+            $procedure->roles()->sync($data['role_ids']);
 
-            if (!empty($data['prices']) && $companyId) {
+            if (! empty($data['prices']) && $companyId) {
                 $this->syncPrices($procedure->id, $data['prices'], $companyId);
             }
 
-            return Procedure::with(['insuranceCompaniesPricesMinimal'])->find($procedure->id);
+            return Procedure::with(['insuranceCompaniesPricesMinimal', 'roles'])->find($procedure->id);
         });
     }
 
@@ -27,15 +28,19 @@ class ProcedureService
     {
         return DB::transaction(function () use ($procedure, $data, $companyId) {
             $updates = array_intersect_key($data, array_flip(['code', 'description']));
-            if (!empty($updates)) {
+            if (! empty($updates)) {
                 $procedure->update($updates);
             }
 
-            if (!empty($data['prices']) && $companyId) {
+            if (array_key_exists('role_ids', $data)) {
+                $procedure->roles()->sync($data['role_ids']);
+            }
+
+            if (! empty($data['prices']) && $companyId) {
                 $this->syncPrices($procedure->id, $data['prices'], $companyId);
             }
 
-            return Procedure::with(['insuranceCompaniesPricesMinimal'])->find($procedure->id);
+            return Procedure::with(['insuranceCompaniesPricesMinimal', 'roles'])->find($procedure->id);
         });
     }
 

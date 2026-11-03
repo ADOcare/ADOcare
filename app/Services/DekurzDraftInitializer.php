@@ -55,7 +55,7 @@ class DekurzDraftInitializer
                     'updated_by' => $actor->id,
                 ]);
             } else {
-                if (! $draft->final_document_id || ! $draft->dekurz_number) {
+                if (! $draft->dekurz_number) {
                     $draft->dekurz_number = max(1, (int) $lockedPatient->dekurz_number);
                 }
 
@@ -83,6 +83,7 @@ class DekurzDraftInitializer
 
             /** @var Collection<int, DekurzEntry> $previousByProcedure */
             $previousByProcedure = collect();
+            $activeProcedureEntryIds = collect();
 
             $groupedProcedureDays = $points
                 ->groupBy(fn (PatientPoint $point): string => Carbon::parse($point->date)->toDateString())
@@ -194,9 +195,26 @@ class DekurzDraftInitializer
                         }
                     }
 
+                    $activeProcedureEntryIds->push((int) $existing->id);
                     $previousByProcedure->put((int) $procedureId, $existing);
                     $position++;
                 }
+            }
+
+            $currentDates = $groupedProcedureDays->keys();
+            foreach ($days as $date => $day) {
+                if (! $currentDates->contains($date)) {
+                    $day->delete();
+                    $days->forget($date);
+
+                    continue;
+                }
+
+                $day->entries()
+                    ->whereNull('custom_track_id')
+                    ->whereNotIn('id', $activeProcedureEntryIds)
+                    ->delete();
+                $day->load(['entries.procedure', 'entries.customTrack']);
             }
 
             $this->activateLegacyTextTracks($patient, $period);

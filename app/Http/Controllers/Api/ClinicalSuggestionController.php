@@ -68,6 +68,8 @@ class ClinicalSuggestionController extends Controller
             ->leftJoinSub($usage, 'usage', 'usage.item_id', '=', 'procedures.id')
             ->select(['procedures.id', 'procedures.code', 'procedures.description'])
             ->selectRaw('COALESCE(usage.usage_count, 0) as usage_count');
+        app(\App\Services\ProcedureRoleService::class)
+            ->scopeForUser($query, $request->user(), (int) $validated['branch_id']);
 
         $this->applySearch($query, $validated['q'] ?? null);
 

@@ -24,6 +24,7 @@ class PatientPointBulkEditService
     public function __construct(
         private VisitTimelineFreshnessService $timeline,
         private ImmediateDocumentationAuditService $audit,
+        private ProcedureRoleService $procedureRoles,
     ) {}
 
     /**
@@ -78,6 +79,11 @@ class PatientPointBulkEditService
             if (! $diagnosis || ! $procedure) {
                 throw ValidationException::withMessages(['procedure_id' => 'Vyberte existujúcu diagnózu a výkon.']);
             }
+            $this->procedureRoles->ensureAllowed(
+                $user,
+                (int) $procedure->id,
+                (int) $first->branch_id,
+            );
             $changes = [
                 'diagnosis_id' => $diagnosis->id,
                 'diagnosis_code' => $diagnosis->code,

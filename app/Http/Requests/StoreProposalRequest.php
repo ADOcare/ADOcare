@@ -6,6 +6,7 @@ use App\Models\Patient;
 use App\Support\ClinicalFrequency;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreProposalRequest extends FormRequest
 {
@@ -57,6 +58,40 @@ class StoreProposalRequest extends FormRequest
             'procedures.*.details.amount' => 'nullable|string|max:255',
             'procedures.*.details.administration_frequency' => 'nullable|string|max:255',
             'procedures.*.details.administration_duration' => 'nullable|string|max:255',
+        ];
+    }
+
+    public function after(): array
+    {
+        return [
+            function (Validator $validator): void {
+                $patient = Patient::query()->find($this->input('patient_id'));
+                if (! $patient || ! $this->user()) {
+                    return;
+                }
+
+                foreach ($this->input('procedures', []) as $index => $procedure) {
+                    $procedureId = (int) ($procedure['procedure_id'] ?? 0);
+                    if (! $procedureId) {
+                        continue;
+                    }
+
+                    try {
+                        app(\App\Services\ProcedureRoleService::class)->ensureAllowed(
+                            $this->user(),
+                            $procedureId,
+                            (int) $patient->branch_id,
+                            "procedures.$index.procedure_id",
+                        );
+                    } catch (\Illuminate\Validation\ValidationException $exception) {
+                        foreach ($exception->errors() as $field => $messages) {
+                            foreach ($messages as $message) {
+                                $validator->errors()->add($field, $message);
+                            }
+                        }
+                    }
+                }
+            },
         ];
     }
 }

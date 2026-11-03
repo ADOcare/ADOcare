@@ -62,7 +62,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
             sidebar: false,
             navbar: false,
             quartalNavbar: true,
-            roles: ['manager', 'nurse'],
+            roles: ['manager', 'nurse', 'physiotherapist'],
         },
     },
 ];

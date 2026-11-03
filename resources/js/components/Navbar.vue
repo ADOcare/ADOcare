@@ -40,8 +40,11 @@ const {
     notifications,
     notificationCount,
     loading: notificationsLoading,
+    loadingMore: notificationsLoadingMore,
+    hasMoreNotifications,
     dismissNotification,
     loadNotifications,
+    loadMoreNotifications,
     startNotificationSession,
 } = useNotifications()
 
@@ -50,9 +53,23 @@ async function toggleNotificationPopover(event: Event) {
     await loadNotifications()
 }
 
-function refreshNotifications() {
+function refreshNotifications(event: Event) {
+    const detail = (event as CustomEvent<{ url?: string }>).detail
+    if (/notifications\/\d+\/dismiss$/.test(detail?.url ?? '')) {
+        return
+    }
+
     if (isAuthenticated.value) {
         void loadNotifications(true)
+    }
+}
+
+function handleNotificationScroll(event: Event) {
+    const element = event.currentTarget as HTMLElement
+    const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
+
+    if (remaining <= 80) {
+        void loadMoreNotifications()
     }
 }
 
@@ -432,81 +449,116 @@ watch(branchOptions, async (newOpts) => {
                     px-1
                     py-1
                 "
+                @scroll.passive="handleNotificationScroll"
             >
-                <div
-                    v-for="notification in notifications"
-                    :key="notification.id"
-                    class="
-                        group
-                        flex
-                        gap-3
-                        rounded-md
-                        transition-transform
-                        duration-200
-                        ease-out
-                        p-4
-                        origin-center
-                        hover:scale-[1.015]
-                    "
-                    :class="
-                        notification.actionable
-                            ? 'bg-darkgrey cursor-pointer text-white'
-                            : 'bg-tag2 text-white'
-                    "
-                    :role="notification.actionable ? 'button' : undefined"
-                    :tabindex="notification.actionable ? 0 : undefined"
-                    @click="openNotification(notification)"
-                    @keydown.enter="openNotification(notification)"
-                >
-                    <!-- Content -->
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-start justify-between gap-3">
-                            <div
-                                class="text-normal font-medium break-words"
-                            >
-                                {{ notification.title }}
+                <TransitionGroup name="notification" tag="div" class="flex flex-col gap-2">
+                    <div
+                        v-for="notification in notifications"
+                        :key="notification.id"
+                        class="
+                            group
+                            flex
+                            gap-3
+                            rounded-md
+                            transition-transform
+                            duration-200
+                            ease-out
+                            p-4
+                            origin-center
+                            hover:scale-[1.015]
+                        "
+                        :class="
+                            notification.actionable
+                                ? 'bg-darkgrey cursor-pointer text-white'
+                                : 'bg-tag2 text-white'
+                        "
+                        :role="notification.actionable ? 'button' : undefined"
+                        :tabindex="notification.actionable ? 0 : undefined"
+                        @click="openNotification(notification)"
+                        @keydown.enter="openNotification(notification)"
+                    >
+                        <!-- Content -->
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-start justify-between gap-3">
+                                <div
+                                    class="text-normal font-medium break-words"
+                                >
+                                    {{ notification.title }}
+                                </div>
+
+                                <button
+                                    v-if="notification.dismissible"
+                                    type="button"
+                                    class="shrink-0 w-6 h-6 flex items-center justify-center cursor-pointer hover:text-darkgrey transition-colors"
+                                    aria-label="Skryť upozornenie"
+                                    title="Skryť upozornenie"
+                                    @click.stop="dismissNotification(notification.id)"
+                                >
+                                    <i class="bi bi-x-lg text-mini" />
+                                </button>
                             </div>
 
-                            <button
-                                v-if="notification.dismissible"
-                                type="button"
-                                class="shrink-0 w-6 h-6 flex items-center justify-center cursor-pointer hover:text-darkgrey transition-colors"
-                                aria-label="Skryť upozornenie"
-                                title="Skryť upozornenie"
-                                @click.stop="dismissNotification(notification.id)"
+                            <div
+                                v-if="notification.description"
+                                class="text-mini mt-0.5 whitespace-normal break-words"
                             >
-                                <i class="bi bi-x-lg text-mini" />
-                            </button>
-                        </div>
+                                {{ notification.description }}
+                            </div>
 
-                        <div
-                            v-if="notification.description"
-                            class="text-mini mt-0.5 whitespace-normal break-words"
-                        >
-                            {{ notification.description }}
-                        </div>
-
-                        <div
-                            class="text-mini mt-2 flex items-center gap-1"
-                            :class="notification.actionable
-                                ? 'text-accent'
-                                : 'text-accent'"
-                        >
-                            <i
+                            <div
+                                class="text-mini mt-2 flex items-center gap-1"
                                 :class="notification.actionable
-                                    ? 'bi bi-arrow-up-right-circle'
-                                    : 'bi bi-info-circle'"
-                            />
+                                    ? 'text-accent'
+                                    : 'text-accent'"
+                            >
+                                <i
+                                    :class="notification.actionable
+                                        ? 'bi bi-arrow-up-right-circle'
+                                        : 'bi bi-info-circle'"
+                                />
 
-                            <span>
-                                {{ notification.actionable
-                                    ? 'Vyriešiť'
-                                    : 'Informácia' }}
-                            </span>
+                                <span>
+                                    {{ notification.actionable
+                                        ? 'Vyriešiť'
+                                        : 'Informácia' }}
+                                </span>
+                            </div>
                         </div>
                     </div>
+                </TransitionGroup>
+
+                <div
+                    v-if="notificationsLoadingMore"
+                    class="py-3 text-center text-mini text-accent"
+                >
+                    Načítavam ďalšie upozornenia...
                 </div>
+
+                <button
+                    v-else-if="hasMoreNotifications"
+                    type="button"
+                    class="py-2 text-mini text-accent cursor-pointer"
+                    @click="loadMoreNotifications"
+                >
+                    Načítať ďalšie
+                </button>
             </div>
         </div>
     </Popover>
 </template>
+
+<style scoped>
+.notification-enter-active,
+.notification-leave-active,
+.notification-move {
+    transition:
+        opacity 180ms ease,
+        transform 180ms ease;
+}
+
+.notification-enter-from,
+.notification-leave-to {
+    opacity: 0;
+    transform: translateX(0.75rem);
+}
+</style>

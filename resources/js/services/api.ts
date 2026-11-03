@@ -55,7 +55,12 @@ api.interceptors.response.use(
         const isDraftPreview = res.config.url?.includes('/draft-preview') === true;
 
         if (method && !isDraftPreview && ['post', 'put', 'patch', 'delete'].includes(method)) {
-            window.dispatchEvent(new CustomEvent('notifications-changed'));
+            window.dispatchEvent(new CustomEvent('notifications-changed', {
+                detail: {
+                    method,
+                    url: res.config.url ?? '',
+                },
+            }));
         }
 
         return res;

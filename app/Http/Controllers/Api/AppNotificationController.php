@@ -11,15 +11,25 @@ class AppNotificationController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $notifications = AppNotification::query()
+        $query = AppNotification::query()
             ->where('user_id', $request->user()->id)
             ->whereNull('resolved_at')
-            ->whereNull('dismissed_at')
+            ->whereNull('dismissed_at');
+        $total = (clone $query)->count();
+        $notifications = $query
             ->latest('occurred_at')
-            ->get();
+            ->latest('id')
+            ->cursorPaginate(
+                min(max($request->integer('per_page', 10), 1), 25),
+            );
 
         return $this->success([
-            'notifications' => $notifications,
+            'notifications' => $notifications->items(),
+            'pagination' => [
+                'total' => $total,
+                'has_more' => $notifications->hasMorePages(),
+                'next_cursor' => $notifications->nextCursor()?->encode(),
+            ],
         ]);
     }
 

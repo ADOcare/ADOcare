@@ -49,7 +49,11 @@ const carServices = ref<CarService[]>([])
 const persistedNotifications = ref<PersistedNotification[]>([])
 const dismissedNotificationIds = ref<Set<string>>(new Set())
 const loading = ref(false)
+const loadingMore = ref(false)
 const loaded = ref(false)
+const persistedNotificationTotal = ref(0)
+const nextNotificationCursor = ref<string | null>(null)
+const hasMoreNotifications = ref(false)
 let activeSessionToken: string | null = null
 
 export function useNotifications() {
@@ -131,7 +135,12 @@ export function useNotifications() {
             })
     })
 
-    const notificationCount = computed(() => notifications.value.length)
+    const notificationCount = computed(() => (
+        persistedNotificationTotal.value
+        + carServices.value.filter(
+            (service) => !dismissedNotificationIds.value.has(`car-service-${service.id}`),
+        ).length
+    ))
 
     function startNotificationSession(token: string | null) {
         if (activeSessionToken === token) {
@@ -142,6 +151,9 @@ export function useNotifications() {
         dismissedNotificationIds.value = new Set()
         carServices.value = []
         persistedNotifications.value = []
+        persistedNotificationTotal.value = 0
+        nextNotificationCursor.value = null
+        hasMoreNotifications.value = false
         loaded.value = false
     }
 
@@ -155,16 +167,27 @@ export function useNotifications() {
                 return
             }
 
+            const notificationIndex = persistedNotifications.value.findIndex(
+                (item) => item.id === notificationId,
+            )
+            if (notificationIndex < 0) {
+                return
+            }
+
             persistedNotifications.value = persistedNotifications.value.filter(
                 (notification) => notification.id !== notificationId,
+            )
+            persistedNotificationTotal.value = Math.max(
+                0,
+                persistedNotificationTotal.value - 1,
             )
 
             try {
                 await api.post(`v1/notifications/${notificationId}/dismiss`)
             } catch (error) {
                 console.error('Failed to dismiss notification', error)
-                loaded.value = false
-                await loadNotifications(true)
+                persistedNotifications.value.splice(notificationIndex, 0, notification)
+                persistedNotificationTotal.value++
             }
 
             return
@@ -194,7 +217,7 @@ export function useNotifications() {
     }
 
     async function loadNotifications(force = false) {
-        if (loaded.value && !force) {
+        if (loading.value || (loaded.value && !force)) {
             return
         }
 
@@ -207,12 +230,17 @@ export function useNotifications() {
 
             const [carResponse, notificationResponse] = await Promise.all([
                 api.get(carServicesEndpoint),
-                api.get('v1/notifications'),
+                api.get('v1/notifications', {
+                    params: { per_page: 10 },
+                }),
             ])
 
             carServices.value = carResponse.data?.data?.services ?? []
-            persistedNotifications.value =
-                notificationResponse.data?.data?.notifications ?? []
+            const notificationData = notificationResponse.data?.data ?? {}
+            persistedNotifications.value = notificationData.notifications ?? []
+            persistedNotificationTotal.value = Number(notificationData.pagination?.total ?? 0)
+            nextNotificationCursor.value = notificationData.pagination?.next_cursor ?? null
+            hasMoreNotifications.value = notificationData.pagination?.has_more === true
             loaded.value = true
         } catch (error) {
             console.error('Failed to load notifications', error)
@@ -221,13 +249,57 @@ export function useNotifications() {
         }
     }
 
+    async function loadMoreNotifications() {
+        if (
+            loading.value
+            || loadingMore.value
+            || !loaded.value
+            || !hasMoreNotifications.value
+            || !nextNotificationCursor.value
+        ) {
+            return
+        }
+
+        loadingMore.value = true
+
+        try {
+            const response = await api.get('v1/notifications', {
+                params: {
+                    per_page: 10,
+                    cursor: nextNotificationCursor.value,
+                },
+            })
+            const data = response.data?.data ?? {}
+            const existingIds = new Set(
+                persistedNotifications.value.map((notification) => notification.id),
+            )
+            const nextNotifications = (data.notifications ?? []).filter(
+                (notification: PersistedNotification) => !existingIds.has(notification.id),
+            )
+
+            persistedNotifications.value.push(...nextNotifications)
+            persistedNotificationTotal.value = Number(
+                data.pagination?.total ?? persistedNotificationTotal.value,
+            )
+            nextNotificationCursor.value = data.pagination?.next_cursor ?? null
+            hasMoreNotifications.value = data.pagination?.has_more === true
+        } catch (error) {
+            console.error('Failed to load more notifications', error)
+        } finally {
+            loadingMore.value = false
+        }
+    }
+
     return {
         notifications,
         notificationCount,
         loading,
+        loadingMore,
+        hasMoreNotifications,
         dismissAllNotifications,
         dismissNotification,
         loadNotifications,
+        loadMoreNotifications,
         startNotificationSession,
     }
 }

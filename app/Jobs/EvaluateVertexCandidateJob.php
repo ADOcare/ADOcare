@@ -24,7 +24,7 @@ class EvaluateVertexCandidateJob implements ShouldQueue
 
     public int $tries = 3;
 
-    public int $timeout = 600;
+    public int $timeout = 1800;
 
     public function __construct(public int $runId)
     {

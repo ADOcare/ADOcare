@@ -498,6 +498,11 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::match(['get', 'post'], '/dekurz/draft-preview', [DekurzV2Controller::class, 'previewDraft'])
         ->middleware('role:any')
         ->withoutMiddleware(ForceJsonResponse::class);
+    Route::post('/dekurz/{document}/edit-preview', [DekurzDocumentController::class, 'editPreview'])
+        ->middleware(['role:any', 'can:update,document', 'subscription.active:write'])
+        ->withoutMiddleware(ForceJsonResponse::class);
+    Route::put('/dekurz/{document}', [DekurzDocumentController::class, 'update'])
+        ->middleware(['role:any', 'can:update,document', 'subscription.active:write']);
     Route::documentRoutes('dekurz', DekurzDocumentController::class);
     Route::post('/patients/{patient}/dekurz/ai-prefill', [DekurzDocumentController::class, 'prefillFromLatestProposal'])
         ->middleware(['role:any', 'can:view,patient']);

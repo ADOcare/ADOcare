@@ -2,14 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\DekurzAiFeedback;
 use App\Models\Document;
 use App\Models\Patient;
-use App\Models\Branch;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
-use App\Services\VisitsService;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 
 class DekurzDocumentService
 {
@@ -22,8 +22,8 @@ class DekurzDocumentService
             'user_id' => $user->id,
             'type' => 'dekurz',
             'mime_type' => 'application/json',
-            'name' => 'dekurz_' . now()->format('d.m.Y'),
-            'path' => 'dekurz/' . now()->timestamp . '.json',
+            'name' => 'dekurz_'.now()->format('d.m.Y'),
+            'path' => 'dekurz/'.now()->timestamp.'.json',
             'period' => date('Y-m', strtotime($data['month'] ?? now()->format('Y-m-d'))),
             'branch_id' => $data['branch_id'] ?? null,
         ]);
@@ -44,11 +44,11 @@ class DekurzDocumentService
         $company = $branch->company;
         $insurance = $patient->insuranceCompany;
 
-        $userName = trim((($user->title ?? '') . ' ' . ($user->first_name ?? '') . ' ' . ($user->last_name ?? '')));
+        $userName = trim((($user->title ?? '').' '.($user->first_name ?? '').' '.($user->last_name ?? '')));
         $companyName = $company ? $company->name : '';
-        $companyAddress = $company ? $company->address : '' . ', ' . ($company->city ?? '');
+        $companyAddress = $company ? $company->address : ''.', '.($company->city ?? '');
         $insuranceCode = $insurance ? $insurance->branch_code : '';
-        $patientAddress = trim(($patient->address ?? '') . ', ' . ($patient->city ?? '') . ', ' . ($patient->postal_code ?? ''));
+        $patientAddress = trim(($patient->address ?? '').', '.($patient->city ?? '').', '.($patient->postal_code ?? ''));
 
         $dekurzData = [
             'schema_version' => 1,
@@ -62,14 +62,14 @@ class DekurzDocumentService
             'patient_personal_number' => $patient->personal_number,
             'patient_address' => $patientAddress,
             'patient_id' => $patient->id,
-            'patient_name' => trim(($patient->first_name ?? '') . ' ' . ($patient->last_name ?? '')),
+            'patient_name' => trim(($patient->first_name ?? '').' '.($patient->last_name ?? '')),
             'dekurz_number' => $data['dekurz_number'],
             'month' => $month,
             'sections' => $sections,
             'days' => $daysWithTimes,
         ];
 
-        Storage::disk('local')->put('dekurz/' . now()->timestamp . '.json', json_encode($dekurzData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        Storage::disk('local')->put('dekurz/'.now()->timestamp.'.json', json_encode($dekurzData, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
         $this->storeAiFeedback($document, $patient, $user, $data, $sections);
 
@@ -78,8 +78,8 @@ class DekurzDocumentService
         DB::table('patients')
             ->where('id', $patient->id)
             ->update([
-                'dekurz_number' => DB::raw("CAST(CAST(dekurz_number AS INTEGER) + 1 AS VARCHAR)"),
-                'updated_at'    => now(),
+                'dekurz_number' => DB::raw('CAST(CAST(dekurz_number AS INTEGER) + 1 AS VARCHAR)'),
+                'updated_at' => now(),
             ]);
         $document->next_dekurz_number = (int) $patient->fresh()->dekurz_number;
 
@@ -89,7 +89,7 @@ class DekurzDocumentService
     private function storeAiFeedback(Document $document, Patient $patient, $user, array $data, array $finalSections): void
     {
         $feedback = $data['ai_feedback'] ?? null;
-        if (!is_array($feedback)) {
+        if (! is_array($feedback)) {
             return;
         }
 
@@ -99,11 +99,11 @@ class DekurzDocumentService
                     'text' => trim((string) ($section['text'] ?? '')),
                 ];
             })
-            ->filter(fn(array $section) => $section['text'] !== '')
+            ->filter(fn (array $section) => $section['text'] !== '')
             ->values()
             ->all();
 
-        if (!count($suggestedSections)) {
+        if (! count($suggestedSections)) {
             return;
         }
 
@@ -113,7 +113,7 @@ class DekurzDocumentService
                     'text' => trim((string) ($section['text'] ?? '')),
                 ];
             })
-            ->filter(fn(array $section) => $section['text'] !== '')
+            ->filter(fn (array $section) => $section['text'] !== '')
             ->values()
             ->all();
 
@@ -138,8 +138,8 @@ class DekurzDocumentService
     private function joinSectionTexts(array $sections): string
     {
         return collect($sections)
-            ->map(fn(array $section) => trim((string) ($section['text'] ?? '')))
-            ->filter(fn(string $text) => $text !== '')
+            ->map(fn (array $section) => trim((string) ($section['text'] ?? '')))
+            ->filter(fn (string $text) => $text !== '')
             ->values()
             ->implode("\n\n");
     }
@@ -155,7 +155,7 @@ class DekurzDocumentService
     {
         return collect($sections)->map(function ($s) {
             $dates = collect($s['dates'])
-                ->map(fn($d) => date('Y-m-d', strtotime($d)))
+                ->map(fn ($d) => date('Y-m-d', strtotime($d)))
                 ->unique()
                 ->sort()
                 ->values()
@@ -174,15 +174,15 @@ class DekurzDocumentService
         foreach ($sections as $s) {
             $text = trim((string) ($s['text'] ?? ''));
             $dates = $s['dates'] ?? [];
-            if ($text === '' || !is_array($dates) || !count($dates)) {
+            if ($text === '' || ! is_array($dates) || ! count($dates)) {
                 continue;
             }
             foreach ($dates as $d) {
                 $date = Carbon::parse($d)->toDateString();
-                if (!isset($byDate[$date])) {
+                if (! isset($byDate[$date])) {
                     $byDate[$date] = $text;
                 } else {
-                    $byDate[$date] .= "\n\n" . $text;
+                    $byDate[$date] .= "\n\n".$text;
                 }
             }
         }
@@ -192,13 +192,14 @@ class DekurzDocumentService
         }
 
         ksort($byDate);
+
         return $byDate;
     }
 
     public function attachVisitTimesForPatient(array $dailyTexts, int $patientId, int $userId, int $branchId): array
     {
-        if (!$branchId) {
-            return array_map(fn($text, $date) => [
+        if (! $branchId) {
+            return array_map(fn ($text, $date) => [
                 'date' => $date,
                 'text' => $text,
                 'terrain_time' => null,
@@ -234,7 +235,7 @@ class DekurzDocumentService
     public function ensureMonthTimelineExistsOrCreate(string $monthYmd, int $branchId, int $userId, int $patientId, array $neededDates): void
     {
         $neededDates = array_values(array_unique(array_filter($neededDates)));
-        if (!count($neededDates)) {
+        if (! count($neededDates)) {
             return;
         }
 
@@ -249,11 +250,11 @@ class DekurzDocumentService
             ->whereNotNull('administrative_time')
             ->distinct()
             ->pluck('date')
-            ->map(fn($d) => Carbon::parse($d)->toDateString())
+            ->map(fn ($d) => Carbon::parse($d)->toDateString())
             ->all();
 
         $missingDates = array_values(array_diff($neededDates, $existingDates));
-        if (!count($missingDates)) {
+        if (! count($missingDates)) {
             return;
         }
 
@@ -278,7 +279,7 @@ class DekurzDocumentService
         $candidateDirs = ['dekurz', 'private/dekurz'];
 
         foreach ($candidateDirs as $dir) {
-            if (!Storage::disk('local')->exists($dir)) {
+            if (! Storage::disk('local')->exists($dir)) {
                 continue;
             }
 
@@ -290,23 +291,94 @@ class DekurzDocumentService
                     continue;
                 }
 
-                if (!is_array($content)) {
+                if (! is_array($content)) {
                     continue;
                 }
 
                 if (($content['document_id'] ?? null) === $document->id) {
                     return $content;
                 }
-
-                // If the file doesn't contain a matching document_id, try matching by patient_id
-                // This helps when the documents table row doesn't have a path or IDs are out-of-sync.
-                if (($content['patient_id'] ?? null) === $document->patient_id) {
-                    return $content;
-                }
             }
         }
 
         return null;
+    }
+
+    public function buildEditedPayload(
+        Document $document,
+        array $sections,
+        ?int $dekurzNumber = null,
+    ): ?array {
+        $snapshot = $this->findDekurzFileForDocument($document);
+        if (! is_array($snapshot)) {
+            return null;
+        }
+
+        $normalizedSections = $this->normalizeSections($sections);
+        $dailyTexts = $this->buildDailyTexts($normalizedSections);
+        $existingDays = collect($snapshot['days'] ?? [])
+            ->filter(fn ($day): bool => is_array($day) && ! empty($day['date']))
+            ->keyBy(fn (array $day): string => Carbon::parse($day['date'])->toDateString());
+        $missingDailyTexts = collect($dailyTexts)
+            ->reject(fn ($text, string $date): bool => $existingDays->has($date))
+            ->all();
+        $newDays = collect();
+
+        if ($missingDailyTexts !== []) {
+            $newDays = collect($this->attachVisitTimesForPatient(
+                $missingDailyTexts,
+                (int) $document->patient_id,
+                (int) ($snapshot['user_id'] ?? $document->user_id),
+                (int) ($snapshot['branch_id'] ?? $document->branch_id),
+            ))->keyBy(fn (array $day): string => Carbon::parse($day['date'])->toDateString());
+        }
+
+        $snapshot['narrative_sections'] = $normalizedSections;
+        $snapshot['sections'] = $normalizedSections;
+        $snapshot['days'] = collect($dailyTexts)
+            ->map(function (string $text, string $date) use ($existingDays, $newDays): array {
+                $day = $existingDays->get($date) ?? $newDays->get($date) ?? [
+                    'date' => $date,
+                    'terrain_time' => null,
+                    'administrative_time' => null,
+                ];
+                $day['date'] = $date;
+                $day['text'] = $text;
+
+                return $day;
+            })
+            ->values()
+            ->all();
+        $snapshot['dekurz_number'] = $dekurzNumber ?? max(1, (int) ($snapshot['dekurz_number'] ?? 1));
+        $snapshot['document_id'] = $document->id;
+        $snapshot['updated_at'] = now()->toISOString();
+
+        return $snapshot;
+    }
+
+    public function updateFromSnapshot(
+        Document $document,
+        array $sections,
+        ?int $dekurzNumber = null,
+    ): ?array {
+        $payload = $this->buildEditedPayload($document, $sections, $dekurzNumber);
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        if (! $document->path) {
+            throw new RuntimeException('Dokument nemá priradený súbor.');
+        }
+
+        $stored = Storage::disk('local')->put(
+            $document->path,
+            json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        );
+        if (! $stored) {
+            throw new RuntimeException('Dekurz sa nepodarilo uložiť.');
+        }
+
+        return $payload;
     }
 
     /**
@@ -318,7 +390,7 @@ class DekurzDocumentService
         $candidates = [];
 
         foreach ($candidateDirs as $dir) {
-            if (!Storage::disk('local')->exists($dir)) {
+            if (! Storage::disk('local')->exists($dir)) {
                 continue;
             }
 
@@ -330,7 +402,7 @@ class DekurzDocumentService
                     continue;
                 }
 
-                if (!is_array($content)) {
+                if (! is_array($content)) {
                     continue;
                 }
 
@@ -339,7 +411,7 @@ class DekurzDocumentService
                 }
 
                 $ts = null;
-                if (!empty($content['created_at'])) {
+                if (! empty($content['created_at'])) {
                     try {
                         $ts = Carbon::parse($content['created_at'])->getTimestamp();
                     } catch (\Throwable $e) {
@@ -347,7 +419,7 @@ class DekurzDocumentService
                     }
                 }
 
-                if (!$ts) {
+                if (! $ts) {
                     // fallback: use file modified time
                     try {
                         $path = Storage::disk('local')->path($file);
@@ -361,11 +433,11 @@ class DekurzDocumentService
             }
         }
 
-        if (!count($candidates)) {
+        if (! count($candidates)) {
             return null;
         }
 
-        usort($candidates, fn($a, $b) => $b['ts'] <=> $a['ts']);
+        usort($candidates, fn ($a, $b) => $b['ts'] <=> $a['ts']);
 
         return $candidates[0]['content'] ?? null;
     }
@@ -388,9 +460,9 @@ class DekurzDocumentService
             ->distinct()
             ->pluck('date');
 
-        $isoDates = $dates->map(fn($d) => Carbon::parse($d)->toDateString())->unique()->values();
+        $isoDates = $dates->map(fn ($d) => Carbon::parse($d)->toDateString())->unique()->values();
 
-        $days = $isoDates->map(fn($d) => (int) Carbon::parse($d)->day)->unique()->sort()->values();
+        $days = $isoDates->map(fn ($d) => (int) Carbon::parse($d)->day)->unique()->sort()->values();
 
         return [
             'month_from' => $from,

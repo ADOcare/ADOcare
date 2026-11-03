@@ -137,6 +137,16 @@ class DekurzV2BuilderTest extends TestCase
         self::assertArrayNotHasKey('3439', $procedures->all());
     }
 
+    public function test_builder_discovers_historical_document_without_a_v2_draft(): void
+    {
+        $this->createDocument(300, 'dekurz', '2026-06', 'dekurz/june.json', '2026-06-30');
+
+        $result = $this->builder()->build(Patient::findOrFail(1), '2026-06');
+
+        self::assertNull($result['draft']);
+        self::assertSame([300], array_column($result['existing_documents'], 'id'));
+    }
+
     public function test_draft_initialization_is_idempotent_and_does_not_overwrite_saved_text(): void
     {
         $patient = Patient::findOrFail(1);
@@ -694,6 +704,52 @@ class DekurzV2BuilderTest extends TestCase
 
         self::assertSame($payload, json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR));
         self::assertSame($payload, (new DekurzDocumentService)->findDekurzFileForDocument($document));
+    }
+
+    public function test_snapshot_edit_preserves_historical_metadata_times_and_patient_texts(): void
+    {
+        $this->createDocument(300, 'dekurz', '2026-06', 'dekurz/june.json', '2026-06-30');
+        $document = Document::findOrFail(300);
+        $storage = $this->useInMemoryStorage();
+        $storage->put($document->path, json_encode([
+            'schema_version' => 1,
+            'document_id' => 300,
+            'patient_id' => 1,
+            'user_id' => 1,
+            'user_name' => 'Pôvodná sestra',
+            'month' => '2026-06',
+            'dekurz_number' => 8,
+            'sections' => [
+                ['text' => 'Pôvodný text', 'dates' => ['2026-06-03']],
+            ],
+            'days' => [
+                [
+                    'date' => '2026-06-03',
+                    'text' => 'Pôvodný text',
+                    'terrain_time' => '07:15:00',
+                    'administrative_time' => '12:45:00',
+                ],
+            ],
+        ], JSON_THROW_ON_ERROR));
+
+        $payload = (new DekurzDocumentService)->updateFromSnapshot(
+            $document,
+            [['text' => 'Upravený historický text', 'dates' => ['2026-06-03']]],
+            9,
+        );
+
+        self::assertSame('Pôvodná sestra', $payload['user_name']);
+        self::assertSame(9, $payload['dekurz_number']);
+        self::assertSame('Upravený historický text', $payload['sections'][0]['text']);
+        self::assertSame($payload['sections'], $payload['narrative_sections']);
+        self::assertSame('Upravený historický text', $payload['days'][0]['text']);
+        self::assertSame('07:15:00', $payload['days'][0]['terrain_time']);
+        self::assertSame('12:45:00', $payload['days'][0]['administrative_time']);
+        self::assertSame(
+            $payload,
+            json_decode($storage->get($document->path), true, flags: JSON_THROW_ON_ERROR),
+        );
+        self::assertNull(Patient::findOrFail(1)->dekurz_texts);
     }
 
     public function test_finalization_rolls_back_database_and_snapshot_when_pdf_generation_fails(): void

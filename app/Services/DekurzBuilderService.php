@@ -43,9 +43,12 @@ class DekurzBuilderService
             ->whereDate('period', $period)
             ->first();
 
-        $existingDocuments = $draft?->finalDocument
-            ? collect([$draft->finalDocument])
-            : collect();
+        $existingDocuments = Document::query()
+            ->where('patient_id', $patient->id)
+            ->where('type', 'dekurz')
+            ->where('period', $month)
+            ->orderByDesc('id')
+            ->get();
 
         $suggestedDekurzNumber = $draft?->final_document_id
             ? $draft->dekurz_number

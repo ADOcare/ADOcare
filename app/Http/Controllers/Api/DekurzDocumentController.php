@@ -3,23 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreDekurzRequest;
 use App\Models\Document;
 use App\Models\Patient;
-use App\Models\Branch;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
-use Carbon\Carbon;
-use App\Models\PatientPoint;
-use App\Http\Requests\StoreDekurzRequest;
 use App\Services\DekurzAiPrefillService;
 use App\Services\DekurzDocumentService;
 use App\Services\DocumentService;
-use Illuminate\Support\Arr;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
-
 
 class DekurzDocumentController extends Controller
 {
@@ -27,15 +22,16 @@ class DekurzDocumentController extends Controller
         private DekurzAiPrefillService $aiPrefillService,
         private DocumentService $documentService,
         private DekurzDocumentService $dekurzDocumentService,
-    ) {
-    }
+    ) {}
 
     /**
      * Store a new dekurz document.
      *
      * @group Documents
+     *
      * @bodyParam patient_id int required Patient ID. Example: 1
      * @bodyParam month date required Month date. Example: 2026-04-01
+     *
      * @response 201 {"data":{"document_id":1,"next_dekurz_number":2},"message":"Dekurz bol úspešne vytvorený"}
      */
     public function store(StoreDekurzRequest $request)
@@ -52,6 +48,7 @@ class DekurzDocumentController extends Controller
      * Show dekurz document payload.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function show(Document $document)
@@ -59,7 +56,7 @@ class DekurzDocumentController extends Controller
         $document->loadMissing(['user', 'patient']);
 
         $dekurzFile = $this->dekurzDocumentService->findDekurzFileForDocument($document);
-        if (!$dekurzFile) {
+        if (! $dekurzFile) {
             return $this->error('Dáta dekurzu sa nenašli', 404);
         }
 
@@ -69,10 +66,49 @@ class DekurzDocumentController extends Controller
         ]);
     }
 
+    public function editPreview(Document $document, Request $request)
+    {
+        $data = $this->validateEditPayload($request, $document);
+        $dekurzData = $this->dekurzDocumentService->buildEditedPayload(
+            $document,
+            $data['sections'],
+            isset($data['dekurz_number']) ? (int) $data['dekurz_number'] : null,
+        );
+        if (! $dekurzData) {
+            return $this->error('Dáta dekurzu sa nenašli', 404);
+        }
+
+        return response()->view('pdf.dekurz', [
+            'dekurzData' => $dekurzData,
+            'signatureDataUri' => $this->documentService->getUserSignatureDataUri((int) ($dekurzData['user_id'] ?? 0)),
+        ])->withHeaders(['Content-Type' => 'text/html; charset=utf-8', 'Cache-Control' => 'no-store, no-cache, must-revalidate, private']);
+    }
+
+    public function update(Document $document, Request $request)
+    {
+        $data = $this->validateEditPayload($request, $document);
+        $dekurzData = $this->dekurzDocumentService->updateFromSnapshot(
+            $document,
+            $data['sections'],
+            isset($data['dekurz_number']) ? (int) $data['dekurz_number'] : null,
+        );
+        if (! $dekurzData) {
+            return $this->error('Dáta dekurzu sa nenašli', 404);
+        }
+
+        $this->documentService->invalidateTravelDocumentPdfCache($document);
+
+        return $this->success([
+            'document_id' => $document->id,
+            'dekurz_data' => $dekurzData,
+        ], 'Dekurz bol aktualizovaný.');
+    }
+
     /**
      * Get the last dekurz data for a patient.
      *
      * @group Documents
+     *
      * @bodyParam patient_id int required Patient ID. Example: 1
      */
     public function last(Request $request)
@@ -94,7 +130,7 @@ class DekurzDocumentController extends Controller
             $dekurz = $this->dekurzDocumentService->findLatestDekurzForPatient((int) $data['patient_id']);
         }
 
-        if (!$dekurz) {
+        if (! $dekurz) {
             return $this->success(null);
         }
 
@@ -108,6 +144,7 @@ class DekurzDocumentController extends Controller
      * Get available dates for a patient's dekurz.
      *
      * @group Documents
+     *
      * @bodyParam patient_id int required Patient ID. Example: 1
      * @bodyParam month date required Month date. Example: 2026-04-01
      */
@@ -127,6 +164,7 @@ class DekurzDocumentController extends Controller
      * Prefill dekurz from latest proposal AI.
      *
      * @group Documents
+     *
      * @urlParam patient int required Patient ID. Example: 1
      */
     public function prefillFromLatestProposal(Patient $patient)
@@ -137,6 +175,7 @@ class DekurzDocumentController extends Controller
             return $this->error($e->getMessage(), 422);
         } catch (\Throwable $e) {
             report($e);
+
             return $this->error('Nepodarilo sa vygenerovať návrh textov dekurzu pomocou AI.', 500);
         }
 
@@ -147,7 +186,9 @@ class DekurzDocumentController extends Controller
      * Improve dekurz text using AI.
      *
      * @group Documents
+     *
      * @urlParam patient int required Patient ID. Example: 1
+     *
      * @bodyParam text string required Text to improve.
      */
     public function improveText(Patient $patient, Request $request)
@@ -162,6 +203,7 @@ class DekurzDocumentController extends Controller
             return $this->error($e->getMessage(), 422);
         } catch (\Throwable $e) {
             report($e);
+
             return $this->error('Nepodarilo sa vylepšiť text pomocou AI.', 500);
         }
 
@@ -172,6 +214,7 @@ class DekurzDocumentController extends Controller
      * Preview dekurz document as HTML via Blade template.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function preview(Document $document)
@@ -179,7 +222,7 @@ class DekurzDocumentController extends Controller
         $document->loadMissing('user');
 
         $dekurzData = $this->dekurzDocumentService->findDekurzFileForDocument($document);
-        if (!$dekurzData) {
+        if (! $dekurzData) {
             return $this->error('Dáta dekurzu sa nenašli', 404);
         }
 
@@ -195,6 +238,7 @@ class DekurzDocumentController extends Controller
      * Download dekurz PDF generated from Blade template.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function download(Document $document)
@@ -202,11 +246,11 @@ class DekurzDocumentController extends Controller
         $document->loadMissing('user');
 
         $pdfPath = $this->documentService->getTravelDocumentPdfPath($document);
-        if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
+        if (! $pdfPath || ! Storage::disk('local')->exists($pdfPath)) {
             return $this->error('PDF dekurzu sa nenašlo', 500);
         }
 
-        $downloadName = pathinfo($document->name, PATHINFO_FILENAME) . '.pdf';
+        $downloadName = pathinfo($document->name, PATHINFO_FILENAME).'.pdf';
 
         return response()->download(Storage::disk('local')->path($pdfPath), $downloadName, [
             'Content-Type' => 'application/pdf',
@@ -217,6 +261,7 @@ class DekurzDocumentController extends Controller
      * Get a signed public preview URL for dekurz document.
      *
      * @group Documents
+     *
      * @urlParam document int required Document ID. Example: 1
      */
     public function previewUrl(Document $document)
@@ -232,4 +277,27 @@ class DekurzDocumentController extends Controller
         return $this->success(['preview_url' => $url]);
     }
 
+    private function validateEditPayload(Request $request, Document $document): array
+    {
+        abort_unless($document->type === 'dekurz', 404);
+        $data = $request->validate([
+            'dekurz_number' => ['nullable', 'integer', 'min:1'],
+            'sections' => ['required', 'array', 'min:1'],
+            'sections.*.text' => ['required', 'string', 'max:20000'],
+            'sections.*.dates' => ['required', 'array', 'min:1'],
+            'sections.*.dates.*' => ['required', 'date_format:Y-m-d'],
+        ]);
+        $period = Carbon::parse($document->period)->format('Y-m');
+        foreach ($data['sections'] as $section) {
+            foreach ($section['dates'] as $date) {
+                if (Carbon::parse($date)->format('Y-m') !== $period) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'sections' => ['Dátumy musia patriť do mesiaca upravovaného Dekurzu.'],
+                    ]);
+                }
+            }
+        }
+
+        return $data;
+    }
 }

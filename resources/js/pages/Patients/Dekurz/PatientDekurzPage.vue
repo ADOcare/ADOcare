@@ -148,6 +148,11 @@ const sections = ref<TextSection[]>([makeSection()])
 const sectionErrors = ref<Record<string, string>>({})
 const loadingTexts = ref(false)
 const patientTextSaveState = ref<SaveState>('idle')
+const snapshotSaveState = ref<SaveState>('idle')
+const snapshotEditMode = ref(false)
+const snapshotEditingDocumentId = ref<number | null>(null)
+const snapshotAvailableDates = ref<string[]>([])
+const snapshotDekurzNumber = ref<string>('')
 const loadingAiPrefill = ref(false)
 const improvingSectionById = ref<Record<string, boolean>>({})
 const previousSectionTextById = ref<Record<string, string>>({})
@@ -159,12 +164,12 @@ let pendingDraftSaves = 0
 let loadToken = 0
 const draftSectionSaving = ref(false)
 
-const hasDraft = computed(() => !!builder.value?.draft)
+const hasDraft = computed(() => snapshotEditMode.value || !!builder.value?.draft)
 const sectionSaveState = computed<SaveState>(() => {
     const draftState = builder.value?.draft ? saveStates.value[`sections-${builder.value.draft.id}`] : undefined
-    if (patientTextSaveState.value === 'saving' || draftSectionSaving.value) return 'saving'
-    if (patientTextSaveState.value === 'error' || draftState === 'error') return 'error'
-    if (patientTextSaveState.value === 'saved' || draftState === 'saved') return 'saved'
+    if (patientTextSaveState.value === 'saving' || snapshotSaveState.value === 'saving' || draftSectionSaving.value) return 'saving'
+    if (patientTextSaveState.value === 'error' || snapshotSaveState.value === 'error' || draftState === 'error') return 'error'
+    if (patientTextSaveState.value === 'saved' || snapshotSaveState.value === 'saved' || draftState === 'saved') return 'saved'
     return 'idle'
 })
 const sectionsLocked = computed(() => finalizing.value || loadingTexts.value || loadingAiPrefill.value)
@@ -176,7 +181,10 @@ const maxSectionDate = computed(() => {
     return date && date < monthEnd.value ? date : monthEnd.value
 })
 const disabledDates = computed(() => {
-    const available = new Set(builder.value?.days.map(day => day.date) ?? [])
+    const available = new Set([
+        ...(builder.value?.days.map(day => day.date) ?? []),
+        ...(snapshotEditMode.value ? snapshotAvailableDates.value : []),
+    ])
     const dates: Date[] = []
     for (let day = 1; day <= monthEnd.value.getDate(); day++) {
         const date = new Date(monthStart.value.getFullYear(), monthStart.value.getMonth(), day)
@@ -236,12 +244,88 @@ function applySections(patientTexts: string[] | null) {
     sectionsBeforeAiPrefill.value = null
 }
 
+function snapshotSections(payload: Record<string, any>): DekurzNarrativeSection[] {
+    const savedSections = Array.isArray(payload.narrative_sections) && payload.narrative_sections.length
+        ? payload.narrative_sections
+        : Array.isArray(payload.sections) && payload.sections.length
+            ? payload.sections
+            : null
+
+    if (savedSections) {
+        return savedSections.map((section: Record<string, any>) => ({
+            text: String(section.text ?? ''),
+            dates: Array.isArray(section.dates) ? section.dates.map(String) : [],
+        }))
+    }
+
+    const byText = new Map<string, string[]>()
+    for (const day of Array.isArray(payload.days) ? payload.days : []) {
+        const text = String(day?.text ?? '').trim()
+        const date = String(day?.date ?? '').slice(0, 10)
+        if (!text || !date) continue
+        byText.set(text, [...(byText.get(text) ?? []), date])
+    }
+
+    return Array.from(byText, ([text, dates]) => ({ text, dates }))
+}
+
+async function loadDocumentSnapshot(documentId: number) {
+    const response = await api.get(`/v1/dekurz/${documentId}`)
+    const responseData = response.data?.data
+    const payload = responseData?.dekurz_data as Record<string, any> | undefined
+    const document = responseData?.document as Record<string, any> | undefined
+
+    if (!payload || Number(document?.patient_id ?? payload.patient_id) !== patientId.value) {
+        throw new Error('Vybraný Dekurz nepatrí aktuálnemu pacientovi.')
+    }
+
+    const documentMonth = String(payload.month ?? payload.period ?? document?.period ?? '').slice(0, 7)
+    if (!/^\d{4}-\d{2}$/.test(documentMonth)) {
+        throw new Error('Dokument nemá platný mesiac Dekurzu.')
+    }
+
+    const savedSections = snapshotSections(payload)
+    sections.value = (savedSections.length ? savedSections : [{ text: '', dates: [] }])
+        .map(section => makeSection(section.text, section.dates))
+    snapshotAvailableDates.value = Array.from(new Set([
+        ...savedSections.flatMap(section => section.dates),
+        ...(Array.isArray(payload.days)
+            ? payload.days.map((day: Record<string, any>) => String(day?.date ?? '').slice(0, 10))
+            : []),
+    ].filter(Boolean)))
+    snapshotDekurzNumber.value = String(payload.dekurz_number ?? '')
+    dekurzNumber.value = snapshotDekurzNumber.value
+    snapshotEditingDocumentId.value = documentId
+    snapshotEditMode.value = true
+    editingDocumentMonthKey.value = documentMonth
+    sectionErrors.value = {}
+    previousSectionTextById.value = {}
+    sectionsBeforeAiPrefill.value = null
+
+    if (monthKey.value !== documentMonth) {
+        const [year, month] = documentMonth.split('-').map(Number)
+        selectedMonth.value = new Date(year, month - 1, 1)
+    }
+}
+
+function clearSnapshotEditMode() {
+    snapshotEditMode.value = false
+    snapshotEditingDocumentId.value = null
+    snapshotAvailableDates.value = []
+    snapshotDekurzNumber.value = ''
+    snapshotSaveState.value = 'idle'
+}
+
 async function syncEditModeWithLoadedDraft() {
     const finalDocumentId =
         Number(
             builder.value
                 ?.draft
                 ?.final_document_id ??
+                builder.value
+                    ?.existing_documents
+                    ?.[0]
+                    ?.id ??
                 0,
         )
 
@@ -258,22 +342,27 @@ async function syncEditModeWithLoadedDraft() {
         monthKey.value
 
     if (
-        editDocumentId.value ===
+        editDocumentId.value !==
         finalDocumentId
     ) {
-        return
+        await router.replace({
+            query: {
+                ...router.currentRoute.value.query,
+
+                editDocumentId:
+                    String(
+                        finalDocumentId,
+                    ),
+            },
+        })
     }
 
-    await router.replace({
-        query: {
-            ...router.currentRoute.value.query,
-
-            editDocumentId:
-                String(
-                    finalDocumentId,
-                ),
-        },
-    })
+    if (
+        !snapshotEditMode.value ||
+        snapshotEditingDocumentId.value !== finalDocumentId
+    ) {
+        await loadDocumentSnapshot(finalDocumentId)
+    }
 }
 
 function changedSections() {
@@ -324,11 +413,50 @@ function saveDraftSections(payload: DekurzNarrativeSection[]): Promise<boolean> 
     return draftSectionSaveQueue
 }
 
+function saveSnapshotSections(payload: DekurzNarrativeSection[]): Promise<boolean> {
+    const documentId = snapshotEditingDocumentId.value
+    if (!documentId) return Promise.resolve(false)
+
+    pendingDraftSaves++
+    draftSectionSaving.value = true
+    snapshotSaveState.value = 'saving'
+    draftSectionSaveQueue = draftSectionSaveQueue
+        .then(async () => {
+            try {
+                await api.put(`/v1/dekurz/${documentId}`, {
+                    dekurz_number: Number(dekurzNumber.value),
+                    sections: payload,
+                })
+                snapshotSaveState.value = 'saved'
+                snapshotDekurzNumber.value = dekurzNumber.value
+                return true
+            } catch (saveError) {
+                snapshotSaveState.value = 'error'
+                toast.add({
+                    severity: 'error',
+                    summary: 'Dekurz sa nepodarilo uložiť',
+                    detail: errorMessage(saveError, 'Skúste dokument uložiť znova.'),
+                    life: 5000,
+                })
+                return false
+            }
+        })
+        .finally(() => {
+            pendingDraftSaves--
+            if (!pendingDraftSaves) draftSectionSaving.value = false
+        })
+
+    return draftSectionSaveQueue
+}
+
 async function persistSections(): Promise<boolean> {
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = null
     if (!patientId.value) return false
     const payload = sectionPayload()
+    if (snapshotEditMode.value) {
+        return saveSnapshotSections(payload)
+    }
     const results = await Promise.all([
         ...(isEditingDocument.value
             ? []
@@ -548,22 +676,24 @@ async function loadPreview() {
         null
 
     try {
+        const previewUrl = snapshotEditMode.value && snapshotEditingDocumentId.value
+            ? `/v1/dekurz/${snapshotEditingDocumentId.value}/edit-preview`
+            : '/v1/dekurz/draft-preview'
+        const previewPayload = snapshotEditMode.value
+            ? {
+                dekurz_number: dekurzNumber.value || undefined,
+                sections: sectionPayload(),
+            }
+            : {
+                patient_id: patientId.value,
+                month: monthKey.value,
+                dekurz_number: dekurzNumber.value || undefined,
+                sections: sectionPayload(),
+            }
         const response =
             await api.post(
-                '/v1/dekurz/draft-preview',
-                {
-                    patient_id:
-                        patientId.value,
-
-                    month:
-                        monthKey.value,
-
-                    dekurz_number:
-                        dekurzNumber.value ||
-                        undefined,
-
-                    sections: sectionPayload(),
-                },
+                previewUrl,
+                previewPayload,
 
                 {
                     headers: {
@@ -771,13 +901,29 @@ async function loadAndInitialize() {
     }
 
     loadingTexts.value = true
-    const textsRequest = fetchPatientTexts(id).then(texts => {
-        if (token === loadToken) applySections(texts)
-        return texts
-    })
 
     try {
         await load()
+
+        if (
+            token === loadToken &&
+            snapshotEditMode.value &&
+            editingDocumentMonthKey.value === monthKey.value
+        ) {
+            dekurzNumber.value = snapshotDekurzNumber.value
+            schedulePreview()
+            return
+        }
+
+        if (
+            token === loadToken &&
+            builder.value?.existing_documents.length
+        ) {
+            await syncEditModeWithLoadedDraft()
+            patientTextSaveState.value = 'idle'
+            schedulePreview()
+            return
+        }
 
         // Create the one logical patient+month Dekurz automatically only when it
         // does not exist yet. Merely viewing a completed month must not reopen it.
@@ -785,7 +931,7 @@ async function loadAndInitialize() {
             await initializeDraft()
         }
 
-        const patientTexts = await textsRequest
+        const patientTexts = await fetchPatientTexts(id)
         if (token !== loadToken) return
         applySections(patientTexts)
         await syncEditModeWithLoadedDraft()
@@ -809,6 +955,25 @@ async function handleFinalize() {
     }
     sectionErrors.value = errors
     if (Object.keys(errors).length || !await persistSections()) return
+
+    if (snapshotEditMode.value && snapshotEditingDocumentId.value) {
+        toast.add({
+            severity: 'success',
+            summary: 'Úspešne',
+            detail: 'Dekurz bol aktualizovaný.',
+            life: 3000,
+        })
+
+        await router.push({
+            name: 'documents-dekurz',
+            params: {
+                documentId: snapshotEditingDocumentId.value,
+            },
+        })
+
+        return
+    }
+
     const finalized = await finalizeDraft(
         previewPageCount.value,
     )
@@ -873,6 +1038,8 @@ watch(
             editingDocumentMonthKey.value &&
             newMonthKey !== editingDocumentMonthKey.value
         ) {
+            await flushSectionSaves()
+
             const query = {
                 ...router.currentRoute.value.query,
             }
@@ -885,6 +1052,7 @@ watch(
 
             editingDocumentMonthKey.value =
                 null
+            clearSnapshotEditMode()
         }
 
         await loadAndInitialize()
@@ -938,21 +1106,8 @@ onMounted(
 
         if (editDocumentId.value) {
             const previousMonth = monthKey.value
-            const response = await api.get(`/v1/dekurz/${editDocumentId.value}`)
-            const documentMonth = String(
-                response.data?.data?.dekurz_data?.month ??
-                response.data?.data?.dekurz_data?.period ??
-                '',
-            ).slice(0, 7)
-
-            if (/^\d{4}-\d{2}$/.test(documentMonth)) {
-                editingDocumentMonthKey.value =
-                    documentMonth
-
-                const [year, month] = documentMonth.split('-').map(Number)
-                selectedMonth.value = new Date(year, month - 1, 1)
-                selectedDocumentChangedMonth = previousMonth !== monthKey.value
-            }
+            await loadDocumentSnapshot(editDocumentId.value)
+            selectedDocumentChangedMonth = previousMonth !== monthKey.value
         }
 
         await loadMacros()
@@ -1329,7 +1484,7 @@ onBeforeUnmount(() => {
                                 <AppButton
                                     type="button"
                                     variant="accent"
-                                    :label="builder?.draft?.final_document_id ? 'Znovu vygenerovať dokument' : 'Generovať dokument'"
+                                    :label="snapshotEditMode ? 'Aktualizovať dokument' : builder?.draft?.final_document_id ? 'Znovu vygenerovať dokument' : 'Generovať dokument'"
                                     :loading="finalizing"
                                     :disabled="!hasDraft || sectionsLocked || isPreviewLoading || !isPreviewPaginationReady || sectionSaveState === 'saving'"
                                     @click="handleFinalize"

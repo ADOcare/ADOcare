@@ -392,10 +392,13 @@ export interface Role {
   name: string
   // relations
   users: User[]
+  procedures: Procedure[]
   // counts
   users_count: number
+  procedures_count: number
   // exists
   users_exists: boolean
+  procedures_exists: boolean
 }
 
 export interface ScanSession {
@@ -848,21 +851,22 @@ export interface Procedure {
   created_at: string | null
   updated_at: string | null
   default_dekurz_text: string | null
-  role_ids?: number[]
   // relations
+  roles: Role[]
   patient_dekurz_templates: PatientProcedureDekurzTemplate[]
   dekurz_entries: DekurzEntry[]
   insurance_rules: InsuranceRule[]
   insurance_companies_prices: InsuranceCompany[]
   insurance_companies_prices_minimal: InsuranceCompany[]
-  roles: Role[]
   // counts
+  roles_count: number
   patient_dekurz_templates_count: number
   dekurz_entries_count: number
   insurance_rules_count: number
   insurance_companies_prices_count: number
   insurance_companies_prices_minimal_count: number
   // exists
+  roles_exists: boolean
   patient_dekurz_templates_exists: boolean
   dekurz_entries_exists: boolean
   insurance_rules_exists: boolean

@@ -80,6 +80,11 @@ const selectedMonth =
         initialMonth,
     )
 
+const editingDocumentMonthKey =
+    ref<string | null>(
+        null,
+    )
+
 const dekurzNumber =
     ref(
         String(
@@ -229,6 +234,46 @@ function applySections(patientTexts: string[] | null) {
     sectionErrors.value = {}
     previousSectionTextById.value = {}
     sectionsBeforeAiPrefill.value = null
+}
+
+async function syncEditModeWithLoadedDraft() {
+    const finalDocumentId =
+        Number(
+            builder.value
+                ?.draft
+                ?.final_document_id ??
+                0,
+        )
+
+    if (
+        !Number.isInteger(
+            finalDocumentId,
+        ) ||
+        finalDocumentId <= 0
+    ) {
+        return
+    }
+
+    editingDocumentMonthKey.value =
+        monthKey.value
+
+    if (
+        editDocumentId.value ===
+        finalDocumentId
+    ) {
+        return
+    }
+
+    await router.replace({
+        query: {
+            ...router.currentRoute.value.query,
+
+            editDocumentId:
+                String(
+                    finalDocumentId,
+                ),
+        },
+    })
 }
 
 function changedSections() {
@@ -743,6 +788,7 @@ async function loadAndInitialize() {
         const patientTexts = await textsRequest
         if (token !== loadToken) return
         applySections(patientTexts)
+        await syncEditModeWithLoadedDraft()
         patientTextSaveState.value = 'idle'
         schedulePreview()
     } finally {
@@ -821,7 +867,26 @@ async function reloadDekurz() {
 
 watch(
     monthKey,
-    async () => {
+    async newMonthKey => {
+        if (
+            isEditingDocument.value &&
+            editingDocumentMonthKey.value &&
+            newMonthKey !== editingDocumentMonthKey.value
+        ) {
+            const query = {
+                ...router.currentRoute.value.query,
+            }
+
+            delete query.editDocumentId
+
+            await router.replace({
+                query,
+            })
+
+            editingDocumentMonthKey.value =
+                null
+        }
+
         await loadAndInitialize()
     },
 )
@@ -881,6 +946,9 @@ onMounted(
             ).slice(0, 7)
 
             if (/^\d{4}-\d{2}$/.test(documentMonth)) {
+                editingDocumentMonthKey.value =
+                    documentMonth
+
                 const [year, month] = documentMonth.split('-').map(Number)
                 selectedMonth.value = new Date(year, month - 1, 1)
                 selectedDocumentChangedMonth = previousMonth !== monthKey.value
@@ -1124,17 +1192,6 @@ onBeforeUnmount(() => {
                             </div>
 
                             <div
-                                v-if="builder?.draft?.final_document_id"
-                                class="flex items-center gap-3 rounded-md bg-danger p-2"
-                            >
-                                <i class="bi bi-file-earmark-check text-white" />
-                                <div class="min-w-0">
-                                    <p class="text-normal font-medium text-white">
-                                        Upravujete existujúci súbor.
-                                    </p>
-                                </div>
-                            </div>
-                            <div
                                 v-if="!builder?.draft"
                                 class="flex items-start gap-3 rounded-md bg-danger p-4"
                             >
@@ -1152,9 +1209,6 @@ onBeforeUnmount(() => {
 
                             <section v-for="(section) in sections" :key="section.id"
                                 class="flex flex-col gap-4 rounded-md bg-white p-4">
-                                <div class="flex items-center justify-between gap-2">
-                                    <h3 class="text-heading">Sekcia</h3>
-                                </div>
                                 <FormField label="Text dekurzu" :error="sectionErrors[`${section.id}-text`]">
                                     <div class="relative">
                                         <Textarea v-model="section.text" rows="8" autoResize class="w-full pb-12!"

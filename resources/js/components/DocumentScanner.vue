@@ -66,9 +66,6 @@ async function startCamera() {
             throw new Error('Tento prehliadač nepodporuje skenovanie fotoaparátom.')
         }
 
-        cv = await loadOpenCv()
-        if (stopped) return
-
         stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
             video: {
@@ -87,10 +84,23 @@ async function startCamera() {
         if (!videoElement) return
 
         videoElement.srcObject = stream
-        await new Promise<void>((resolve) => {
-            videoElement.onloadedmetadata = () => resolve()
-        })
+        videoElement.muted = true
+        videoElement.playsInline = true
         await videoElement.play()
+
+        if (videoElement.videoWidth === 0 || videoElement.videoHeight === 0) {
+            await new Promise<void>((resolve, reject) => {
+                const timeout = window.setTimeout(
+                    () => reject(new Error('Fotoaparát neposkytol obraz.')),
+                    10_000,
+                )
+                videoElement.addEventListener('loadeddata', () => {
+                    window.clearTimeout(timeout)
+                    resolve()
+                }, { once: true })
+            })
+        }
+
         setupCanvases()
 
         const track = stream.getVideoTracks()[0]
@@ -99,9 +109,9 @@ async function startCamera() {
         }
         torchAvailable.value = capabilities?.torch === true
         loading.value = false
-        status.value = 'Namierte fotoaparát na dokument'
+        status.value = 'Pripravujem rozpoznávanie dokumentu...'
         drawPreview()
-        detectionTimer = window.setInterval(detectDocument, 250)
+        void startDocumentDetection()
     } catch (reason) {
         console.error('Could not start document scanner', reason)
         error.value = reason instanceof Error
@@ -109,6 +119,20 @@ async function startCamera() {
             : 'Fotoaparát sa nepodarilo spustiť.'
         status.value = ''
         loading.value = false
+    }
+}
+
+async function startDocumentDetection() {
+    try {
+        cv = await loadOpenCv()
+        if (stopped) return
+
+        status.value = 'Namierte fotoaparát na dokument'
+        detectDocument()
+        detectionTimer = window.setInterval(detectDocument, 250)
+    } catch (reason) {
+        console.error('Could not start document detection', reason)
+        status.value = 'Automatické rozpoznávanie nie je dostupné. Dokument môžete odfotiť.'
     }
 }
 
@@ -134,7 +158,7 @@ function drawPreview() {
     const context = canvas?.getContext('2d')
     if (!videoElement || !canvas || !context || stopped) return
 
-    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+    context.clearRect(0, 0, canvas.width, canvas.height)
 
     if (detectedCorners) {
         context.save()
@@ -428,14 +452,21 @@ onBeforeUnmount(stopCamera)
 
 <template>
     <div class="fixed inset-0 z-[10000] flex flex-col bg-black">
-        <video ref="video" autoplay muted playsinline class="hidden" />
-        <canvas ref="detection" class="hidden" />
-
         <div class="relative min-h-0 flex-1 overflow-hidden">
+            <video
+                ref="video"
+                autoplay
+                muted
+                playsinline
+                class="absolute inset-0 h-full w-full object-contain"
+            />
+
             <canvas
                 ref="preview"
-                class="h-full w-full object-contain"
+                class="absolute inset-0 h-full w-full object-contain"
             />
+
+            <canvas ref="detection" class="hidden" />
 
             <div class="absolute inset-x-0 top-0 flex items-center justify-between p-4">
                 <button

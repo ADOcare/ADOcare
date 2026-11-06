@@ -9,6 +9,7 @@ import {
 
 import { useRoute } from 'vue-router'
 import DatePicker from 'primevue/datepicker'
+import Dialog from 'primevue/dialog'
 
 import AppButton from '@/components/AppButton.vue'
 import FormField from '@/components/FormField.vue'
@@ -74,6 +75,14 @@ const expiryProgress = computed(() => {
     )
 })
 
+const formattedExpiry = computed(() => {
+    const seconds = Math.max(0, Math.floor(expiresIn.value))
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = seconds % 60
+
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
+})
+
 /* -------------------------------------------------------------------------- */
 /* Selected files                                                             */
 /* -------------------------------------------------------------------------- */
@@ -90,6 +99,22 @@ const galleryInputRef =
     )
 
 const scannerOpen = ref(false)
+const previewedImageIndex =
+    ref<number | null>(null)
+
+const previewedImageUrl =
+    computed(() => {
+        if (
+            previewedImageIndex.value ===
+            null
+        ) {
+            return ''
+        }
+
+        return previewUrls.value[
+            previewedImageIndex.value
+        ] ?? ''
+    })
 
 /* -------------------------------------------------------------------------- */
 /* Final screen                                                               */
@@ -128,7 +153,7 @@ const MAX_TOTAL_BYTES =
     80 * 1024 * 1024
 
 const MAX_IMAGE_DIMENSION =
-    2400
+    3200
 
 /* -------------------------------------------------------------------------- */
 /* Session helpers                                                            */
@@ -180,6 +205,8 @@ function showFinalScreen(
     isLoading.value = false
     isUploading.value = false
     sessionValid.value = false
+    scannerOpen.value = false
+    previewedImageIndex.value = null
 
     isFinalScreen.value = true
     finalSeverity.value =
@@ -341,6 +368,8 @@ async function compressImage(
     }
 
     context.fillStyle = '#ffffff'
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
     context.fillRect(
         0,
         0,
@@ -534,6 +563,21 @@ async function handleGallerySelected(
 function removeImage(
     index: number,
 ) {
+    if (
+        previewedImageIndex.value ===
+        index
+    ) {
+        previewedImageIndex.value =
+            null
+    } else if (
+        previewedImageIndex.value !==
+            null &&
+        previewedImageIndex.value >
+            index
+    ) {
+        previewedImageIndex.value--
+    }
+
     const url =
         previewUrls.value[index]
 
@@ -552,6 +596,18 @@ function removeImage(
         index,
         1,
     )
+}
+
+function openImagePreview(
+    index: number,
+) {
+    previewedImageIndex.value =
+        index
+}
+
+function closeImagePreview() {
+    previewedImageIndex.value =
+        null
 }
 
 /* -------------------------------------------------------------------------- */
@@ -872,499 +928,222 @@ onBeforeUnmount(() => {
     <!-- Loading -->
     <div
         v-if="isLoading"
-        class="
-            flex
-            min-h-[50vh]
-            items-center
-            justify-center
-        "
+        class="flex min-h-[100dvh] w-full items-center justify-center bg-tag3"
+        role="status"
+        aria-label="Načítavam skenovanie dokumentu"
     >
-        <i
-            class="
-                bi
-                bi-arrow-repeat
-                animate-spin
-                text-xl
-                text-accent
-            "
-        />
+        <i class="bi bi-arrow-repeat animate-spin text-xl text-accent" aria-hidden="true" />
     </div>
 
-    <!-- Final animated screen -->
+    <!-- Final screen -->
     <Transition name="final-screen">
         <div
             v-if="isFinalScreen"
-            class="
-                fixed
-                inset-0
-                z-[9999]
-                flex
-                items-center
-                justify-center
-                px-6
-            "
-            :class="
-                finalSeverity ===
-                'success'
-                    ? 'bg-accent'
-                    : 'bg-danger'
-            "
+            class="fixed inset-0 z-[9999] flex min-h-[100dvh] items-center justify-center px-5 py-8"
+            :class="finalSeverity === 'success' ? 'bg-accent' : 'bg-danger'"
+            role="status"
         >
-            <div
-                class="
-                    final-message
-                    flex
-                    flex-col
-                    items-center
-                    text-center
-                    text-white
-                "
-            >
-                <div
-                    class="
-                        mb-6
-                        flex
-                        h-20
-                        w-20
-                        items-center
-                        justify-center
-                        rounded-full
-                        bg-white/15
-                        backdrop-blur-sm
-                    "
-                >
+            <div class="final-message flex w-full max-w-md flex-col items-center text-center text-white">
+                <div class="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/15 backdrop-blur-sm">
                     <i
-                        :class="
-                            finalSeverity ===
-                            'success'
-                                ? 'bi bi-check-lg'
-                                : 'bi bi-x-lg'
-                        "
-                        class="
-                            text-4xl
-                            text-white
-                        "
+                        :class="finalSeverity === 'success' ? 'bi bi-check-lg' : 'bi bi-x-lg'"
+                        class="text-4xl text-white"
+                        aria-hidden="true"
                     />
                 </div>
-
-                <h1
-                    class="
-                        mb-3
-                        text-heading-accent
-                        text-white!
-                    "
-                >
-                    {{ finalTitle }}
-                </h1>
-
-                <p
-                    class="
-                        text-normal
-                        text-white
-                    "
-                >
-                    {{ finalMessage }}
-                </p>
-
-                <p
-                    class="
-                        mt-6
-                        text-mini
-                        text-white/80
-                    "
-                >
-                    Môžete zatvoriť túto stránku.
-                </p>
+                <h1 class="mb-3 text-heading-accent text-white!">{{ finalTitle }}</h1>
+                <p class="text-normal text-white">{{ finalMessage }}</p>
+                <p class="mt-6 text-mini text-white/80">Môžete zatvoriť túto stránku.</p>
             </div>
         </div>
     </Transition>
 
-    <!-- Main page -->
-    <div
-        v-if="
-            !isLoading &&
-            !isFinalScreen
-        "
-        class="
-            flex
-            min-h-full
-            w-full
-            flex-col
-            gap-4
-            p-8
-            sm:p-6
-        "
+    <!-- Mobile-first upload page -->
+    <main
+        v-if="!isLoading && !isFinalScreen"
+        class="flex min-h-[100dvh] w-full flex-col gap-5 bg-tag3 px-3 py-4 text-darkgrey sm:gap-6 sm:px-6 sm:py-8 lg:px-8"
     >
-        <!-- Header -->
-        <header
-            class="
-                flex
-                items-center
-                justify-between
-                pb-2
-            "
-        >
-            <div
-                class="
-                    flex
-                    min-w-0
-                    items-center
-                "
-            >
-                <h1
-                    class="
-                        truncate
-                        border-r-2!
-                        border-accent!
-                        pr-sm!
-                        text-heading-accent!
-                    "
-                >
-                    {{ patientName }}
-                </h1>
-
-                <h1
-                    class="
-                        whitespace-nowrap
-                        px-sm!
-                        font-light!
-                        text-heading-accent!
-                        text-darkgrey!
-                    "
-                >
-                    Lekársky nález
-                </h1>
-            </div>
+        <header class="flex min-w-0 gap-1 pb-4 sm:gap-2">
+            <h1 class="min-w-0 break-words text-heading-accent! text-darkgrey!">
+                {{ patientName }}
+            </h1>
+            <Tag class="bg-darkgrey!">Lekársky nález</Tag>
         </header>
 
-        <form
-            class="
-                flex
-                w-full
-                flex-col
-                gap-3
-            "
-            @submit.prevent="
-                finalizeScan
-            "
-        >
-            <!-- Main section -->
-            <section
-                class="
-                    flex
-                    flex-col
-                    gap-4
-                    rounded-md
-                    bg-tag3
-                    p-4
-                "
-            >
+        <form class="flex w-full flex-col gap-4" @submit.prevent="finalizeScan">
+            <section class="flex w-full flex-col gap-5">
                 <!-- Date -->
                 <FormField
                     label="Dátum odporučenia"
                     required
-                    :error="
-                        submitted &&
-                        !referenceDate
-                            ? 'Dátum odporučenia je povinný.'
-                            : null
-                    "
-                    v-slot="{
-                        id,
-                        describedBy,
-                        invalid,
-                    }"
+                    :error="submitted && !referenceDate ? 'Dátum odporučenia je povinný.' : null"
+                    v-slot="{ id, describedBy, invalid }"
                 >
                     <DatePicker
                         :id="id"
-                        v-model="
-                            referenceDate
-                        "
+                        v-model="referenceDate"
                         dateFormat="dd.mm.yy"
                         :showIcon="false"
                         :manualInput="false"
                         class="w-full"
-                        inputClass="
-                            w-full!
-                            cursor-pointer!
-                            border-none!
-                        "
-                        :invalid="
-                            invalid
-                        "
-                        :aria-invalid="
-                            invalid ||
-                            undefined
-                        "
-                        :aria-describedby="
-                            describedBy
-                        "
+                        :inputClass="[
+                            'w-full! cursor-pointer! rounded-md!  bg-white! px-3! py-3! text-normal! text-darkgrey!',
+                            invalid ? 'border-danger!' : 'border-none!'
+                        ]"
+                        :invalid="invalid"
+                        :aria-invalid="invalid || undefined"
+                        :aria-describedby="describedBy"
                     />
                 </FormField>
 
-                <!-- Hidden gallery input -->
                 <input
                     ref="galleryInputRef"
                     type="file"
                     accept="image/*"
                     multiple
                     class="hidden"
-                    @change="
-                        handleGallerySelected
-                    "
+                    aria-label="Vybrať obrázky dokumentu z galérie"
+                    @change="handleGallerySelected"
                 />
 
-                <!-- Photo grid -->
-                <FormField
-                    label="Stránky dokumentu"
-                    required
-                >
-                <div
-                    class="
-                        grid
-                        grid-cols-2
-                        gap-2
-                        sm:grid-cols-6
-                    "
-                >
-                    <!-- Filled placeholders -->
-                    <div
-                        v-for="(
-                            url,
-                            index
-                        ) in previewUrls"
-                        :key="url"
-                        class="
-                            group
-                            relative
-                            aspect-square
-                            overflow-hidden
-                            rounded-md
-                            bg-white
-                        "
-                    >
-                        <img
-                            :src="url"
-                            alt=""
-                            class="
-                                h-full
-                                w-full
-                                object-cover
-                            "
-                        />
-
-                        <!-- Order -->
-                        <div
-                            class="
-                                absolute
-                                left-2
-                                top-2
-                                flex
-                                h-7
-                                min-w-7
-                                items-center
-                                justify-center
-                                rounded-md
-                                bg-darkgrey
-                                px-1.5
-                                text-mini
-                                text-white
-                            "
-                        >
-                            {{
-                                index +
-                                1
-                            }}
-                        </div>
-
-                        <!-- Remove -->
-                        <AppButton
-                            type="button"
-                            variant="secondary"
-                            icon="
-                                bi
-                                bi-x-lg
-                            "
-                            aria-label="
-                                Odstrániť obrázok
-                            "
-                            class="
-                                absolute!
-                                right-2!
-                                top-2!
-                                h-6!
-                                min-w-6!
-                                px-0!
-                                text-xs!
-                            "
-                            @click="
-                                removeImage(
-                                    index,
-                                )
-                            "
-                        />
-                    </div>
-
-                    <!-- Permanent empty placeholder -->
+                <!-- Primary mobile actions -->
+                <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <button
                         type="button"
-                        class="
-                            flex
-                            aspect-square
-                            cursor-pointer
-                            flex-col
-                            items-center
-                            justify-center
-                            gap-2
-                            rounded-md
-                            bg-white
-                            text-tag3
-                            transition-all
-                            duration-200
-                            hover:scale-[0.98]
-                            hover:bg-tag2
-                            disabled:cursor-wait
-                            disabled:opacity-60
-                        "
-                        :disabled="
-                            isProcessingFiles ||
-                            isUploading
-                        "
-                        @click="
-                            openScanner
-                        "
+                        class="flex min-h-12 items-center justify-center gap-2 rounded-md bg-accent px-4 py-3 text-normal font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="!sessionValid || isProcessingFiles || isUploading"
+                        @click="openScanner"
                     >
-                        <div
-                            class="
-                                flex
-                                h-10
-                                w-10
-                                items-center
-                                justify-center
-                                rounded-full
-                            "
-                        >
-                            <i
-                                    class="bi"
-                                    :class="
-                                        isProcessingFiles
-                                            ? 'bi-arrow-repeat animate-spin'
-                                            : 'bi-plus-lg'
-                                    "
-                            />
-                        </div>
+                        <i class="bi bi-camera text-lg" aria-hidden="true" />
+                        Odfotiť dokument
+                    </button>
+                    <button
+                        type="button"
+                        class="flex min-h-12 items-center justify-center gap-2 rounded-md border border-darkgrey bg-white px-4 py-3 text-normal text-darkgrey transition-colors hover:bg-tag2 disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="!sessionValid || isProcessingFiles || isUploading"
+                        @click="openGallery"
+                    >
+                        <i class="bi bi-images text-lg" aria-hidden="true" />
+                        Vybrať z galérie
                     </button>
                 </div>
 
-                <button
-                    type="button"
-                    class="self-start text-mini text-darkgrey underline underline-offset-2"
-                    :disabled="
-                        isProcessingFiles ||
-                        isUploading
-                    "
-                    @click="openGallery"
-                >
-                    Vybrať z galérie
-                </button>
+                <!-- Document pages -->
+                <FormField label="Stránky dokumentu" required>
+                    <div v-if="previewUrls.length" class="flex flex-col gap-2">
+                        <p class="text-mini text-darkgrey/70">
+                            Pridané stránky: {{ previewUrls.length }}. Klepnutím zobrazíte náhľad.
+                        </p>
+                        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                            <div
+                                v-for="(url, index) in previewUrls"
+                                :key="url"
+                                class="group relative aspect-[3/4] overflow-hidden rounded-md border border-darkgrey/15 bg-white"
+                            >
+                                <button
+                                    type="button"
+                                    class="absolute inset-0 h-full w-full p-2"
+                                    :aria-label="`Zobraziť náhľad strany ${index + 1}`"
+                                    @click="openImagePreview(index)"
+                                >
+                                    <img
+                                        :src="url"
+                                        :alt="`Strana dokumentu ${index + 1}`"
+                                        class="h-full w-full object-contain"
+                                    />
+                                </button>
+                                <span
+                                    class="pointer-events-none absolute left-2 top-2 flex h-7 min-w-7 items-center justify-center rounded-md bg-darkgrey px-1.5 text-mini text-white"
+                                >
+                                    {{ index + 1 }}
+                                </span>
+                                <button
+                                    type="button"
+                                    class="absolute right-1 top-1 flex h-10 w-10 items-center justify-center rounded-md bg-white/95 text-darkgrey shadow-sm transition-colors hover:bg-tag2 disabled:opacity-50"
+                                    :disabled="isUploading || isProcessingFiles"
+                                    :aria-label="`Odstrániť stranu ${index + 1}`"
+                                    @click="removeImage(index)"
+                                >
+                                    <i class="bi bi-x-lg text-normal" aria-hidden="true" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div
+                        v-else
+                        class="flex min-h-28 items-center justify-center gap-3 rounded-md border border-dashed border-darkgrey/30 bg-white px-4 py-5 text-darkgrey/70"
+                    >
+                        <i class="bi bi-file-earmark-image text-xl" aria-hidden="true" />
+                        <p class="text-mini">Zatiaľ nie sú pridané žiadne stránky.</p>
+                    </div>
                 </FormField>
 
-                <div
-                    v-if="
-                        fileSelectionError
-                    "
-                    class="
-                        rounded-md
-                        bg-danger/10
-                        px-3
-                        py-2
-                        text-mini
-                        text-danger
-                    "
+                <p
+                    v-if="fileSelectionError"
+                    class="rounded-md bg-danger/10 px-3 py-2 text-mini text-danger"
+                    role="alert"
                 >
-                    {{
-                        fileSelectionError
-                    }}
-                </div>
-
-                <!-- Image validation -->
-                <div
-                    v-if="
-                        submitted &&
-                        selectedFiles.length ===
-                            0
-                    "
-                    class="
-                        rounded-md
-                        bg-danger/10
-                        px-3
-                        py-2
-                        text-mini
-                        text-danger
-                    "
+                    {{ fileSelectionError }}
+                </p>
+                <p
+                    v-if="submitted && selectedFiles.length === 0"
+                    class="rounded-md bg-danger/10 px-3 py-2 text-mini text-danger"
+                    role="alert"
                 >
                     Pridajte aspoň jeden obrázok lekárskeho nálezu.
-                </div>
+                </p>
 
-                <!-- Submit -->
                 <AppButton
                     type="submit"
-                    label="
-                        Nahrať nález
-                    "
-                    :loading="
-                        isUploading ||
-                        isProcessingFiles
-                    "
-                    :loading-label="
-                        isProcessingFiles
-                            ? 'Spracúvam obrázky'
-                            : 'Nahrávam'
-                    "
-                    :disabled="
-                        isUploading ||
-                        isProcessingFiles ||
-                        !sessionValid
-                    "
-                    class="
-                        w-full!
-                    "
+                    label="Nahrať nález"
+                    :loading="isUploading || isProcessingFiles"
+                    :loading-label="isProcessingFiles ? 'Spracúvam obrázky' : 'Nahrávam'"
+                    :disabled="isUploading || isProcessingFiles || !sessionValid"
+                    class="min-h-12! w-full! rounded-md!"
                     :align="'center'"
                 />
             </section>
 
-            <!-- Progress bar -->
-            <div
-                class="
-                    h-1
-                    w-full
-                    overflow-hidden
-                    rounded-full
-                    bg-tag3
-                "
-            >
-                <div
-                    class="
-                        h-full
-                        rounded-full
-                        bg-darkgrey
-                        transition-[width]
-                        duration-500
-                    "
-                    :style="{
-                        width:
-                            `${expiryProgress}%`,
-                    }"
-                />
+            <!-- Session countdown stays visible on mobile -->
+            <div v-if="sessionValid" class="flex flex-col gap-2" role="timer" aria-live="off">
+                <div class="flex items-center justify-between gap-2 text-mini text-darkgrey">
+                    <span>Zostávajúci čas na nahratie</span>
+                    <span class="shrink-0 font-semibold tabular-nums">{{ formattedExpiry }}</span>
+                </div>
+                <div class="h-1 w-full overflow-hidden rounded-full bg-tag3">
+                    <div
+                        class="h-full rounded-full bg-darkgrey transition-[width] duration-500"
+                        :style="{ width: `${expiryProgress}%` }"
+                    />
+                </div>
             </div>
         </form>
-    </div>
+    </main>
 
     <DocumentScanner
         v-if="scannerOpen"
         @close="scannerOpen = false"
         @captured="handleScannedFile"
     />
+
+    <Dialog
+        :visible="previewedImageIndex !== null"
+        modal
+        dismissable-mask
+        header="Náhľad skenu"
+        class="mx-2 w-[calc(100vw-1rem)] sm:mx-3 sm:w-auto"
+        :style="{ maxWidth: 'min(96vw, 900px)' }"
+        @update:visible="closeImagePreview"
+    >
+        <div class="flex max-h-[78dvh] min-h-48 items-center justify-center overflow-hidden rounded-md bg-black">
+            <img
+                v-if="previewedImageUrl"
+                :src="previewedImageUrl"
+                :alt="`Náhľad strany ${(previewedImageIndex ?? 0) + 1}`"
+                class="max-h-[78dvh] max-w-full object-contain"
+            />
+        </div>
+    </Dialog>
 </template>
 
 <style scoped>

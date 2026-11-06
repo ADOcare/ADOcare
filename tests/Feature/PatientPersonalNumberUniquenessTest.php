@@ -23,10 +23,10 @@ class PatientPersonalNumberUniquenessTest extends TestCase
     {
         parent::setUp();
 
-        $app = new Container();
+        $app = new Container;
         Container::setInstance($app);
-        $app->instance('config', new Repository());
-        $translator = new Translator(new ArrayLoader(), 'sk');
+        $app->instance('config', new Repository);
+        $translator = new Translator(new ArrayLoader, 'sk');
         $app->instance('translator', $translator);
         $app->instance('validator', new Factory($translator, $app));
 
@@ -75,12 +75,22 @@ class PatientPersonalNumberUniquenessTest extends TestCase
             ['id' => 2, 'company_id' => 7, 'code' => 'TT1', 'city' => 'Trnava'],
         ]);
         DB::table('users')->insert([
-            'id' => 20,
-            'title' => 'Mgr.',
-            'first_name' => 'Ina',
-            'last_name' => 'Sestra',
-            'created_at' => '2026-01-01 08:00:00',
-            'updated_at' => '2026-01-01 08:00:00',
+            [
+                'id' => 20,
+                'title' => 'Mgr.',
+                'first_name' => 'Ina',
+                'last_name' => 'Sestra',
+                'created_at' => '2026-01-01 08:00:00',
+                'updated_at' => '2026-01-01 08:00:00',
+            ],
+            [
+                'id' => 21,
+                'title' => 'Bc.',
+                'first_name' => 'Aktívna',
+                'last_name' => 'Sestra',
+                'created_at' => '2026-01-01 08:00:00',
+                'updated_at' => '2026-01-01 08:00:00',
+            ],
         ]);
         DB::table('patients')->insert([
             'id' => 100,
@@ -104,22 +114,66 @@ class PatientPersonalNumberUniquenessTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_deleted_patient_of_another_nurse_in_company_blocks_duplicate_creation(): void
+    public function test_deleted_patient_is_ignored_when_checking_new_patient_identity(): void
     {
         $service = new PatientService(
             $this->createMock(EoverenieInsuranceService::class),
         );
-        $assertUnique = new ReflectionMethod($service, 'assertUniquePersonalNumberWithinCompany');
+        $assertUnique = new ReflectionMethod($service, 'assertNoPatientAssignedToAnotherNurse');
+
+        $assertUnique->invoke($service, '9001011234', 7, 21);
+
+        self::assertTrue(true);
+    }
+
+    public function test_active_patient_of_same_nurse_is_ignored_by_cross_nurse_check(): void
+    {
+        DB::table('patients')->insert([
+            'id' => 101,
+            'first_name' => 'Jana',
+            'last_name' => 'Aktivna',
+            'personal_number' => '900101/1234',
+            'branch_id' => 1,
+            'nurse_id' => 21,
+            'created_at' => '2026-01-01 08:00:00',
+            'updated_at' => '2026-01-01 08:00:00',
+        ]);
+        $service = new PatientService(
+            $this->createMock(EoverenieInsuranceService::class),
+        );
+        $assertUnique = new ReflectionMethod($service, 'assertNoPatientAssignedToAnotherNurse');
+
+        $assertUnique->invoke($service, '9001011234', 7, 21);
+
+        self::assertTrue(true);
+    }
+
+    public function test_active_patient_of_another_nurse_blocks_creation(): void
+    {
+        DB::table('patients')->insert([
+            'id' => 101,
+            'first_name' => 'Jana',
+            'last_name' => 'Aktivna',
+            'personal_number' => '900101/1234',
+            'branch_id' => 1,
+            'nurse_id' => 20,
+            'created_at' => '2026-01-01 08:00:00',
+            'updated_at' => '2026-01-01 08:00:00',
+        ]);
+        $service = new PatientService(
+            $this->createMock(EoverenieInsuranceService::class),
+        );
+        $assertUnique = new ReflectionMethod($service, 'assertNoPatientAssignedToAnotherNurse');
 
         try {
-            $assertUnique->invoke($service, '9001011234', 7);
-            self::fail('Expected duplicate personal number validation to fail.');
+            $assertUnique->invoke($service, '9001011234', 7, 21);
+            self::fail('Expected cross-nurse duplicate validation to fail.');
         } catch (ValidationException $exception) {
             $message = $exception->errors()['personal_number'][0] ?? '';
 
-            self::assertStringContainsString('medzi odstránenými pacientmi', $message);
             self::assertStringContainsString('Ina Sestra', $message);
-            self::assertStringContainsString('Obnovte existujúceho pacienta', $message);
+            self::assertStringContainsString('Požiadajte manažéra, aby pacienta presunul', $message);
+            self::assertStringNotContainsString('obnovil', $message);
         }
     }
 }

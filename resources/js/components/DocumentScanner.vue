@@ -1,18 +1,17 @@
 <script setup lang="ts">
-import cvModule from '@techstark/opencv-js'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+    createCornerEditor,
+    Scanner,
+    type CornerEditor,
+    type CornerPoints,
+    type Point,
+} from 'scanic'
 
-type Point = {
-    x: number
-    y: number
-}
-
-type Corners = {
-    topLeft: Point
-    topRight: Point
-    bottomLeft: Point
-    bottomRight: Point
-}
+const DETECTION_INTERVAL_MS = 100
+const AUTO_CAPTURE_CONFIDENCE = 0.9
+const AUTO_CAPTURE_STABLE_FRAMES = 2
+const CAPTURE_MAX_DIMENSION = 3200
 
 const emit = defineEmits<{
     captured: [file: File]
@@ -20,54 +19,48 @@ const emit = defineEmits<{
 }>()
 
 const video = ref<HTMLVideoElement | null>(null)
-const preview = ref<HTMLCanvasElement | null>(null)
-const detection = ref<HTMLCanvasElement | null>(null)
+const editorHost = ref<HTMLDivElement | null>(null)
 const loading = ref(true)
 const cameraReady = ref(false)
+const scannerReady = ref(false)
 const capturing = ref(false)
+const reviewing = ref(false)
 const error = ref('')
-const status = ref('Pripravujem skener...')
+const status = ref('Pripravujem fotoaparát...')
 const torchEnabled = ref(false)
 const torchAvailable = ref(false)
+const liveCorners = ref<CornerPoints | null>(null)
+const editedCorners = ref<CornerPoints | null>(null)
+const videoSize = ref({ width: 1, height: 1 })
+const detectionConfidence = ref(0)
 
-let cv: Awaited<typeof cvModule> | null = null
+const scanner = new Scanner()
+
+let scannerInitialization: Promise<void> | null = null
+let cornerEditor: CornerEditor | null = null
 let stream: MediaStream | null = null
-let animationFrame: number | null = null
+let sourceCanvas: HTMLCanvasElement | null = null
 let detectionTimer: number | null = null
-let detectedCorners: Corners | null = null
+let detectionRunning = false
+let stableDetectionFrames = 0
+let missedDetectionFrames = 0
 let stopped = false
+let cameraInitialized = false
+let autoCaptureArmedAt = 0
 
 const canCapture = computed(() => cameraReady.value && !capturing.value && !error.value)
+const confidencePercent = computed(() => Math.round(detectionConfidence.value * 100))
+const livePolygonPoints = computed(() => {
+    const corners = liveCorners.value
+    if (!corners) return ''
 
-async function loadOpenCv() {
-    const module = await Promise.race([
-        Promise.resolve(cvModule),
-        new Promise<never>((_resolve, reject) => {
-            window.setTimeout(
-                () => reject(new Error('OpenCV sa nepodarilo načítať.')),
-                20_000,
-            )
-        }),
-    ])
-
-    if (typeof module.Mat === 'function') {
-        return module
-    }
-
-    await new Promise<void>((resolve, reject) => {
-        const timeout = window.setTimeout(
-            () => reject(new Error('OpenCV sa nepodarilo načítať.')),
-            20_000,
-        )
-
-        module.onRuntimeInitialized = () => {
-            window.clearTimeout(timeout)
-            resolve()
-        }
-    })
-
-    return module
-}
+    return [
+        corners.topLeft,
+        corners.topRight,
+        corners.bottomRight,
+        corners.bottomLeft,
+    ].map((point) => `${point.x},${point.y}`).join(' ')
+})
 
 function waitForVideoDimensions(videoElement: HTMLVideoElement) {
     return new Promise<void>((resolve, reject) => {
@@ -96,6 +89,20 @@ function waitForVideoDimensions(videoElement: HTMLVideoElement) {
     })
 }
 
+async function initializeScanner() {
+    try {
+        await scanner.initialize()
+        if (stopped) return
+
+        scannerReady.value = true
+        status.value = 'Namierte fotoaparát na dokument'
+        scheduleDetection()
+    } catch (reason) {
+        console.error('Could not initialize Scanic', reason)
+        status.value = 'Automatické rozpoznávanie nie je dostupné. Dokument môžete odfotiť.'
+    }
+}
+
 async function startCamera() {
     try {
         if (!navigator.mediaDevices?.getUserMedia) {
@@ -106,13 +113,13 @@ async function startCamera() {
             audio: false,
             video: {
                 facingMode: { ideal: 'environment' },
-                width: { ideal: 2560 },
-                height: { ideal: 1440 },
+                width: { ideal: 3840 },
+                height: { ideal: 2160 },
             },
         })
 
         if (stopped) {
-            stopCamera()
+            stopScanner()
             return
         }
 
@@ -124,23 +131,9 @@ async function startCamera() {
         videoElement.playsInline = true
         loading.value = false
         status.value = 'Spúšťam obraz z fotoaparátu...'
-        void videoElement.play().catch((reason) => {
-            console.error('Could not play camera stream', reason)
-        })
-
+        await videoElement.play()
         await waitForVideoDimensions(videoElement)
-
-        setupCanvases()
-
-        const track = stream.getVideoTracks()[0]
-        const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & {
-            torch?: boolean
-        }
-        torchAvailable.value = capabilities?.torch === true
-        cameraReady.value = true
-        status.value = 'Pripravujem rozpoznávanie dokumentu...'
-        drawPreview()
-        void startDocumentDetection()
+        initializeCamera()
     } catch (reason) {
         console.error('Could not start document scanner', reason)
         error.value = reason instanceof Error
@@ -151,234 +144,251 @@ async function startCamera() {
     }
 }
 
-async function startDocumentDetection() {
-    try {
-        cv = await loadOpenCv()
-        if (stopped) return
+function initializeCamera() {
+    if (cameraInitialized || stopped) return
 
-        status.value = 'Namierte fotoaparát na dokument'
-        detectDocument()
-        detectionTimer = window.setInterval(detectDocument, 250)
-    } catch (reason) {
-        console.error('Could not start document detection', reason)
-        status.value = 'Automatické rozpoznávanie nie je dostupné. Dokument môžete odfotiť.'
-    }
-}
-
-function setupCanvases() {
     const videoElement = video.value
-    const previewCanvas = preview.value
-    const detectionCanvas = detection.value
-    if (!videoElement || !previewCanvas || !detectionCanvas) return
+    if (!videoElement || videoElement.videoWidth <= 0 || videoElement.videoHeight <= 0) {
+        return
+    }
 
-    const scale = Math.min(1, 900 / videoElement.videoWidth)
-    const width = Math.max(1, Math.round(videoElement.videoWidth * scale))
-    const height = Math.max(1, Math.round(videoElement.videoHeight * scale))
-
-    previewCanvas.width = width
-    previewCanvas.height = height
-    detectionCanvas.width = width
-    detectionCanvas.height = height
+    cameraInitialized = true
+    const track = stream?.getVideoTracks()[0]
+    const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & {
+        torch?: boolean
+    }
+    torchAvailable.value = capabilities?.torch === true
+    videoSize.value = {
+        width: videoElement.videoWidth,
+        height: videoElement.videoHeight,
+    }
+    cameraReady.value = true
+    loading.value = false
+    status.value = 'Pripravujem rozpoznávanie dokumentu...'
+    autoCaptureArmedAt = performance.now() + 1_000
+    scannerInitialization = initializeScanner()
 }
 
-function drawPreview() {
+function smoothPoint(previous: Point, next: Point): Point {
+    const nextWeight = 0.45
+
+    return {
+        x: previous.x * (1 - nextWeight) + next.x * nextWeight,
+        y: previous.y * (1 - nextWeight) + next.y * nextWeight,
+    }
+}
+
+function smoothCorners(
+    previous: CornerPoints | null,
+    next: CornerPoints,
+): CornerPoints {
+    if (!previous) return next
+
+    return {
+        topLeft: smoothPoint(previous.topLeft, next.topLeft),
+        topRight: smoothPoint(previous.topRight, next.topRight),
+        bottomRight: smoothPoint(previous.bottomRight, next.bottomRight),
+        bottomLeft: smoothPoint(previous.bottomLeft, next.bottomLeft),
+    }
+}
+
+function pauseDetection() {
+    if (detectionTimer !== null) {
+        window.clearTimeout(detectionTimer)
+        detectionTimer = null
+    }
+}
+
+function scheduleDetection(delay = 0) {
+    pauseDetection()
+    if (!scannerReady.value || reviewing.value || capturing.value || stopped) return
+
+    detectionTimer = window.setTimeout(runDetection, delay)
+}
+
+async function runDetection() {
+    detectionTimer = null
+
     const videoElement = video.value
-    const canvas = preview.value
-    const context = canvas?.getContext('2d')
-    if (!videoElement || !canvas || !context || stopped) return
-
-    context.clearRect(0, 0, canvas.width, canvas.height)
-
-    if (detectedCorners) {
-        context.save()
-        context.strokeStyle = '#22c55e'
-        context.lineWidth = 4
-        context.shadowColor = 'rgba(0, 0, 0, 0.6)'
-        context.shadowBlur = 4
-        context.beginPath()
-        context.moveTo(detectedCorners.topLeft.x, detectedCorners.topLeft.y)
-        context.lineTo(detectedCorners.topRight.x, detectedCorners.topRight.y)
-        context.lineTo(detectedCorners.bottomRight.x, detectedCorners.bottomRight.y)
-        context.lineTo(detectedCorners.bottomLeft.x, detectedCorners.bottomLeft.y)
-        context.closePath()
-        context.stroke()
-        context.restore()
+    if (
+        !videoElement
+        || reviewing.value
+        || capturing.value
+        || stopped
+        || detectionRunning
+        || document.hidden
+        || videoElement.readyState < 2
+    ) {
+        scheduleDetection(DETECTION_INTERVAL_MS)
+        return
     }
 
-    animationFrame = window.requestAnimationFrame(drawPreview)
-}
-
-function cornersForContour(contour: InstanceType<NonNullable<typeof cv>['Mat']>): Corners | null {
-    if (!cv) return null
-
-    const center = cv.minAreaRect(contour).center
-    const corners: Partial<Corners> = {}
-    const distances: Record<keyof Corners, number> = {
-        topLeft: 0,
-        topRight: 0,
-        bottomLeft: 0,
-        bottomRight: 0,
-    }
-
-    for (let index = 0; index < contour.data32S.length; index += 2) {
-        const point = {
-            x: contour.data32S[index],
-            y: contour.data32S[index + 1],
-        }
-        const key: keyof Corners = point.x < center.x
-            ? (point.y < center.y ? 'topLeft' : 'bottomLeft')
-            : (point.y < center.y ? 'topRight' : 'bottomRight')
-        const distance = Math.hypot(point.x - center.x, point.y - center.y)
-
-        if (distance > distances[key]) {
-            corners[key] = point
-            distances[key] = distance
-        }
-    }
-
-    return corners.topLeft && corners.topRight && corners.bottomLeft && corners.bottomRight
-        ? corners as Corners
-        : null
-}
-
-function detectDocument() {
-    const videoElement = video.value
-    const canvas = detection.value
-    const context = canvas?.getContext('2d')
-    if (!cv || !videoElement || !canvas || !context || videoElement.readyState < 2) return
-
-    context.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
-
-    const source = cv.imread(canvas)
-    const gray = new cv.Mat()
-    const blurred = new cv.Mat()
-    const edges = new cv.Mat()
-    const contours = new cv.MatVector()
-    const hierarchy = new cv.Mat()
-    let bestContour: InstanceType<typeof cv.Mat> | null = null
+    detectionRunning = true
+    const startedAt = performance.now()
 
     try {
-        cv.cvtColor(source, gray, cv.COLOR_RGBA2GRAY)
-        cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT)
-        cv.Canny(blurred, edges, 50, 180)
-        cv.findContours(
-            edges,
-            contours,
-            hierarchy,
-            cv.RETR_EXTERNAL,
-            cv.CHAIN_APPROX_SIMPLE,
-        )
+        const result = await scanner.scan(videoElement, { mode: 'detect' })
 
-        let largestArea = canvas.width * canvas.height * 0.12
+        if (result.success && result.corners) {
+            const confidence = Math.max(0, Math.min(1, result.confidence ?? 0))
+            liveCorners.value = smoothCorners(liveCorners.value, result.corners)
+            detectionConfidence.value = confidence
+            missedDetectionFrames = 0
+            status.value = `Dokument rozpoznaný na ${Math.round(confidence * 100)} %`
 
-        for (let index = 0; index < contours.size(); index++) {
-            const contour = contours.get(index)
-            const area = cv.contourArea(contour)
-
-            if (area > largestArea) {
-                bestContour?.delete()
-                bestContour = contour.clone()
-                largestArea = area
+            if (
+                confidence >= AUTO_CAPTURE_CONFIDENCE
+                && performance.now() >= autoCaptureArmedAt
+            ) {
+                stableDetectionFrames++
+                if (stableDetectionFrames >= AUTO_CAPTURE_STABLE_FRAMES) {
+                    stableDetectionFrames = 0
+                    await capture()
+                }
+            } else {
+                stableDetectionFrames = 0
             }
+        } else {
+            stableDetectionFrames = 0
+            missedDetectionFrames++
+            detectionConfidence.value = 0
 
-            contour.delete()
+            if (missedDetectionFrames >= 3) {
+                liveCorners.value = null
+                status.value = 'Namierte fotoaparát na celý dokument'
+            }
         }
-
-        detectedCorners = bestContour ? cornersForContour(bestContour) : null
-        status.value = detectedCorners
-            ? 'Dokument rozpoznaný'
-            : 'Namierte fotoaparát na dokument'
     } catch (reason) {
-        console.error('Document detection failed', reason)
-        detectedCorners = null
-        status.value = 'Namierte fotoaparát na dokument'
+        console.error('Scanic live detection failed', reason)
+        stableDetectionFrames = 0
     } finally {
-        bestContour?.delete()
-        hierarchy.delete()
-        contours.delete()
-        edges.delete()
-        blurred.delete()
-        gray.delete()
-        source.delete()
+        detectionRunning = false
+        const elapsed = performance.now() - startedAt
+        scheduleDetection(Math.max(0, DETECTION_INTERVAL_MS - elapsed))
     }
 }
 
-function pointDistance(first: Point, second: Point) {
-    return Math.hypot(first.x - second.x, first.y - second.y)
+function defaultCorners(canvas: HTMLCanvasElement): CornerPoints {
+    const insetX = canvas.width * 0.07
+    const insetY = canvas.height * 0.07
+
+    return {
+        topLeft: { x: insetX, y: insetY },
+        topRight: { x: canvas.width - insetX, y: insetY },
+        bottomRight: { x: canvas.width - insetX, y: canvas.height - insetY },
+        bottomLeft: { x: insetX, y: canvas.height - insetY },
+    }
 }
 
-function scaleCorners(corners: Corners, scaleX: number, scaleY: number): Corners {
+function cornersForCapture(
+    canvas: HTMLCanvasElement,
+    videoElement: HTMLVideoElement,
+): CornerPoints {
+    const detected = liveCorners.value
+    if (!detected) return defaultCorners(canvas)
+
+    const scaleX = canvas.width / videoElement.videoWidth
+    const scaleY = canvas.height / videoElement.videoHeight
     const scale = (point: Point): Point => ({
         x: point.x * scaleX,
         y: point.y * scaleY,
     })
 
     return {
-        topLeft: scale(corners.topLeft),
-        topRight: scale(corners.topRight),
-        bottomLeft: scale(corners.bottomLeft),
-        bottomRight: scale(corners.bottomRight),
+        topLeft: scale(detected.topLeft),
+        topRight: scale(detected.topRight),
+        bottomRight: scale(detected.bottomRight),
+        bottomLeft: scale(detected.bottomLeft),
     }
 }
 
-function extractDocument(sourceCanvas: HTMLCanvasElement, corners: Corners) {
-    if (!cv) return sourceCanvas
+function destroyCornerEditor() {
+    cornerEditor?.destroy()
+    cornerEditor = null
+}
 
-    const width = Math.max(
-        pointDistance(corners.topLeft, corners.topRight),
-        pointDistance(corners.bottomLeft, corners.bottomRight),
-    )
-    const height = Math.max(
-        pointDistance(corners.topLeft, corners.bottomLeft),
-        pointDistance(corners.topRight, corners.bottomRight),
-    )
-    const outputScale = Math.min(1, 2400 / Math.max(width, height))
-    const outputWidth = Math.max(1, Math.round(width * outputScale))
-    const outputHeight = Math.max(1, Math.round(height * outputScale))
-    const outputCanvas = document.createElement('canvas')
-    const source = cv.imread(sourceCanvas)
-    const result = new cv.Mat()
-    const sourcePoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        corners.topLeft.x,
-        corners.topLeft.y,
-        corners.topRight.x,
-        corners.topRight.y,
-        corners.bottomLeft.x,
-        corners.bottomLeft.y,
-        corners.bottomRight.x,
-        corners.bottomRight.y,
-    ])
-    const destinationPoints = cv.matFromArray(4, 1, cv.CV_32FC2, [
-        0,
-        0,
-        outputWidth,
-        0,
-        0,
-        outputHeight,
-        outputWidth,
-        outputHeight,
-    ])
-    const transform = cv.getPerspectiveTransform(sourcePoints, destinationPoints)
+function mountCornerEditor() {
+    const host = editorHost.value
+    if (!host || !sourceCanvas || !editedCorners.value) return
+
+    destroyCornerEditor()
+    cornerEditor = createCornerEditor({
+        container: host,
+        image: sourceCanvas,
+        corners: editedCorners.value,
+        toolbar: { enabled: false },
+        magnifier: {
+            enabled: true,
+            size: 96,
+            zoom: 2,
+            borderColor: '#22c55e',
+            crosshairColor: '#22c55e',
+        },
+        theme: {
+            accent: '#22c55e',
+            edgeColor: '#22c55e',
+            edgeWidth: 3,
+            handleSize: 24,
+            handleHit: 56,
+            mask: 'rgba(0, 0, 0, 0.48)',
+        },
+        handleHitArea: 56,
+        onChange: (value) => {
+            editedCorners.value = value
+            error.value = ''
+        },
+    })
+}
+
+async function capture() {
+    if (!canCapture.value) return
+
+    const videoElement = video.value
+    if (!videoElement) return
+
+    capturing.value = true
+    pauseDetection()
+    error.value = ''
 
     try {
-        cv.warpPerspective(
-            source,
-            result,
-            transform,
-            new cv.Size(outputWidth, outputHeight),
-            cv.INTER_LINEAR,
-            cv.BORDER_CONSTANT,
-            new cv.Scalar(),
+        const canvas = document.createElement('canvas')
+        const scale = Math.min(
+            1,
+            CAPTURE_MAX_DIMENSION / Math.max(
+                videoElement.videoWidth,
+                videoElement.videoHeight,
+            ),
         )
-        cv.imshow(outputCanvas, result)
+        canvas.width = Math.max(1, Math.round(videoElement.videoWidth * scale))
+        canvas.height = Math.max(1, Math.round(videoElement.videoHeight * scale))
+        const context = canvas.getContext('2d')
+        if (!context) throw new Error('Scan sa nepodarilo vytvoriť.')
 
-        return outputCanvas
+        context.imageSmoothingEnabled = true
+        context.imageSmoothingQuality = 'high'
+        context.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+        sourceCanvas = canvas
+        editedCorners.value = cornersForCapture(canvas, videoElement)
+        reviewing.value = true
+        stream?.getVideoTracks().forEach((track) => {
+            track.enabled = false
+        })
+
+        await nextTick()
+        mountCornerEditor()
+    } catch (reason) {
+        console.error('Document capture failed', reason)
+        error.value = reason instanceof Error
+            ? reason.message
+            : 'Scan sa nepodarilo vytvoriť.'
+        reviewing.value = false
+        sourceCanvas = null
+        stream?.getVideoTracks().forEach((track) => {
+            track.enabled = true
+        })
+        scheduleDetection()
     } finally {
-        transform.delete()
-        destinationPoints.delete()
-        sourcePoints.delete()
-        result.delete()
-        source.delete()
+        capturing.value = false
     }
 }
 
@@ -389,53 +399,67 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
                 ? resolve(blob)
                 : reject(new Error('Scan sa nepodarilo vytvoriť.')),
             'image/jpeg',
-            0.94,
+            0.96,
         )
     })
 }
 
-async function capture() {
-    if (!canCapture.value) return
+async function confirmCapture() {
+    if (!sourceCanvas || capturing.value) return
 
-    const videoElement = video.value
-    const detectionCanvas = detection.value
-    if (!videoElement || !detectionCanvas) return
+    const selectedCorners = cornerEditor?.getCorners() ?? editedCorners.value
+    if (!selectedCorners) return
 
     capturing.value = true
+    error.value = ''
 
     try {
-        const fullCanvas = document.createElement('canvas')
-        fullCanvas.width = videoElement.videoWidth
-        fullCanvas.height = videoElement.videoHeight
-        const context = fullCanvas.getContext('2d')
-        if (!context) throw new Error('Scan sa nepodarilo vytvoriť.')
+        scannerInitialization ??= initializeScanner()
+        await scannerInitialization
 
-        context.drawImage(videoElement, 0, 0, fullCanvas.width, fullCanvas.height)
+        const result = await scanner.extract(sourceCanvas, selectedCorners, {
+            output: 'canvas',
+        })
+        if (
+            !result.success
+            || !(result.output instanceof HTMLCanvasElement)
+        ) {
+            throw new Error(result.message || 'Dokument sa nepodarilo narovnať.')
+        }
 
-        const corners = detectedCorners
-            ? scaleCorners(
-                detectedCorners,
-                fullCanvas.width / detectionCanvas.width,
-                fullCanvas.height / detectionCanvas.height,
-            )
-            : null
-        const result = corners ? extractDocument(fullCanvas, corners) : fullCanvas
-        const blob = await canvasToBlob(result)
+        const blob = await canvasToBlob(result.output)
         const timestamp = Date.now()
-
         emit('captured', new File([blob], `scan-${timestamp}.jpg`, {
             type: 'image/jpeg',
             lastModified: timestamp,
         }))
         close()
     } catch (reason) {
-        console.error('Document capture failed', reason)
+        console.error('Document extraction failed', reason)
         error.value = reason instanceof Error
             ? reason.message
             : 'Scan sa nepodarilo vytvoriť.'
     } finally {
         capturing.value = false
     }
+}
+
+function retake() {
+    destroyCornerEditor()
+    reviewing.value = false
+    sourceCanvas = null
+    editedCorners.value = null
+    liveCorners.value = null
+    detectionConfidence.value = 0
+    stableDetectionFrames = 0
+    missedDetectionFrames = 0
+    error.value = ''
+    autoCaptureArmedAt = performance.now() + 1_000
+    stream?.getVideoTracks().forEach((track) => {
+        track.enabled = true
+    })
+    status.value = 'Namierte fotoaparát na dokument'
+    scheduleDetection(100)
 }
 
 async function toggleTorch() {
@@ -454,110 +478,210 @@ async function toggleTorch() {
     }
 }
 
-function stopCamera() {
+function stopScanner() {
     stopped = true
-
-    if (animationFrame !== null) {
-        window.cancelAnimationFrame(animationFrame)
-        animationFrame = null
-    }
-    if (detectionTimer !== null) {
-        window.clearInterval(detectionTimer)
-        detectionTimer = null
-    }
-
+    pauseDetection()
+    destroyCornerEditor()
+    sourceCanvas = null
     stream?.getTracks().forEach((track) => track.stop())
     stream = null
 }
 
 function close() {
-    stopCamera()
+    stopScanner()
     emit('close')
 }
 
 onMounted(startCamera)
-onBeforeUnmount(stopCamera)
+onBeforeUnmount(stopScanner)
 </script>
 
 <template>
-    <div class="fixed inset-0 z-[10000] flex flex-col bg-black">
-        <div class="relative min-h-0 flex-1 overflow-hidden">
-            <video
-                ref="video"
-                autoplay
-                muted
-                playsinline
-                class="absolute inset-0 h-full w-full object-cover"
-            />
+    <Teleport to="body">
+        <div class="fixed inset-0 z-[10000] flex h-[100dvh] w-screen flex-col bg-black">
+            <div class="relative min-h-0 flex-1 overflow-hidden">
+                <video
+                    v-show="!reviewing"
+                    ref="video"
+                    autoplay
+                    muted
+                    playsinline
+                    webkit-playsinline
+                    class="absolute inset-0 block h-full w-full object-cover"
+                    @loadedmetadata="initializeCamera"
+                    @loadeddata="initializeCamera"
+                    @canplay="initializeCamera"
+                    @playing="initializeCamera"
+                />
 
-            <canvas
-                ref="preview"
-                class="absolute inset-0 h-full w-full object-cover"
-            />
-
-            <canvas ref="detection" class="hidden" />
-
-            <div class="absolute inset-x-0 top-0 flex items-center justify-between p-4">
-                <button
-                    type="button"
-                    class="rounded-md bg-black/55 px-3 py-2 text-normal text-white backdrop-blur-sm"
-                    @click="close"
+                <svg
+                    v-if="!reviewing && liveCorners"
+                    class="pointer-events-none absolute inset-0 h-full w-full"
+                    :viewBox="`0 0 ${videoSize.width} ${videoSize.height}`"
+                    preserveAspectRatio="xMidYMid slice"
+                    aria-hidden="true"
                 >
-                    Zrušiť
-                </button>
+                    <polygon
+                        :points="livePolygonPoints"
+                        fill="rgb(34 197 94 / 0.1)"
+                        stroke="#22c55e"
+                        stroke-width="5"
+                        vector-effect="non-scaling-stroke"
+                    />
+                </svg>
 
-                <button
-                    v-if="torchAvailable"
-                    type="button"
-                    class="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm"
-                    :aria-label="torchEnabled ? 'Vypnúť blesk' : 'Zapnúť blesk'"
-                    @click="toggleTorch"
+                <div
+                    v-if="reviewing"
+                    ref="editorHost"
+                    class="absolute inset-0 touch-none bg-black"
+                />
+
+                <div
+                    v-if="!reviewing"
+                    class="absolute inset-x-0 top-0 flex items-center justify-between p-4"
+                    :style="{
+                        paddingTop: 'max(1rem, env(safe-area-inset-top))',
+                    }"
                 >
-                    <i :class="torchEnabled ? 'bi bi-lightning-fill' : 'bi bi-lightning'" />
-                </button>
+                    <button
+                        type="button"
+                        class="rounded-md bg-black/55 px-3 py-2 text-normal text-white backdrop-blur-sm"
+                        @click="close"
+                    >
+                        Zrušiť
+                    </button>
+
+                    <button
+                        v-if="torchAvailable"
+                        type="button"
+                        class="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm"
+                        :aria-label="torchEnabled ? 'Vypnúť blesk' : 'Zapnúť blesk'"
+                        @click="toggleTorch"
+                    >
+                        <i :class="torchEnabled ? 'bi bi-lightning-fill' : 'bi bi-lightning'" />
+                    </button>
+                </div>
+
+                <div
+                    v-else
+                    class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center bg-gradient-to-b from-black/80 to-transparent p-5 text-center text-normal font-semibold text-white"
+                    :style="{
+                        paddingTop: 'max(1.25rem, env(safe-area-inset-top))',
+                    }"
+                >
+                    Potiahnite zelené rohy na okraje dokumentu
+                </div>
+
+                <div
+                    v-if="error && !reviewing"
+                    class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 px-8 text-center text-white"
+                >
+                    <i class="bi bi-camera-video-off text-3xl" />
+                    <p class="text-normal">{{ error }}</p>
+                    <button
+                        type="button"
+                        class="rounded-md bg-white px-4 py-2 text-normal text-darkgrey"
+                        @click="close"
+                    >
+                        Zavrieť
+                    </button>
+                </div>
+
+                <div
+                    v-else-if="!reviewing"
+                    class="absolute inset-x-4 bottom-5 flex flex-col items-center gap-2 text-center text-normal text-white drop-shadow-md"
+                >
+                    <div class="flex items-center justify-center gap-2">
+                        <i
+                            v-if="loading || !cameraReady || !scannerReady"
+                            class="bi bi-arrow-repeat animate-spin"
+                        />
+                        <span>{{ status }}</span>
+                    </div>
+                    <div
+                        v-if="scannerReady"
+                        class="h-1.5 w-full max-w-64 overflow-hidden rounded-full bg-white/25"
+                    >
+                        <div
+                            class="h-full rounded-full transition-[width,background-color] duration-150"
+                            :class="
+                                detectionConfidence >= 0.9
+                                    ? 'bg-success'
+                                    : 'bg-white'
+                            "
+                            :style="{ width: `${confidencePercent}%` }"
+                        />
+                    </div>
+                    <span
+                        v-if="scannerReady"
+                        class="text-mini text-white/80"
+                    >
+                        Automatické odfotenie pri 90 %
+                    </span>
+                </div>
+
+                <div
+                    v-if="reviewing && error"
+                    class="absolute inset-x-4 bottom-4 z-20 rounded-md bg-danger px-3 py-2 text-center text-mini text-white shadow-lg"
+                >
+                    {{ error }}
+                </div>
             </div>
 
             <div
-                v-if="loading"
-                class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70 text-white"
+                v-if="!reviewing"
+                class="flex min-h-28 shrink-0 items-center justify-center bg-black px-4 pt-4"
+                :style="{
+                    paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+                }"
             >
-                <i class="bi bi-arrow-repeat animate-spin text-xl" />
-                <span class="text-normal">{{ status }}</span>
-            </div>
-
-            <div
-                v-else-if="error"
-                class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 px-8 text-center text-white"
-            >
-                <i class="bi bi-camera-video-off text-3xl" />
-                <p class="text-normal">{{ error }}</p>
                 <button
                     type="button"
-                    class="rounded-md bg-white px-4 py-2 text-normal text-darkgrey"
-                    @click="close"
+                    class="flex h-18 w-18 items-center justify-center rounded-full border-4 border-white disabled:opacity-50"
+                    :disabled="!canCapture"
+                    aria-label="Odfotiť dokument"
+                    @click="capture"
                 >
-                    Zavrieť
+                    <span class="h-14 w-14 rounded-full bg-white" />
                 </button>
             </div>
 
             <div
                 v-else
-                class="absolute inset-x-0 bottom-5 text-center text-normal text-white drop-shadow-md"
+                class="grid min-h-24 shrink-0 grid-cols-2 gap-3 bg-black px-4 pt-4"
+                :style="{
+                    paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
+                }"
             >
-                {{ status }}
+                <button
+                    type="button"
+                    class="rounded-md border border-white/40 bg-white/10 px-4 text-normal font-semibold text-white disabled:opacity-50"
+                    :disabled="capturing"
+                    @click="retake"
+                >
+                    Odfotiť znova
+                </button>
+                <button
+                    type="button"
+                    class="rounded-md bg-white px-4 text-normal font-semibold text-darkgrey disabled:opacity-50"
+                    :disabled="capturing"
+                    @click="confirmCapture"
+                >
+                    <i
+                        v-if="capturing"
+                        class="bi bi-arrow-repeat mr-2 animate-spin"
+                    />
+                    {{ capturing ? 'Spracúvam' : 'Hotovo' }}
+                </button>
             </div>
         </div>
-
-        <div class="flex h-28 shrink-0 items-center justify-center bg-black">
-            <button
-                type="button"
-                class="flex h-18 w-18 items-center justify-center rounded-full border-4 border-white disabled:opacity-50"
-                :disabled="!canCapture"
-                aria-label="Odfotiť dokument"
-                @click="capture"
-            >
-                <span class="h-14 w-14 rounded-full bg-white" />
-            </button>
-        </div>
-    </div>
+    </Teleport>
 </template>
+
+<style scoped>
+:deep(.scanic-corner-editor),
+:deep(.scanic-corner-editor canvas) {
+    width: 100%;
+    height: 100%;
+}
+</style>

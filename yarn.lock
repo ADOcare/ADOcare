@@ -388,11 +388,6 @@
     "@tailwindcss/oxide" "4.1.17"
     tailwindcss "4.1.17"
 
-"@techstark/opencv-js@^4.12.0-release.1":
-  version "4.12.0-release.1"
-  resolved "https://registry.npmjs.org/@techstark/opencv-js/-/opencv-js-4.12.0-release.1.tgz"
-  integrity sha512-LtTaph9v/HqLPXEg3m1xs2h7QJh10pUpuDT0nj8g77lelWnTwwQrehtd+fXElLOdrkqc4Fea6Z/sJBvEJLYPfw==
-
 "@types/estree@^1.0.6", "@types/estree@1.0.8":
   version "1.0.8"
   resolved "https://registry.npmjs.org/@types/estree/-/estree-1.0.8.tgz"
@@ -2236,6 +2231,11 @@ sass@^1.70.0:
     source-map-js ">=0.6.2 <2.0.0"
   optionalDependencies:
     "@parcel/watcher" "^2.4.1"
+
+scanic@^1.7.1:
+  version "1.7.1"
+  resolved "https://registry.npmjs.org/scanic/-/scanic-1.7.1.tgz"
+  integrity sha512-KE2cEtaXClYkqWbu5J1AmQ0O8iGCTT67l32x1Y2MPUAhvnyDK6yMuwF0holU0Izo3+hDsCL7TkG2qpadmewayQ==
 
 scss@^0.2.4:
   version "0.2.4"

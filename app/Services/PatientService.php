@@ -12,9 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class PatientService
 {
-    public function __construct(private EoverenieInsuranceService $insuranceVerification)
-    {
-    }
+    public function __construct(private EoverenieInsuranceService $insuranceVerification) {}
 
     public function queryForUserBranch(User $nurse, Branch $branch): Builder
     {
@@ -39,9 +37,10 @@ class PatientService
                 (string) ($data['personal_number'] ?? '')
             ) ?: null;
             $this->lockPatientIdentity((int) $branch->company_id, $data['personal_number']);
-            $this->assertUniquePersonalNumberWithinCompany(
+            $this->assertNoPatientAssignedToAnotherNurse(
                 $data['personal_number'],
                 (int) $branch->company_id,
+                (int) $data['nurse_id'],
             );
 
             if (is_array($coverageData)) {
@@ -97,9 +96,10 @@ class PatientService
                 $branchId = (int) ($data['branch_id'] ?? $patient->branch_id);
                 $branch = Branch::query()->findOrFail($branchId);
                 $this->lockPatientIdentity((int) $branch->company_id, $data['personal_number']);
-                $this->assertUniquePersonalNumberWithinCompany(
+                $this->assertNoPatientAssignedToAnotherNurse(
                     $data['personal_number'],
                     (int) $branch->company_id,
+                    (int) ($data['nurse_id'] ?? $patient->nurse_id),
                     (int) $patient->id,
                 );
             }
@@ -189,9 +189,10 @@ class PatientService
                 ) ?: null;
 
                 $this->lockPatientIdentity((int) $branch->company_id, $personalNumber);
-                $this->assertUniquePersonalNumberWithinCompany(
+                $this->assertNoPatientAssignedToAnotherNurse(
                     $personalNumber,
                     (int) $branch->company_id,
+                    (int) $patient->nurse_id,
                     (int) $patient->id,
                 );
 
@@ -339,20 +340,23 @@ class PatientService
         );
     }
 
-    private function assertUniquePersonalNumberWithinCompany(
+    private function assertNoPatientAssignedToAnotherNurse(
         ?string $personalNumber,
         int $companyId,
+        int $nurseId,
         ?int $exceptPatientId = null,
     ): void {
         if (! $personalNumber) {
             return;
         }
 
-        $query = Patient::withTrashed()
+        $query = Patient::query()
             ->with('branch')
             ->whereHas('branch', function (Builder $query) use ($companyId) {
                 $query->where('company_id', $companyId);
-            });
+            })
+            ->whereNotNull('nurse_id')
+            ->where('nurse_id', '<>', $nurseId);
 
         if ($exceptPatientId) {
             $query->where('patients.id', '<>', $exceptPatientId);
@@ -360,11 +364,11 @@ class PatientService
 
         if (DB::getDriverName() === 'pgsql') {
             $query->whereRaw(
-                "CASE "
-                . "WHEN COALESCE(personal_number, '') ~ '[[:alpha:]]' "
-                . "THEN upper(regexp_replace(COALESCE(personal_number, ''), '\\s+', '', 'g')) "
-                . "ELSE regexp_replace(COALESCE(personal_number, ''), '[^0-9]', '', 'g') "
-                . 'END = ?',
+                'CASE '
+                ."WHEN COALESCE(personal_number, '') ~ '[[:alpha:]]' "
+                ."THEN upper(regexp_replace(COALESCE(personal_number, ''), '\\s+', '', 'g')) "
+                ."ELSE regexp_replace(COALESCE(personal_number, ''), '[^0-9]', '', 'g') "
+                .'END = ?',
                 [$personalNumber],
             );
             $duplicate = $query->first();
@@ -384,32 +388,21 @@ class PatientService
             : null;
         $workerName = $nurse
             ? trim(
-                ($nurse->title ? $nurse->title . ' ' : '')
-                . $nurse->first_name
-                . ' '
-                . $nurse->last_name
+                ($nurse->title ? $nurse->title.' ' : '')
+                .$nurse->first_name
+                .' '
+                .$nurse->last_name
             )
             : 'bez priradeného pracovníka';
         $branch = $duplicate->branch;
         $branchName = $branch
             ? collect([$branch->code, $branch->city, $branch->address])->filter()->join(' – ')
             : 'bez určenej pobočky';
-        $patientName = trim($duplicate->first_name . ' ' . $duplicate->last_name);
-
-        if ($duplicate->trashed()) {
-            $message = "Pacient {$patientName} s týmto rodným číslom sa nachádza medzi odstránenými "
-                . "pacientmi spoločnosti u pracovníka {$workerName} na pobočke {$branchName}."
-                . ' Nového pacienta nie je možné vytvoriť. Obnovte existujúceho pacienta'
-                . ' v zozname odstránených pacientov.';
-
-            throw ValidationException::withMessages([
-                'personal_number' => [$message],
-            ]);
-        }
+        $patientName = trim($duplicate->first_name.' '.$duplicate->last_name);
 
         $message = "Pacient {$patientName} s týmto rodným číslom je už v spoločnosti "
-            . "evidovaný u pracovníka {$workerName} na pobočke {$branchName}."
-            . ' Požiadajte manažéra, aby pacienta presunul alebo obnovil.';
+            ."evidovaný u pracovníka {$workerName} na pobočke {$branchName}."
+            .' Požiadajte manažéra, aby pacienta presunul.';
 
         throw ValidationException::withMessages([
             'personal_number' => [$message],

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
     createCornerEditor,
     Scanner,
@@ -8,15 +8,29 @@ import {
     type Point,
 } from 'scanic'
 
-const DETECTION_INTERVAL_MS = 100
-const AUTO_CAPTURE_CONFIDENCE = 0.9
-const AUTO_CAPTURE_STABLE_FRAMES = 2
-const CAPTURE_MAX_DIMENSION = 3200
+const props = withDefaults(defineProps<{
+    paused?: boolean
+    galleryFile?: File | null
+    galleryDisabled?: boolean
+}>(), {
+    paused: false,
+    galleryFile: null,
+    galleryDisabled: false,
+})
 
 const emit = defineEmits<{
     captured: [file: File]
-    close: []
+    galleryRequested: []
+    galleryFinished: []
+    galleryError: [message: string]
+    reviewingChange: [reviewing: boolean]
 }>()
+
+const DETECTION_INTERVAL_MS = 300
+const MIN_CONFIDENCE = 0.80
+const STABLE_FRAMES = 2
+const FRAMES_WITHOUT_PAPER_TO_REARM = 6
+const CAPTURE_MAX_DIMENSION = 3200
 
 const video = ref<HTMLVideoElement | null>(null)
 const editorHost = ref<HTMLDivElement | null>(null)
@@ -25,32 +39,41 @@ const cameraReady = ref(false)
 const scannerReady = ref(false)
 const capturing = ref(false)
 const reviewing = ref(false)
+const savedAnimation = ref(false)
 const error = ref('')
-const status = ref('Pripravujem fotoaparát...')
-const torchEnabled = ref(false)
+const status = ref('Zapínam fotoaparát…')
 const torchAvailable = ref(false)
+const torchEnabled = ref(false)
 const liveCorners = ref<CornerPoints | null>(null)
 const editedCorners = ref<CornerPoints | null>(null)
+const reviewSource = ref<'camera' | 'gallery' | null>(null)
 const videoSize = ref({ width: 1, height: 1 })
-const detectionConfidence = ref(0)
 
 const scanner = new Scanner()
-
-let scannerInitialization: Promise<void> | null = null
-let cornerEditor: CornerEditor | null = null
 let stream: MediaStream | null = null
+let editor: CornerEditor | null = null
 let sourceCanvas: HTMLCanvasElement | null = null
+let scannerInitialization: Promise<void> | null = null
+let galleryLoading = false
 let detectionTimer: number | null = null
+let animationTimer: number | null = null
 let detectionRunning = false
-let stableDetectionFrames = 0
-let missedDetectionFrames = 0
-let stopped = false
 let cameraInitialized = false
-let autoCaptureArmedAt = 0
+let stopped = false
+let stableFrames = 0
+let missingFrames = 0
+let candidateCorners: CornerPoints | null = null
+let waitingForNewPage = false
+let captureArmedAt = 0
 
-const canCapture = computed(() => cameraReady.value && !capturing.value && !error.value)
-const confidencePercent = computed(() => Math.round(detectionConfidence.value * 100))
-const livePolygonPoints = computed(() => {
+const canTakePhoto = computed(() =>
+    cameraReady.value && !props.paused && !capturing.value && !reviewing.value && !savedAnimation.value,
+)
+const canOpenGallery = computed(() =>
+    !props.galleryDisabled && !props.paused && !capturing.value && !reviewing.value && !savedAnimation.value,
+)
+
+const polygonPoints = computed(() => {
     const corners = liveCorners.value
     if (!corners) return ''
 
@@ -62,209 +85,155 @@ const livePolygonPoints = computed(() => {
     ].map((point) => `${point.x},${point.y}`).join(' ')
 })
 
-function waitForVideoDimensions(videoElement: HTMLVideoElement) {
-    return new Promise<void>((resolve, reject) => {
-        const startedAt = Date.now()
-
-        const check = () => {
-            if (stopped) {
-                reject(new Error('Skenovanie bolo zrušené.'))
-                return
-            }
-
-            if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
-                resolve()
-                return
-            }
-
-            if (Date.now() - startedAt >= 10_000) {
-                reject(new Error('Fotoaparát neposkytol obraz.'))
-                return
-            }
-
-            window.setTimeout(check, 100)
-        }
-
-        check()
-    })
-}
-
-async function initializeScanner() {
-    try {
-        await scanner.initialize()
-        if (stopped) return
-
-        scannerReady.value = true
-        status.value = 'Namierte fotoaparát na dokument'
-        scheduleDetection()
-    } catch (reason) {
-        console.error('Could not initialize Scanic', reason)
-        status.value = 'Automatické rozpoznávanie nie je dostupné. Dokument môžete odfotiť.'
-    }
-}
-
-async function startCamera() {
-    try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-            throw new Error('Tento prehliadač nepodporuje skenovanie fotoaparátom.')
-        }
-
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 3840 },
-                height: { ideal: 2160 },
-            },
-        })
-
-        if (stopped) {
-            stopScanner()
-            return
-        }
-
-        const videoElement = video.value
-        if (!videoElement) return
-
-        videoElement.srcObject = stream
-        videoElement.muted = true
-        videoElement.playsInline = true
-        loading.value = false
-        status.value = 'Spúšťam obraz z fotoaparátu...'
-        await videoElement.play()
-        await waitForVideoDimensions(videoElement)
-        initializeCamera()
-    } catch (reason) {
-        console.error('Could not start document scanner', reason)
-        error.value = reason instanceof Error
-            ? reason.message
-            : 'Fotoaparát sa nepodarilo spustiť.'
-        status.value = ''
-        loading.value = false
-    }
-}
-
-function initializeCamera() {
-    if (cameraInitialized || stopped) return
-
-    const videoElement = video.value
-    if (!videoElement || videoElement.videoWidth <= 0 || videoElement.videoHeight <= 0) {
-        return
-    }
-
-    cameraInitialized = true
-    const track = stream?.getVideoTracks()[0]
-    const capabilities = track?.getCapabilities?.() as MediaTrackCapabilities & {
-        torch?: boolean
-    }
-    torchAvailable.value = capabilities?.torch === true
-    videoSize.value = {
-        width: videoElement.videoWidth,
-        height: videoElement.videoHeight,
-    }
-    cameraReady.value = true
-    loading.value = false
-    status.value = 'Pripravujem rozpoznávanie dokumentu...'
-    autoCaptureArmedAt = performance.now() + 1_000
-    scannerInitialization = initializeScanner()
-}
-
-function smoothPoint(previous: Point, next: Point): Point {
-    const nextWeight = 0.45
-
-    return {
-        x: previous.x * (1 - nextWeight) + next.x * nextWeight,
-        y: previous.y * (1 - nextWeight) + next.y * nextWeight,
-    }
-}
-
-function smoothCorners(
-    previous: CornerPoints | null,
-    next: CornerPoints,
-): CornerPoints {
-    if (!previous) return next
-
-    return {
-        topLeft: smoothPoint(previous.topLeft, next.topLeft),
-        topRight: smoothPoint(previous.topRight, next.topRight),
-        bottomRight: smoothPoint(previous.bottomRight, next.bottomRight),
-        bottomLeft: smoothPoint(previous.bottomLeft, next.bottomLeft),
-    }
-}
-
-function pauseDetection() {
+function stopDetection() {
     if (detectionTimer !== null) {
         window.clearTimeout(detectionTimer)
         detectionTimer = null
     }
 }
 
-function scheduleDetection(delay = 0) {
-    pauseDetection()
-    if (!scannerReady.value || reviewing.value || capturing.value || stopped) return
-
-    detectionTimer = window.setTimeout(runDetection, delay)
-}
-
-async function runDetection() {
-    detectionTimer = null
-
-    const videoElement = video.value
+function scheduleDetection(delay = DETECTION_INTERVAL_MS) {
+    stopDetection()
     if (
-        !videoElement
-        || reviewing.value
-        || capturing.value
-        || stopped
-        || detectionRunning
-        || document.hidden
-        || videoElement.readyState < 2
+        stopped || props.paused || !scannerReady.value ||
+        reviewing.value || capturing.value || savedAnimation.value
     ) {
-        scheduleDetection(DETECTION_INTERVAL_MS)
         return
     }
 
+    detectionTimer = window.setTimeout(() => {
+        void detectPage()
+    }, delay)
+}
+
+function areaOf(corners: CornerPoints): number {
+    const points = [
+        corners.topLeft,
+        corners.topRight,
+        corners.bottomRight,
+        corners.bottomLeft,
+    ]
+
+    return Math.abs(points.reduce((area, point, index) => {
+        const next = points[(index + 1) % points.length]
+        return area + point.x * next.y - next.x * point.y
+    }, 0)) / 2
+}
+
+function cornersAreSteady(previous: CornerPoints, current: CornerPoints): boolean {
+    const diagonal = Math.hypot(videoSize.value.width, videoSize.value.height)
+    const maxMovement = diagonal * 0.018
+    const keys = ['topLeft', 'topRight', 'bottomRight', 'bottomLeft'] as const
+
+    return keys.every((key) =>
+        Math.hypot(
+            previous[key].x - current[key].x,
+            previous[key].y - current[key].y,
+        ) <= maxMovement,
+    )
+}
+
+function onPaperMissing() {
+    stableFrames = 0
+    candidateCorners = null
+    missingFrames++
+
+    if (missingFrames >= 3) {
+        liveCorners.value = null
+    }
+
+    // A scan is not armed again while the same sheet is still in the viewfinder.
+    if (waitingForNewPage && missingFrames >= FRAMES_WITHOUT_PAPER_TO_REARM) {
+        waitingForNewPage = false
+        captureArmedAt = performance.now() + 350
+    }
+
+    status.value = waitingForNewPage
+        ? 'Ukážte ďalšiu stranu'
+        : 'Ukážte celý papier vo fotoaparáte'
+}
+
+async function detectPage() {
+    detectionTimer = null
+    const element = video.value
+
+    if (
+        stopped || props.paused || reviewing.value || capturing.value ||
+        savedAnimation.value || !element || document.hidden ||
+        element.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+    ) {
+        scheduleDetection(250)
+        return
+    }
+
+    if (detectionRunning) return
     detectionRunning = true
-    const startedAt = performance.now()
 
     try {
-        const result = await scanner.scan(videoElement, { mode: 'detect' })
+        const result = await scanner.scan(element, { mode: 'detect' })
+        if (stopped || props.paused || reviewing.value) return
 
-        if (result.success && result.corners) {
-            const confidence = Math.max(0, Math.min(1, result.confidence ?? 0))
-            liveCorners.value = smoothCorners(liveCorners.value, result.corners)
-            detectionConfidence.value = confidence
-            missedDetectionFrames = 0
-            status.value = `Dokument rozpoznaný na ${Math.round(confidence * 100)} %`
+        if (!result.success || !result.corners) {
+            onPaperMissing()
+            return
+        }
 
-            if (
-                confidence >= AUTO_CAPTURE_CONFIDENCE
-                && performance.now() >= autoCaptureArmedAt
-            ) {
-                stableDetectionFrames++
-                if (stableDetectionFrames >= AUTO_CAPTURE_STABLE_FRAMES) {
-                    stableDetectionFrames = 0
-                    await capture()
-                }
-            } else {
-                stableDetectionFrames = 0
-            }
-        } else {
-            stableDetectionFrames = 0
-            missedDetectionFrames++
-            detectionConfidence.value = 0
+        const confidence = Math.max(0, Math.min(1, result.confidence ?? 0))
+        const corners = result.corners
+        const coverage = areaOf(corners) / (element.videoWidth * element.videoHeight)
+        const isGood = confidence >= MIN_CONFIDENCE && coverage >= 0.15
+        missingFrames = 0
+        liveCorners.value = corners
 
-            if (missedDetectionFrames >= 3) {
-                liveCorners.value = null
-                status.value = 'Namierte fotoaparát na celý dokument'
-            }
+        if (waitingForNewPage) {
+            status.value = 'Strana je pridaná. Odložte ju a ukážte ďalšiu.'
+            return
+        }
+
+        if (!isGood) {
+            stableFrames = 0
+            candidateCorners = null
+            status.value = 'Podržte papier celý v zábere'
+            return
+        }
+
+        status.value = 'Výborne, chvíľu podržte papier…'
+        stableFrames = candidateCorners && cornersAreSteady(candidateCorners, corners)
+            ? stableFrames + 1
+            : 1
+        candidateCorners = corners
+
+        if (stableFrames >= STABLE_FRAMES && performance.now() >= captureArmedAt) {
+            stableFrames = 0
+            candidateCorners = null
+            await captureAutomatically(corners)
         }
     } catch (reason) {
-        console.error('Scanic live detection failed', reason)
-        stableDetectionFrames = 0
+        console.error('Page detection failed', reason)
+        onPaperMissing()
     } finally {
         detectionRunning = false
-        const elapsed = performance.now() - startedAt
-        scheduleDetection(Math.max(0, DETECTION_INTERVAL_MS - elapsed))
+        scheduleDetection()
+    }
+}
+
+function scaledCorners(
+    corners: CornerPoints,
+    canvas: HTMLCanvasElement,
+    element: HTMLVideoElement,
+): CornerPoints {
+    const scaleX = canvas.width / element.videoWidth
+    const scaleY = canvas.height / element.videoHeight
+    const scale = (point: Point): Point => ({
+        x: point.x * scaleX,
+        y: point.y * scaleY,
+    })
+
+    return {
+        topLeft: scale(corners.topLeft),
+        topRight: scale(corners.topRight),
+        bottomRight: scale(corners.bottomRight),
+        bottomLeft: scale(corners.bottomLeft),
     }
 }
 
@@ -280,42 +249,125 @@ function defaultCorners(canvas: HTMLCanvasElement): CornerPoints {
     }
 }
 
-function cornersForCapture(
-    canvas: HTMLCanvasElement,
-    videoElement: HTMLVideoElement,
-): CornerPoints {
-    const detected = liveCorners.value
-    if (!detected) return defaultCorners(canvas)
-
-    const scaleX = canvas.width / videoElement.videoWidth
-    const scaleY = canvas.height / videoElement.videoHeight
-    const scale = (point: Point): Point => ({
-        x: point.x * scaleX,
-        y: point.y * scaleY,
-    })
-
-    return {
-        topLeft: scale(detected.topLeft),
-        topRight: scale(detected.topRight),
-        bottomRight: scale(detected.bottomRight),
-        bottomLeft: scale(detected.bottomLeft),
+function videoFrame(): HTMLCanvasElement {
+    const element = video.value
+    if (!element || !element.videoWidth || !element.videoHeight) {
+        throw new Error('Fotoaparát ešte nie je pripravený.')
     }
+
+    const scale = Math.min(
+        1,
+        CAPTURE_MAX_DIMENSION / Math.max(element.videoWidth, element.videoHeight),
+    )
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(element.videoWidth * scale))
+    canvas.height = Math.max(1, Math.round(element.videoHeight * scale))
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Fotku sa nepodarilo vytvoriť.')
+
+    context.imageSmoothingEnabled = true
+    context.imageSmoothingQuality = 'high'
+    context.drawImage(element, 0, 0, canvas.width, canvas.height)
+    return canvas
 }
 
-function destroyCornerEditor() {
-    cornerEditor?.destroy()
-    cornerEditor = null
+function loadGalleryCanvas(file: File): Promise<HTMLCanvasElement> {
+    return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file)
+        const image = new Image()
+        image.onload = () => {
+            URL.revokeObjectURL(url)
+            const width = image.naturalWidth
+            const height = image.naturalHeight
+            if (width <= 0 || height <= 0) {
+                reject(new Error('Fotka sa nedá otvoriť.'))
+                return
+            }
+
+            const scale = Math.min(1, CAPTURE_MAX_DIMENSION / Math.max(width, height))
+            const canvas = document.createElement('canvas')
+            canvas.width = Math.max(1, Math.round(width * scale))
+            canvas.height = Math.max(1, Math.round(height * scale))
+            const context = canvas.getContext('2d')
+            if (!context) {
+                reject(new Error('Fotku sa nedá otvoriť.'))
+                return
+            }
+            context.imageSmoothingEnabled = true
+            context.imageSmoothingQuality = 'high'
+            context.drawImage(image, 0, 0, canvas.width, canvas.height)
+            resolve(canvas)
+        }
+        image.onerror = () => {
+            URL.revokeObjectURL(url)
+            reject(new Error('Túto fotku sa nepodarilo otvoriť.'))
+        }
+        image.src = url
+    })
 }
 
-function mountCornerEditor() {
-    const host = editorHost.value
-    if (!host || !sourceCanvas || !editedCorners.value) return
+function toBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+        canvas.toBlob(
+            (blob) => blob ? resolve(blob) : reject(new Error('Fotku sa nepodarilo uložiť.')),
+            'image/jpeg',
+            0.95,
+        )
+    })
+}
 
-    destroyCornerEditor()
-    cornerEditor = createCornerEditor({
-        container: host,
-        image: sourceCanvas,
-        corners: editedCorners.value,
+function destroyEditor() {
+    editor?.destroy()
+    editor = null
+}
+
+function enableVideo() {
+    stream?.getVideoTracks().forEach((track) => {
+        track.enabled = true
+    })
+}
+
+function resetReview() {
+    destroyEditor()
+    sourceCanvas = null
+    editedCorners.value = null
+    reviewing.value = false
+    reviewSource.value = null
+    liveCorners.value = null
+    stableFrames = 0
+    candidateCorners = null
+    missingFrames = 0
+    error.value = ''
+    enableVideo()
+    emit('reviewingChange', false)
+    captureArmedAt = performance.now() + 1000
+    scheduleDetection(150)
+}
+
+async function beginReview(
+    canvas: HTMLCanvasElement,
+    corners: CornerPoints,
+    source: 'camera' | 'gallery',
+) {
+    stopDetection()
+    sourceCanvas = canvas
+    editedCorners.value = corners
+    reviewSource.value = source
+    reviewing.value = true
+    error.value = ''
+    stream?.getVideoTracks().forEach((track) => {
+        track.enabled = false
+    })
+    emit('reviewingChange', true)
+
+    await nextTick()
+    if (stopped || !editorHost.value) return
+
+    destroyEditor()
+    editor = createCornerEditor({
+        container: editorHost.value,
+        image: canvas,
+        corners,
         toolbar: { enabled: false },
         magnifier: {
             enabled: true,
@@ -327,12 +379,12 @@ function mountCornerEditor() {
         theme: {
             accent: '#22c55e',
             edgeColor: '#22c55e',
-            edgeWidth: 3,
-            handleSize: 24,
-            handleHit: 56,
-            mask: 'rgba(0, 0, 0, 0.48)',
+            edgeWidth: 2,
+            handleSize: 18,
+            handleHit: 54,
+            mask: 'rgba(0, 0, 0, 0.20)',
         },
-        handleHitArea: 56,
+        handleHitArea: 54,
         onChange: (value) => {
             editedCorners.value = value
             error.value = ''
@@ -340,348 +392,497 @@ function mountCornerEditor() {
     })
 }
 
-async function capture() {
-    if (!canCapture.value) return
-
-    const videoElement = video.value
-    if (!videoElement) return
-
+async function captureAutomatically(corners: CornerPoints) {
+    if (!canTakePhoto.value || waitingForNewPage) return
     capturing.value = true
-    pauseDetection()
+    stopDetection()
     error.value = ''
 
     try {
-        const canvas = document.createElement('canvas')
-        const scale = Math.min(
-            1,
-            CAPTURE_MAX_DIMENSION / Math.max(
-                videoElement.videoWidth,
-                videoElement.videoHeight,
-            ),
-        )
-        canvas.width = Math.max(1, Math.round(videoElement.videoWidth * scale))
-        canvas.height = Math.max(1, Math.round(videoElement.videoHeight * scale))
-        const context = canvas.getContext('2d')
-        if (!context) throw new Error('Scan sa nepodarilo vytvoriť.')
-
-        context.imageSmoothingEnabled = true
-        context.imageSmoothingQuality = 'high'
-        context.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
-        sourceCanvas = canvas
-        editedCorners.value = cornersForCapture(canvas, videoElement)
-        reviewing.value = true
-        stream?.getVideoTracks().forEach((track) => {
-            track.enabled = false
-        })
-
-        await nextTick()
-        mountCornerEditor()
+        const canvas = videoFrame()
+        const element = video.value
+        if (!element) return
+        await beginReview(canvas, scaledCorners(corners, canvas, element), 'camera')
     } catch (reason) {
-        console.error('Document capture failed', reason)
-        error.value = reason instanceof Error
-            ? reason.message
-            : 'Scan sa nepodarilo vytvoriť.'
-        reviewing.value = false
-        sourceCanvas = null
-        stream?.getVideoTracks().forEach((track) => {
-            track.enabled = true
-        })
-        scheduleDetection()
+        console.error('Automatic capture failed', reason)
+        resetReview()
+        status.value = 'Skúste papier vyrovnať alebo ho odfoťte tlačidlom.'
+        captureArmedAt = performance.now() + 1800
+    } finally {
+        capturing.value = false
+        scheduleDetection(350)
+    }
+}
+
+async function captureManually() {
+    if (!canTakePhoto.value) return
+    capturing.value = true
+    stopDetection()
+    error.value = ''
+
+    try {
+        const canvas = videoFrame()
+        const element = video.value
+        const corners = element && liveCorners.value
+            ? scaledCorners(liveCorners.value, canvas, element)
+            : defaultCorners(canvas)
+        await beginReview(canvas, corners, 'camera')
+    } catch (reason) {
+        console.error('Manual capture failed', reason)
+        resetReview()
+        error.value = reason instanceof Error ? reason.message : 'Skúste to znova.'
     } finally {
         capturing.value = false
     }
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-        canvas.toBlob(
-            (blob) => blob
-                ? resolve(blob)
-                : reject(new Error('Scan sa nepodarilo vytvoriť.')),
-            'image/jpeg',
-            0.96,
-        )
-    })
+async function reviewGalleryFile(file: File) {
+    if (stopped || galleryLoading) return
+    galleryLoading = true
+    stopDetection()
+    error.value = ''
+
+    try {
+        const canvas = await loadGalleryCanvas(file)
+        await initializeScanner()
+        if (stopped || props.galleryFile !== file) return
+        const detection = await scanner.scan(canvas, { mode: 'detect' })
+        if (stopped || props.galleryFile !== file) return
+        const corners = detection.success && detection.corners
+            ? detection.corners
+            : defaultCorners(canvas)
+        await beginReview(canvas, corners, 'gallery')
+    } catch (reason) {
+        console.error('Could not open gallery image', reason)
+        if (!stopped && props.galleryFile === file) {
+            emit('galleryError', 'Jednu fotku sa nepodarilo otvoriť. Skúste inú.')
+            resetReview()
+            emit('galleryFinished')
+        }
+    } finally {
+        galleryLoading = false
+    }
+}
+
+function cancelReview() {
+    if (capturing.value) return
+    const wasGallery = reviewSource.value === 'gallery'
+    resetReview()
+    if (wasGallery) {
+        emit('galleryFinished')
+    }
 }
 
 async function confirmCapture() {
-    if (!sourceCanvas || capturing.value) return
-
-    const selectedCorners = cornerEditor?.getCorners() ?? editedCorners.value
-    if (!selectedCorners) return
+    if (capturing.value || !sourceCanvas) return
+    const corners = editor?.getCorners() ?? editedCorners.value
+    if (!corners) return
 
     capturing.value = true
     error.value = ''
-
+    const wasGallery = reviewSource.value === 'gallery'
     try {
-        scannerInitialization ??= initializeScanner()
-        await scannerInitialization
-
-        const result = await scanner.extract(sourceCanvas, selectedCorners, {
-            output: 'canvas',
-        })
-        if (
-            !result.success
-            || !(result.output instanceof HTMLCanvasElement)
-        ) {
-            throw new Error(result.message || 'Dokument sa nepodarilo narovnať.')
+        await initializeScanner()
+        const result = await scanner.extract(sourceCanvas, corners, { output: 'canvas' })
+        if (!result.success || !(result.output instanceof HTMLCanvasElement)) {
+            throw new Error(result.message || 'Fotku sa nepodarilo upraviť. Posuňte rohy a skúste znova.')
         }
 
-        const blob = await canvasToBlob(result.output)
-        const timestamp = Date.now()
-        emit('captured', new File([blob], `scan-${timestamp}.jpg`, {
+        const blob = await toBlob(result.output)
+        if (stopped) return
+        const stamp = Date.now()
+        const file = new File([blob], `strana-${stamp}.jpg`, {
             type: 'image/jpeg',
-            lastModified: timestamp,
-        }))
-        close()
+            lastModified: stamp,
+        })
+        if (!wasGallery) {
+            waitingForNewPage = true
+        }
+        emit('captured', file)
+        resetReview()
+
+        savedAnimation.value = true
+        if (animationTimer !== null) window.clearTimeout(animationTimer)
+        animationTimer = window.setTimeout(() => {
+            savedAnimation.value = false
+            captureArmedAt = performance.now() + 450
+            scheduleDetection(150)
+        }, 700)
+
+        if (wasGallery) {
+            emit('galleryFinished')
+        }
     } catch (reason) {
-        console.error('Document extraction failed', reason)
-        error.value = reason instanceof Error
-            ? reason.message
-            : 'Scan sa nepodarilo vytvoriť.'
+        console.error('Could not finish photo', reason)
+        error.value = 'Fotku sa nepodarilo orezať. Skontrolujte rohy a skúste znova.'
     } finally {
         capturing.value = false
     }
-}
-
-function retake() {
-    destroyCornerEditor()
-    reviewing.value = false
-    sourceCanvas = null
-    editedCorners.value = null
-    liveCorners.value = null
-    detectionConfidence.value = 0
-    stableDetectionFrames = 0
-    missedDetectionFrames = 0
-    error.value = ''
-    autoCaptureArmedAt = performance.now() + 1_000
-    stream?.getVideoTracks().forEach((track) => {
-        track.enabled = true
-    })
-    status.value = 'Namierte fotoaparát na dokument'
-    scheduleDetection(100)
 }
 
 async function toggleTorch() {
     const track = stream?.getVideoTracks()[0]
     if (!track || !torchAvailable.value) return
 
-    const enabled = !torchEnabled.value
-
     try {
+        const enabled = !torchEnabled.value
         await track.applyConstraints({
             advanced: [{ torch: enabled } as MediaTrackConstraintSet],
         })
         torchEnabled.value = enabled
     } catch (reason) {
-        console.error('Could not toggle camera torch', reason)
+        console.error('Could not toggle torch', reason)
     }
+}
+
+function initializeScanner(): Promise<void> {
+    if (!scannerInitialization) {
+        scannerInitialization = scanner.initialize().then(() => {
+            if (stopped) return
+            scannerReady.value = true
+            status.value = 'Ukážte celý papier vo fotoaparáte'
+            scheduleDetection(200)
+        }).catch((reason) => {
+            scannerInitialization = null
+            console.error('Could not initialize Scanic', reason)
+            status.value = 'Môžete použiť tlačidlo Odfotiť.'
+            throw reason
+        })
+    }
+    return scannerInitialization
+}
+
+function syncVideoSize() {
+    const element = video.value
+    if (!element || !element.videoWidth || !element.videoHeight) return
+
+    if (
+        videoSize.value.width !== element.videoWidth ||
+        videoSize.value.height !== element.videoHeight
+    ) {
+        videoSize.value = { width: element.videoWidth, height: element.videoHeight }
+        stableFrames = 0
+        candidateCorners = null
+        liveCorners.value = null
+    }
+}
+
+function initializeCamera() {
+    syncVideoSize()
+    if (cameraInitialized || stopped) return
+    const element = video.value
+    if (!element || !element.videoWidth || !element.videoHeight) return
+
+    cameraInitialized = true
+    cameraReady.value = true
+    loading.value = false
+    const track = stream?.getVideoTracks()[0]
+    const capabilities = track?.getCapabilities?.() as (MediaTrackCapabilities & {
+        torch?: boolean
+    }) | undefined
+    torchAvailable.value = capabilities?.torch === true
+    status.value = 'Pripravujem fotoaparát…'
+    captureArmedAt = performance.now() + 1200
+    void initializeScanner().catch(() => {
+        // The camera can still be used manually if automatic detection fails.
+    })
+}
+
+async function startCamera() {
+    error.value = ''
+    loading.value = true
+    try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            throw new Error('Fotoaparát nie je dostupný. Môžete vybrať fotku z galérie.')
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 3840 },
+                height: { ideal: 2160 },
+            },
+        })
+        if (stopped) {
+            stream.getTracks().forEach((track) => track.stop())
+            stream = null
+            return
+        }
+
+        const element = video.value
+        if (!element) return
+        element.srcObject = stream
+        element.muted = true
+        element.playsInline = true
+        await element.play()
+        initializeCamera()
+    } catch (reason) {
+        console.error('Could not start camera', reason)
+        error.value = 'Fotoaparát sa nedá zapnúť. Skúste to znova alebo vyberte fotky.'
+        loading.value = false
+    }
+}
+
+async function retryCamera() {
+    error.value = ''
+    if (stream && video.value) {
+        try {
+            await video.value.play()
+            initializeCamera()
+            return
+        } catch {
+            stream.getTracks().forEach((track) => track.stop())
+            stream = null
+        }
+    }
+    await startCamera()
 }
 
 function stopScanner() {
     stopped = true
-    pauseDetection()
-    destroyCornerEditor()
-    sourceCanvas = null
+    stopDetection()
+    destroyEditor()
+    if (animationTimer !== null) window.clearTimeout(animationTimer)
     stream?.getTracks().forEach((track) => track.stop())
     stream = null
+    sourceCanvas = null
 }
 
-function close() {
-    stopScanner()
-    emit('close')
-}
+watch(() => props.paused, (paused) => {
+    if (paused) {
+        stopDetection()
+        stableFrames = 0
+        candidateCorners = null
+    } else {
+        captureArmedAt = performance.now() + 450
+        scheduleDetection(150)
+    }
+})
 
-onMounted(startCamera)
+watch(() => props.galleryFile, (file) => {
+    if (file && !stopped) {
+        void reviewGalleryFile(file)
+    }
+}, { immediate: true })
+
+onMounted(() => {
+    void startCamera()
+})
 onBeforeUnmount(stopScanner)
 </script>
 
 <template>
-    <Teleport to="body">
-        <div class="fixed inset-0 z-[10000] flex h-[100dvh] w-screen flex-col bg-black">
-            <div class="relative min-h-0 flex-1 overflow-hidden">
-                <video
-                    v-show="!reviewing"
-                    ref="video"
-                    autoplay
-                    muted
-                    playsinline
-                    webkit-playsinline
-                    class="absolute inset-0 block h-full w-full object-cover"
-                    @loadedmetadata="initializeCamera"
-                    @loadeddata="initializeCamera"
-                    @canplay="initializeCamera"
-                    @playing="initializeCamera"
+    <div class=" overflow-hidden rounded-md bg-black text-white">
+        <div
+            id="scan-preview-anchor"
+            class="relative mx-auto aspect-[9/16] w-full max-w-[43.875dvh] overflow-hidden bg-black"
+        >
+            <video
+                ref="video"
+                autoplay
+                muted
+                playsinline
+                webkit-playsinline
+                class="absolute inset-0 h-full w-full object-cover"
+                @loadedmetadata="initializeCamera"
+                @resize="syncVideoSize"
+                @loadeddata="initializeCamera"
+                @playing="initializeCamera"
+            />
+
+            <svg
+                v-if="!reviewing && liveCorners"
+                class="pointer-events-none absolute inset-0 h-full w-full"
+                :viewBox="`0 0 ${videoSize.width} ${videoSize.height}`"
+                preserveAspectRatio="xMidYMid meet"
+                aria-hidden="true"
+            >
+                <polygon
+                    :points="polygonPoints"
+                    fill="none"
+                    stroke="#22c55e"
+                    stroke-width="2"
+                    vector-effect="non-scaling-stroke"
                 />
+            </svg>
 
-                <svg
-                    v-if="!reviewing && liveCorners"
-                    class="pointer-events-none absolute inset-0 h-full w-full"
-                    :viewBox="`0 0 ${videoSize.width} ${videoSize.height}`"
-                    preserveAspectRatio="xMidYMid slice"
-                    aria-hidden="true"
-                >
-                    <polygon
-                        :points="livePolygonPoints"
-                        fill="rgb(34 197 94 / 0.1)"
-                        stroke="#22c55e"
-                        stroke-width="5"
-                        vector-effect="non-scaling-stroke"
-                    />
-                </svg>
+            <div v-if="reviewing" ref="editorHost" class="absolute inset-0 z-10 touch-none bg-black" />
 
-                <div
-                    v-if="reviewing"
-                    ref="editorHost"
-                    class="absolute inset-0 touch-none bg-black"
-                />
-
-                <div
-                    v-if="!reviewing"
-                    class="absolute inset-x-0 top-0 flex items-center justify-between p-4"
-                    :style="{
-                        paddingTop: 'max(1rem, env(safe-area-inset-top))',
-                    }"
-                >
-                    <button
-                        type="button"
-                        class="rounded-md bg-black/55 px-3 py-2 text-normal text-white backdrop-blur-sm"
-                        @click="close"
-                    >
-                        Zrušiť
-                    </button>
-
-                    <button
-                        v-if="torchAvailable"
-                        type="button"
-                        class="flex h-10 w-10 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm"
-                        :aria-label="torchEnabled ? 'Vypnúť blesk' : 'Zapnúť blesk'"
-                        @click="toggleTorch"
-                    >
-                        <i :class="torchEnabled ? 'bi bi-lightning-fill' : 'bi bi-lightning'" />
-                    </button>
-                </div>
-
-                <div
-                    v-else
-                    class="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center bg-gradient-to-b from-black/80 to-transparent p-5 text-center text-normal font-semibold text-white"
-                    :style="{
-                        paddingTop: 'max(1.25rem, env(safe-area-inset-top))',
-                    }"
-                >
-                    Potiahnite zelené rohy na okraje dokumentu
-                </div>
-
-                <div
-                    v-if="error && !reviewing"
-                    class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 px-8 text-center text-white"
-                >
-                    <i class="bi bi-camera-video-off text-3xl" />
-                    <p class="text-normal">{{ error }}</p>
-                    <button
-                        type="button"
-                        class="rounded-md bg-white px-4 py-2 text-normal text-darkgrey"
-                        @click="close"
-                    >
-                        Zavrieť
-                    </button>
-                </div>
-
-                <div
-                    v-else-if="!reviewing"
-                    class="absolute inset-x-4 bottom-5 flex flex-col items-center gap-2 text-center text-normal text-white drop-shadow-md"
-                >
-                    <div class="flex items-center justify-center gap-2">
-                        <i
-                            v-if="loading || !cameraReady || !scannerReady"
-                            class="bi bi-arrow-repeat animate-spin"
-                        />
-                        <span>{{ status }}</span>
-                    </div>
-                    <div
-                        v-if="scannerReady"
-                        class="h-1.5 w-full max-w-64 overflow-hidden rounded-full bg-white/25"
-                    >
-                        <div
-                            class="h-full rounded-full transition-[width,background-color] duration-150"
-                            :class="
-                                detectionConfidence >= 0.9
-                                    ? 'bg-success'
-                                    : 'bg-white'
-                            "
-                            :style="{ width: `${confidencePercent}%` }"
-                        />
-                    </div>
-                    <span
-                        v-if="scannerReady"
-                        class="text-mini text-white/80"
-                    >
-                        Automatické odfotenie pri 90 %
-                    </span>
-                </div>
-
-                <div
-                    v-if="reviewing && error"
-                    class="absolute inset-x-4 bottom-4 z-20 rounded-md bg-danger px-3 py-2 text-center text-mini text-white shadow-lg"
-                >
-                    {{ error }}
-                </div>
+            <div
+                v-if="loading"
+                class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 text-center"
+            >
+                <i class="bi bi-arrow-repeat animate-spin text-2xl" aria-hidden="true" />
+                <p class="text-normal">Zapínam fotoaparát…</p>
             </div>
 
             <div
-                v-if="!reviewing"
-                class="flex min-h-28 shrink-0 items-center justify-center bg-black px-4 pt-4"
-                :style="{
-                    paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
-                }"
+                v-if="error && !reviewing"
+                class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/80 px-5 text-center"
+                role="alert"
             >
+                <i class="bi bi-camera-video-off text-3xl" aria-hidden="true" />
+                <p class="max-w-sm text-normal">{{ error }}</p>
                 <button
                     type="button"
-                    class="flex h-18 w-18 items-center justify-center rounded-full border-4 border-white disabled:opacity-50"
-                    :disabled="!canCapture"
-                    aria-label="Odfotiť dokument"
-                    @click="capture"
+                    class="mt-2 min-h-11 rounded-md bg-white px-4 text-normal text-darkgrey"
+                    @click="retryCamera"
                 >
-                    <span class="h-14 w-14 rounded-full bg-white" />
+                    Skúsiť znova
                 </button>
             </div>
 
-            <div
-                v-else
-                class="grid min-h-24 shrink-0 grid-cols-2 gap-3 bg-black px-4 pt-4"
-                :style="{
-                    paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
-                }"
+            <Transition name="scan-success">
+                <div
+                    v-if="savedAnimation"
+                    class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-black/25"
+                    role="status"
+                >
+                    <div class="flex items-center gap-3 rounded-md bg-white px-5 py-3 text-darkgrey shadow-xl">
+                        <i class="bi bi-check-circle-fill text-2xl text-accent" aria-hidden="true" />
+                        <span class="text-normal font-semibold">Strana pridaná</span>
+                    </div>
+                </div>
+            </Transition>
+
+            <button
+                v-if="!reviewing && !error && !loading"
+                type="button"
+                class="
+                    absolute
+                    bottom-4
+                    left-1/2
+                    z-20
+                    flex
+                    size-16
+                    -translate-x-1/2
+                    items-center
+                    justify-center
+                    rounded-full
+                    border-4
+                    border-white
+                    bg-black/30
+                    shadow-xl
+                    transition-transform
+                    active:scale-95
+                    disabled:opacity-50
+                "
+                :disabled="!canTakePhoto"
+                aria-label="Odfotiť dokument"
+                title="Odfotiť"
+                @click="captureManually"
             >
+                <span class="size-12 rounded-full bg-white" aria-hidden="true" />
+            </button>
+
+            <button
+                v-if="!reviewing && !error && !loading"
+                type="button"
+                class="
+                    absolute
+                    bottom-[1.625rem]
+                    right-4
+                    z-20
+                    flex
+                    h-11
+                    items-center
+                    justify-center
+                    gap-2
+                    px-3
+                    text-2xl
+                    text-white
+                    disabled:opacity-50
+                "
+                :disabled="!canOpenGallery"
+                @click="emit('galleryRequested')"
+            >
+                <i class="bi bi-images" aria-hidden="true" />
+            </button>
+
+        </div>
+
+        <div
+            v-if="!reviewing && !error"
+            class="flex min-h-16 items-center justify-between gap-3 bg-black px-3 py-3"
+        >
+            <p class="min-w-0 flex-1 text-mini text-white/90" role="status" aria-live="polite">
+                {{ status }}
+            </p>
+            <div class="flex shrink-0 items-center gap-2">
                 <button
+                    v-if="torchAvailable"
                     type="button"
-                    class="rounded-md border border-white/40 bg-white/10 px-4 text-normal font-semibold text-white disabled:opacity-50"
-                    :disabled="capturing"
-                    @click="retake"
+                    class="flex h-11 w-11 items-center justify-center rounded-md bg-white/15 text-white"
+                    :aria-label="torchEnabled ? 'Vypnúť svetlo' : 'Zapnúť svetlo'"
+                    @click="toggleTorch"
                 >
-                    Odfotiť znova
-                </button>
-                <button
-                    type="button"
-                    class="rounded-md bg-white px-4 text-normal font-semibold text-darkgrey disabled:opacity-50"
-                    :disabled="capturing"
-                    @click="confirmCapture"
-                >
-                    <i
-                        v-if="capturing"
-                        class="bi bi-arrow-repeat mr-2 animate-spin"
-                    />
-                    {{ capturing ? 'Spracúvam' : 'Hotovo' }}
+                    <i :class="torchEnabled ? 'bi bi-lightning-fill' : 'bi bi-lightning'" aria-hidden="true" />
                 </button>
             </div>
         </div>
-    </Teleport>
+
+        <div v-if="reviewing" class="flex flex-col gap-2 bg-black px-3 py-3">
+            <p class="text-center text-mini text-white/90">
+                Posuňte rohy na okraje papiera a pridajte stranu.
+            </p>
+            <p v-if="error" class="rounded-md bg-danger px-3 py-2 text-mini text-white" role="alert">{{ error }}</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button
+                    type="button"
+                    class="min-h-12 rounded-md border border-white/40 bg-black/70 px-4 text-normal text-white disabled:opacity-50"
+                    :disabled="capturing"
+                    @click="cancelReview"
+                >
+                    {{ reviewSource === 'gallery' ? 'Preskočiť fotku' : 'Odfotiť znova' }}
+                </button>
+                <button
+                    type="button"
+                    class="min-h-12 rounded-md bg-white px-4 text-normal font-semibold text-darkgrey disabled:opacity-50"
+                    :disabled="capturing"
+                    @click="confirmCapture"
+                >
+                    {{ capturing ? 'Ukladám…' : 'Pridať stranu' }}
+                </button>
+            </div>
+        </div>
+    </div>
 </template>
 
 <style scoped>
+.scan-success-enter-active,
+.scan-success-leave-active {
+    transition: opacity 240ms ease;
+}
+
+.scan-success-enter-from,
+.scan-success-leave-to {
+    opacity: 0;
+}
+
+.scan-success-enter-active > div {
+    animation: scan-confirm 420ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+@keyframes scan-confirm {
+    from { transform: translateY(14px) scale(0.9); }
+    to { transform: translateY(0) scale(1); }
+}
+
 :deep(.scanic-corner-editor),
 :deep(.scanic-corner-editor canvas) {
     width: 100%;
     height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .scan-success-enter-active,
+    .scan-success-leave-active {
+        transition: none;
+    }
+
+    .scan-success-enter-active > div {
+        animation: none;
+    }
 }
 </style>

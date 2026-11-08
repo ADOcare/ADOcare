@@ -52,7 +52,8 @@ final class MonthlyMileageOptimizer
                         continue;
                     }
                     $score = abs($option['distance_m'] - $monthlyAverage)
-                        + 150 * $counts[$id];
+                        + 3500 * $counts[$id]
+                        + $this->nearbyDayPenalty($schedule, $day, $id);
                     if ($score < $pickScore) {
                         $pick = $id;
                         $pickScore = $score;
@@ -79,7 +80,9 @@ final class MonthlyMileageOptimizer
                     continue;
                 }
                 foreach ($options as $id => $option) {
-                    if (!$this->eligible($option, $counts[$id])) {
+                    // A person's day cannot include repeated visits to the
+                    // same address just to accumulate extra kilometres.
+                    if (in_array($id, $ids, true) || !$this->eligible($option, $counts[$id])) {
                         continue;
                     }
                     $nextKm = $total + $option['distance_m'];
@@ -97,8 +100,9 @@ final class MonthlyMileageOptimizer
                     // Large unbalanced days have a gentle penalty; distance
                     // accuracy always dominates when choosing the final result.
                     $imbalance = max(0, $dayMeters[$day] + $option['distance_m'] - $monthlyAverage);
-                    $score = $improvement - 0.25 * $imbalance - 120 * $counts[$id]
-                        - 120 * count($ids);
+                    $score = $improvement - 0.25 * $imbalance - 3500 * $counts[$id]
+                        - 600 * count($ids)
+                        - $this->nearbyDayPenalty($schedule, $day, $id);
                     if ($best === null || $score > $best['score']) {
                         $best = ['id' => $id, 'day' => $day, 'extra' => $extra, 'score' => $score];
                     }
@@ -124,7 +128,9 @@ final class MonthlyMileageOptimizer
             foreach ($schedule as $day => $ids) {
                 foreach ($ids as $slot => $oldId) {
                     foreach ($options as $newId => $option) {
-                        if ($oldId === $newId || !$this->eligible($option, $counts[$newId])) {
+                        if ($oldId === $newId ||
+                            in_array($newId, $ids, true) ||
+                            !$this->eligible($option, $counts[$newId])) {
                             continue;
                         }
                         $newTotal = $total - $options[$oldId]['distance_m'] + $option['distance_m'];
@@ -156,7 +162,7 @@ final class MonthlyMileageOptimizer
         // required to hit a narrow kilometre tolerance. Best valid solution
         // is retained; less-good states are never emitted merely to fit goal.
         $bestSchedule = $schedule;
-        $bestError = abs($total - $targetMeters);
+        $bestScore = abs($total - $targetMeters) + $this->schedulePenalty($schedule);
         $random = $seed & 0x7fffffff;
         $rand = static function (int $bound) use (&$random): int {
             $random = (int) (($random * 1103515245 + 12345) & 0x7fffffff);
@@ -185,6 +191,11 @@ final class MonthlyMileageOptimizer
             if ($action !== 1 && !$this->eligible($options[$newId], $counts[$newId])) {
                 continue;
             }
+            // No duplicate destination within one working day. This applies
+            // to additions AND replacements (not just the initial seed).
+            if ($action !== 1 && in_array($newId, $schedule[$day], true)) {
+                continue;
+            }
             $newMeters = $total + ($action === 1 ? 0 : $options[$newId]['distance_m'])
                 - ($oldId === null ? 0 : $options[$oldId]['distance_m']);
             $newSeconds = $daySeconds[$day]
@@ -198,10 +209,21 @@ final class MonthlyMileageOptimizer
             if ($newMeters < 0 || $newMeters > $maxTotalMeters || $newSeconds > $dailyTimeLimitSeconds) {
                 continue;
             }
-            $oldError = abs($total - $targetMeters);
-            $newError = abs($newMeters - $targetMeters);
+            // The monthly kilometre target is a preference. Penalize
+            // repeatedly scheduling the same address on nearby workdays,
+            // rather than forcing implausible trips to match a number.
+            $oldScore = abs($total - $targetMeters) + $this->schedulePenalty($schedule);
+            $trial = $schedule;
+            if ($action === 0) {
+                $trial[$day][] = $newId;
+            } elseif ($action === 1) {
+                array_splice($trial[$day], $slot, 1);
+            } else {
+                $trial[$day][$slot] = $newId;
+            }
+            $newScore = abs($newMeters - $targetMeters) + $this->schedulePenalty($trial);
             $temperature = max(150.0, 15000.0 * (1 - $iter / $iterations));
-            if ($newError > $oldError && $rand(1000000) / 1000000 > exp(($oldError - $newError) / $temperature)) {
+            if ($newScore > $oldScore && $rand(1000000) / 1000000 > exp(($oldScore - $newScore) / $temperature)) {
                 continue;
             }
             if ($action === 0) {
@@ -217,19 +239,65 @@ final class MonthlyMileageOptimizer
             }
             $total = $newMeters;
             $daySeconds[$day] = $newSeconds;
-            if ($newError < $bestError) {
-                $bestError = $newError;
+            if ($newScore < $bestScore) {
+                $bestScore = $newScore;
                 $bestSchedule = $schedule;
-                if ($bestError <= 20) {
-                    break;
-                }
+                // Do not stop solely because kilometres match: the visit
+                // spacing is also part of the result quality.
             }
         }
         $result = [];
         foreach ($dates as $index => $date) {
             $result[$date] = array_values($bestSchedule[$index]);
+            if (count($result[$date]) !== count(array_unique($result[$date]))) {
+                throw new \LogicException('Repeated destination on one day.');
+            }
         }
         return $result;
+    }
+
+    /**
+     * A soft preference (not a visit ban): consecutive workday repetitions
+     * carry the largest cost; two or three workdays apart are less costly.
+     * All penalties are in metre-equivalent objective units, not exported km.
+     */
+    private function nearbyDayPenalty(array $schedule, int $day, int $id): int
+    {
+        $penalty = 0;
+        foreach ($schedule as $otherDay => $ids) {
+            if ($otherDay === $day || !in_array($id, $ids, true)) {
+                continue;
+            }
+            $gap = abs($otherDay - $day);
+            $penalty += match ($gap) {
+                1 => 30000,
+                2 => 10000,
+                3 => 2000,
+                default => 0,
+            };
+        }
+        return $penalty;
+    }
+
+    private function schedulePenalty(array $schedule): int
+    {
+        $lastSeen = [];
+        $penalty = 0;
+        foreach ($schedule as $day => $ids) {
+            foreach ($ids as $id) {
+                if (isset($lastSeen[$id])) {
+                    $gap = $day - $lastSeen[$id];
+                    $penalty += match ($gap) {
+                        1 => 30000,
+                        2 => 10000,
+                        3 => 2000,
+                        default => 0,
+                    };
+                }
+                $lastSeen[$id] = $day;
+            }
+        }
+        return $penalty;
     }
 
     private function eligible(array $option, int $count): bool

@@ -46,7 +46,11 @@ class GenerateManualMonthlyDzc extends Command
                         static fn (array $stop): bool => ($stop['type'] ?? null) === 'destination'
                     ));
                     $names = implode(' -> ', array_column($stops, 'address'));
-                    $this->line($day['date'] . ': ' . $names . ' | ' . $day['distance_km'] . ' km');
+                    $this->line(
+                        $day['date'] . ' | štart: ' . ($day['planned_start_time'] ?? $day['departure_time'] ?? '--:--') .
+                        ' | návrat: ' . ($day['arrival_time'] ?? '--:--') .
+                        ' | ' . $names . ' | ' . $day['distance_km'] . ' km'
+                    );
                 }
             } else {
                 $destination = $this->option('output-dir') ?: storage_path('app/private/dzc-manual/' . $period);
@@ -68,6 +72,34 @@ class GenerateManualMonthlyDzc extends Command
                 $this->line('Pokryté destinácie: ' . $coverage['distinct_destinations'] . '/' . $coverage['total_destinations']);
                 $this->line('Dostupné pracovné dni: ' . $coverage['available_workdays']);
                 $this->line('Spolu zastávok vrátane opakovaní: ' . $coverage['total_stops']);
+                $analysis = $coverage['candidate_analysis'] ?? null;
+                if ($analysis !== null && $this->output->isVerbose()) {
+                    $this->line('Hodnotené realizovateľné vzory trás: ' . $analysis['evaluated_candidates']);
+                    $parts = [];
+                    foreach ($analysis['candidates_by_stop_count'] as $stops => $count) {
+                        $parts[] = $stops . ' zast.: ' . $count;
+                    }
+                    $this->line('Rozdelenie kandidátov: ' . implode(', ', $parts));
+                    $this->line('Najdlhší hodnotený denný okruh: ' . $analysis['longest_candidate_km'] . ' km');
+                    $this->line('Najdlhší okruh bez obmedzených adries: ' . $analysis['longest_unrestricted_candidate_km'] . ' km');
+                    $this->line('Potrebný priemer na deň: ' . $analysis['required_average_daily_km'] . ' km');
+                    $this->line('Optimistický horný odhad pre kandidátov: ' . $analysis['optimistic_upper_bound_km'] . ' km');
+                }
+                if ($this->option('preview') && !empty($coverage['visits_per_destination'])) {
+                    $this->newLine();
+                    $this->line('Počet navrhnutých návštev podľa adresy:');
+                    foreach ($coverage['visits_per_destination'] as $stop) {
+                        if ($stop['visits'] === 0) {
+                            continue;
+                        }
+                        $limit = $stop['max_visits_per_month'] === null
+                            ? '' : ' (max ' . $stop['max_visits_per_month'] . ')';
+                        $this->line('  ' . ($stop['name'] ?: $stop['address']) . ': ' . $stop['visits'] . $limit);
+                    }
+                    $this->line('Nevyužité destinácie: ' . (
+                        $coverage['total_destinations'] - $coverage['distinct_destinations']
+                    ) . ' (ich návšteva sa nevyžaduje)');
+                }
             }
             foreach ($payload['warnings'] as $warning) {
                 $this->warn($warning);

@@ -316,6 +316,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Dekurz',
                     link: 'dekurz',
+                    documentEditor: true,
                     sidebar: false,
                     navbar: false,
                 },
@@ -327,6 +328,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Návrh na poskytnutie ošetrovateľskej starostlivosti',
                     link: 'návrh',
+                    documentEditor: true,
                     sidebar: false,
                     navbar: false,
                 },
@@ -338,6 +340,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Dohoda o poskytnutí zdravotnej starostlivosti v rozsahu ošetrovateľskej starostlivosti',
                     link: 'dohoda',
+                    documentEditor: true,
                     sidebar: false,
                     navbar: false,
                 },
@@ -349,6 +352,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Ošetrovateľský záznam',
                     link: 'ošetrovateľský záznam',
+                    documentEditor: true,
                     sidebar: false,
                     navbar: false,
                 },
@@ -361,6 +365,7 @@ const generalRoutes: Readonly<RouteRecordRaw[]> = [
                 meta: {
                     title: 'Ošetrovateľská prepúšťacia správa',
                     link: 'prepúšťacia správa',
+                    documentEditor: true,
                     sidebar: false,
                     navbar: false,
                 },

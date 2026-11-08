@@ -210,7 +210,6 @@ const options = computed<DataTableOptions<PatientPointApi>>(() => ({
                         detail: error?.response?.data?.message ?? 'Skúste operáciu zopakovať.',
                         life: 5000,
                     })
-                    throw error
                 }
             },
         },

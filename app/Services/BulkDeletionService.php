@@ -2,10 +2,11 @@
 
 namespace App\Services;
 
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Auth\Access\AuthorizationException;
 
 /**
  * Generic service to perform safe bulk deletions of Eloquent models.
@@ -22,7 +23,9 @@ use Illuminate\Auth\Access\AuthorizationException;
 class BulkDeletionService
 {
     public int $chunkSize;
+
     public int $queueThreshold;
+
     public int $forceSyncMax;
 
     public function __construct(?int $chunkSize = null, ?int $queueThreshold = null, ?int $forceSyncMax = null)
@@ -37,10 +40,8 @@ class BulkDeletionService
      * the method will dispatch the job (caller must handle queued flow) and return ['queued' => true].
      * Otherwise it performs transactional, chunked model deletions and preserves model events.
      *
-     * @param string $modelClass Fully-qualified model class
-     * @param array $ids
-     * @param \Closure|null $onChunk Optional callback invoked per-chunk with (Collection $chunk)
-     * @return array
+     * @param  string  $modelClass  Fully-qualified model class
+     * @param  \Closure|null  $onChunk  Optional callback invoked per-chunk with (Collection $chunk)
      */
     public function delete(string $modelClass, array $ids, ?\Closure $onChunk = null, bool $forceSync = false): array
     {
@@ -49,7 +50,7 @@ class BulkDeletionService
             return ['queued' => false, 'deleted' => 0, 'error' => null];
         }
 
-        if ($count > $this->queueThreshold && !$forceSync) {
+        if ($count > $this->queueThreshold && ! $forceSync) {
             // Caller should dispatch job. We just indicate queued unless forceSync is true.
             return ['queued' => true, 'deleted' => 0, 'error' => null];
         }
@@ -64,8 +65,9 @@ class BulkDeletionService
                         throw new \RuntimeException('Some items not found for delete');
                     }
 
-                    if ($onChunk)
+                    if ($onChunk) {
                         $onChunk($items);
+                    }
 
                     foreach ($items as $item) {
                         $item->delete();
@@ -77,6 +79,7 @@ class BulkDeletionService
             return ['queued' => false, 'deleted' => $deletedCount, 'error' => null];
         } catch (\Throwable $e) {
             Log::warning('BulkDeletionService failed', ['error' => $e->getMessage(), 'ids' => $ids, 'model' => $modelClass]);
+
             return ['queued' => false, 'deleted' => 0, 'error' => $e->getMessage()];
         }
     }
@@ -85,8 +88,6 @@ class BulkDeletionService
      * For queued jobs: process deletions in chunks without trying to re-dispatch job.
      * This method is resilient and will attempt deletes while logging errors per-item.
      *
-     * @param string $modelClass
-     * @param array $ids
      * @return array ['processed' => int, 'failed' => int]
      */
     public function processQueued(string $modelClass, array $ids): array
@@ -115,9 +116,7 @@ class BulkDeletionService
      * Throws AuthorizationException if any item is not deletable by the user.
      * Throws RuntimeException if any id is missing.
      *
-     * @param \App\Models\User $user
-     * @param string $modelClass
-     * @param array $ids
+     * @param  \App\Models\User  $user
      */
     public function authorizeIds($user, string $modelClass, array $ids): void
     {
@@ -128,29 +127,24 @@ class BulkDeletionService
             }
 
             foreach ($items as $item) {
-                if (!Gate::forUser($user)->allows('delete', $item)) {
+                if (! Gate::forUser($user)->allows('delete', $item)) {
                     throw new AuthorizationException('Not allowed to delete some items');
                 }
             }
         }
     }
+
     /**
      * Orchestrator: pure, model-agnostic API to handle a bulk-delete request.
      * Does not emit HTTP responses or dispatch jobs; returns a structured
      * result the controller can map to HTTP responses.
      *
-     * @param \App\Models\User $user
-     * @param string $modelClass
-     * @param array $ids
      * @return array ['queued'=>bool, 'deleted'=>int, 'error'=>string|null]
      */
     /**
      * Handle a bulk-delete request.
      *
-     * @param \App\Models\User $user
-     * @param string $modelClass
-     * @param array $ids
-     * @param bool $preAuthorized  Set true when the caller (FormRequest) already ran per-item authorization.
+     * @param  bool  $preAuthorized  Set true when the caller (FormRequest) already ran per-item authorization.
      * @return array ['queued'=>bool,'deleted'=>int,'error'=>null|'no_ids'|'not_found'|'forbidden'|'internal']
      */
     public function handleBulkDelete(\App\Models\User $user, string $modelClass, array $ids, bool $preAuthorized = false): array
@@ -161,16 +155,18 @@ class BulkDeletionService
         }
 
         // Queue path decision: if above threshold and the user cannot force sync, prepare to queue.
-        if ($count > $this->queueThreshold && !Gate::forUser($user)->allows('forceBulkDelete', $modelClass)) {
-            if (!$preAuthorized) {
+        if ($count > $this->queueThreshold && ! Gate::forUser($user)->allows('forceBulkDelete', $modelClass)) {
+            if (! $preAuthorized) {
                 try {
                     // Lightweight check: ensure items exist and the user can delete them.
                     $this->authorizeIds($user, $modelClass, $ids);
                 } catch (AuthorizationException $e) {
                     Log::warning('BulkDeletionService pre-queue authorization denied', ['model' => $modelClass, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+
                     return ['queued' => false, 'deleted' => 0, 'error' => 'forbidden'];
                 } catch (\Throwable $e) {
                     Log::warning('BulkDeletionService pre-queue check failed', ['model' => $modelClass, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+
                     return ['queued' => false, 'deleted' => 0, 'error' => 'not_found'];
                 }
             }
@@ -190,7 +186,7 @@ class BulkDeletionService
                     }
 
                     foreach ($items as $item) {
-                        if (!Gate::forUser($user)->allows('delete', $item)) {
+                        if (! Gate::forUser($user)->allows('delete', $item)) {
                             throw new AuthorizationException('Not allowed to delete some items');
                         }
                         $item->delete();
@@ -202,12 +198,19 @@ class BulkDeletionService
             return ['queued' => false, 'deleted' => $deleted, 'error' => null];
         } catch (AuthorizationException $e) {
             Log::warning('BulkDeletionService forbidden during sync delete', ['model' => $modelClass, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+
             return ['queued' => false, 'deleted' => 0, 'error' => 'forbidden'];
+        } catch (QueryException $e) {
+            Log::warning('BulkDeletionService database conflict during sync delete', ['model' => $modelClass, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+
+            return ['queued' => false, 'deleted' => 0, 'error' => 'database_conflict'];
         } catch (\RuntimeException $e) {
             Log::warning('BulkDeletionService not found during sync delete', ['model' => $modelClass, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+
             return ['queued' => false, 'deleted' => 0, 'error' => 'not_found'];
         } catch (\Throwable $e) {
             Log::error('BulkDeletionService failed during sync delete', ['model' => $modelClass, 'user_id' => $user->id, 'error' => $e->getMessage()]);
+
             return ['queued' => false, 'deleted' => 0, 'error' => 'internal'];
         }
     }

@@ -139,7 +139,7 @@ export default {
         `
             }),
             dropdown: { class: `${baseNoOutline} border-0! bg-transparent! px-1!` },
-            dropDownIcon: { class: 'text-sm! text-darkgrey!' },
+            dropDownIcon: { class: 'text-sm! text-darkgrey! bi! bi-chevron-down!' },
             label: { class: 'text-normal! text-darkgrey! truncate!' },
             overlay: { class: 'rounded-md! border-0!' },
             header: { class: 'p-2!' },
@@ -355,7 +355,7 @@ export default {
 
         tag: {
             root: {
-                class: 'rounded-md! text-white! px-2! flex items-center gap-1! h-7! text-normal!'
+                class: 'rounded-md! text-white! text-normal! px-2! py-0! flex items-center gap-1!'
             }
         },
             

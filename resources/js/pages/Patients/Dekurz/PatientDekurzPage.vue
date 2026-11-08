@@ -30,7 +30,10 @@ import ScanDocumentContent from '@/components/documents/ScanDocumentContent.vue'
 import { useDocumentEditMode } from '@/composables/useDocumentEditMode'
 
 import PresetMultiDatePicker from '@/components/Date/PresetMultiDatePicker.vue'
+import Dialog from 'primevue/dialog'
 import Popover from 'primevue/popover'
+import Select from 'primevue/select'
+import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { toApiDate } from '@/utils/dateUtils'
 
@@ -80,6 +83,11 @@ const selectedMonth =
         initialMonth,
     )
 
+const selectedCreationMonthKey =
+    ref<string | null>(
+        null,
+    )
+
 const editingDocumentMonthKey =
     ref<string | null>(
         null,
@@ -96,14 +104,7 @@ const dekurzNumber =
 
 const monthKey =
     computed(
-        () =>
-            `${selectedMonth.value.getFullYear()}-${String(
-                selectedMonth.value.getMonth() +
-                    1,
-            ).padStart(
-                2,
-                '0',
-            )}`,
+        () => editingDocumentMonthKey.value ?? selectedCreationMonthKey.value ?? '',
     )
 
 const patientIdRef =
@@ -143,6 +144,26 @@ const {
 
 type TextSection = { id: string; text: string; dates: Date[] }
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+type DateCoverage = {
+    date: string
+    formattedDate: string
+    procedures: string[]
+    procedureCodes: string[]
+    procedureSummary: string
+    selected: boolean
+}
+type DekurzMonthOption = {
+    month: string
+    label: string
+    status: 'issued' | 'ready' | 'timeline_required'
+    document_id: number | null
+    message: string | null
+}
+type SnapshotCoverageDay = {
+    date: string
+    procedures: string[]
+    procedureCodes: string[]
+}
 
 const sections = ref<TextSection[]>([makeSection()])
 const sectionErrors = ref<Record<string, string>>({})
@@ -152,8 +173,16 @@ const snapshotSaveState = ref<SaveState>('idle')
 const snapshotEditMode = ref(false)
 const snapshotEditingDocumentId = ref<number | null>(null)
 const snapshotAvailableDates = ref<string[]>([])
+const snapshotCoverageDays = ref<SnapshotCoverageDay[]>([])
 const snapshotDekurzNumber = ref<string>('')
+const monthOptions = ref<DekurzMonthOption[]>([])
+const loadingMonthOptions = ref(false)
 const loadingAiPrefill = ref(false)
+const loadingSnapshot = ref(false)
+const finalizeConfirmationVisible = ref(false)
+const pendingDekurzNumber = ref<number | null>(null)
+const dateCoverageScroller = ref<HTMLElement | null>(null)
+const timelineCalculationMonth = ref<string | null>(null)
 const improvingSectionById = ref<Record<string, boolean>>({})
 const previousSectionTextById = ref<Record<string, string>>({})
 const sectionsBeforeAiPrefill = ref<TextSection[] | null>(null)
@@ -162,15 +191,24 @@ let patientTextSaveQueue = Promise.resolve(true)
 let draftSectionSaveQueue = Promise.resolve(true)
 let pendingDraftSaves = 0
 let loadToken = 0
+let timelineStatusTimer: ReturnType<typeof setTimeout> | null = null
+let timelineStatusAttempts = 0
+const TIMELINE_CALC_TOAST_GROUP = 'timeline-calculation-toast'
 const draftSectionSaving = ref(false)
 
 const hasDraft = computed(
     () =>
         snapshotEditMode.value ||
         (
-            !!builder.value?.draft &&
-            builder.value.days.length > 0
+            !draftInitializationError.value &&
+            (
+                !!builder.value?.draft &&
+                builder.value.days.length > 0
+            )
         ),
+)
+const hasActiveDekurz = computed(
+    () => snapshotEditMode.value || selectedCreationMonthKey.value !== null,
 )
 const sectionSaveState = computed<SaveState>(() => {
     const draftState = builder.value?.draft ? saveStates.value[`sections-${builder.value.draft.id}`] : undefined
@@ -188,9 +226,14 @@ const maxSectionDate = computed(() => {
     return date && date < monthEnd.value ? date : monthEnd.value
 })
 const disabledDates = computed(() => {
+    const snapshotDates = snapshotEditMode.value
+        ? snapshotAvailableDates.value
+        : []
     const available = new Set([
-        ...(builder.value?.days.map(day => day.date) ?? []),
-        ...(snapshotEditMode.value ? snapshotAvailableDates.value : []),
+        ...(!snapshotEditMode.value && !draftInitializationError.value
+            ? (builder.value?.days.map(day => day.date) ?? [])
+            : []),
+        ...snapshotDates,
     ])
     const dates: Date[] = []
     for (let day = 1; day <= monthEnd.value.getDate(); day++) {
@@ -200,6 +243,74 @@ const disabledDates = computed(() => {
     }
     return dates
 })
+const selectedSectionDates = computed(() => new Set(
+    sections.value.flatMap(section => (
+        section.dates
+            .map(date => toApiDate(date))
+            .filter((date): date is string => date !== null)
+    )),
+))
+const dateCoverage = computed<DateCoverage[]>(() => {
+    if (!snapshotEditMode.value && draftInitializationError.value) return []
+
+    const daysByDate = new Map((builder.value?.days ?? []).map(day => [day.date, day]))
+    const snapshotDaysByDate = new Map(
+        snapshotCoverageDays.value.map(day => [day.date, day]),
+    )
+    const availableDates = new Set([
+        ...(snapshotEditMode.value ? [] : daysByDate.keys()),
+        ...(snapshotEditMode.value ? snapshotAvailableDates.value : []),
+    ])
+
+    return Array.from(availableDates)
+        .sort()
+        .map(date => {
+            const snapshotDay = snapshotDaysByDate.get(date)
+            const entries = daysByDate.get(date)?.entries ?? []
+            const procedures = snapshotEditMode.value
+                ? (snapshotDay?.procedures ?? [])
+                : Array.from(new Set(
+                entries
+                    .map(entry => {
+                        const code = entry.procedure_code?.trim() ?? ''
+                        const name = (
+                            entry.procedure_name ??
+                            entry.track_name
+                        ).trim()
+
+                        if (code && name) return `${code} – ${name}`
+                        return code || name
+                    })
+                    .filter(Boolean),
+                ))
+            const procedureCodes = snapshotEditMode.value
+                ? (snapshotDay?.procedureCodes ?? [])
+                : Array.from(new Set(
+                entries
+                    .map(entry => (
+                        entry.procedure_code?.trim() ||
+                        entry.track_name.trim()
+                        ))
+                    .filter(Boolean),
+            ))
+
+            return {
+                date,
+                formattedDate: new Intl.DateTimeFormat('sk-SK', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                }).format(new Date(`${date}T00:00:00`)),
+                procedures,
+                procedureCodes,
+                procedureSummary: procedures.join(', '),
+                selected: selectedSectionDates.value.has(date),
+            }
+        })
+})
+const missingCoverageDates = computed(() => (
+    dateCoverage.value.filter(day => !day.selected)
+))
 
 function makeSection(text = '', dates: string[] = []): TextSection {
     return { id: crypto.randomUUID(), text, dates: dates.map(date => new Date(`${date}T00:00:00`)) }
@@ -212,9 +323,254 @@ function sectionPayload(): DekurzNarrativeSection[] {
     }))
 }
 
+function scrollDateCoverage(direction: -1 | 1): void {
+    const scroller = dateCoverageScroller.value
+    if (!scroller) return
+
+    scroller.scrollBy({
+        left: direction * Math.max(240, scroller.clientWidth * 0.75),
+        behavior: 'smooth',
+    })
+}
+
 function errorMessage(value: unknown, fallback: string): string {
     const response = (value as { response?: { data?: { message?: string } } })?.response
     return response?.data?.message || (value instanceof Error ? value.message : '') || fallback
+}
+
+async function loadMonthOptions(): Promise<void> {
+    if (!patientId.value) {
+        monthOptions.value = []
+        return
+    }
+
+    loadingMonthOptions.value = true
+    try {
+        const response = await api.get<{ data: DekurzMonthOption[] }>(
+            `/v1/patients/${patientId.value}/dekurz-months`,
+        )
+        monthOptions.value = response.data.data
+    } catch (loadError) {
+        monthOptions.value = []
+        toast.add({
+            severity: 'error',
+            summary: 'Mesiace Dekurzu sa nepodarilo načítať',
+            detail: errorMessage(loadError, 'Skúste stránku načítať znova.'),
+            life: 5000,
+        })
+    } finally {
+        loadingMonthOptions.value = false
+    }
+}
+
+async function selectDekurzMonth(month: string | null): Promise<void> {
+    if (!month) return
+
+    const option = monthOptions.value.find(item => item.month === month)
+    if (!option) return
+
+    if (option.status === 'timeline_required') {
+        await recalculateTimeline(option)
+        return
+    }
+
+    await flushSectionSaves()
+
+    if (option.status === 'issued' && option.document_id) {
+        await router.replace({
+            query: {
+                ...router.currentRoute.value.query,
+                editDocumentId: String(option.document_id),
+            },
+        })
+        await loadDocumentSnapshot(option.document_id)
+        schedulePreview()
+        return
+    }
+
+    const query = { ...router.currentRoute.value.query }
+    delete query.editDocumentId
+    await router.replace({ query })
+    clearSnapshotEditMode()
+    selectedCreationMonthKey.value = month
+    const [year, selectedMonthNumber] = month.split('-').map(Number)
+    selectedMonth.value = new Date(year, selectedMonthNumber - 1, 1)
+    await loadAndInitialize()
+}
+
+async function selectFirstReadyMonth(): Promise<void> {
+    const option = monthOptions.value.find(item => item.status === 'ready')
+    if (option) {
+        await selectDekurzMonth(option.month)
+    }
+}
+
+function stopTimelineStatusPolling(): void {
+    if (timelineStatusTimer) {
+        clearTimeout(timelineStatusTimer)
+        timelineStatusTimer = null
+    }
+}
+
+async function pollTimelineCalculation(
+    option: DekurzMonthOption,
+    requestedAt: string,
+    branchId: number,
+    nurseId: number,
+    requestedPatientId: number,
+): Promise<void> {
+    timelineStatusAttempts++
+
+    try {
+        const response = await api.get('/v1/visits/timeline/status', {
+            params: {
+                month: `${option.month}-01`,
+                branch_id: branchId,
+                user_id: nurseId,
+            },
+        })
+        const status = response.data?.data?.status
+        const completedAt = response.data?.data?.completed_at
+        const isCurrentCompletion =
+            typeof completedAt === 'string' &&
+            new Date(completedAt).getTime() >= new Date(requestedAt).getTime()
+
+        if (status === 'completed' && isCurrentCompletion) {
+            stopTimelineStatusPolling()
+            timelineCalculationMonth.value = null
+            toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+            toast.add({
+                severity: 'success',
+                summary: 'Výpočet dokončený',
+                detail: `Časová os pre ${option.label} bola úspešne vypočítaná.`,
+                life: 5000,
+            })
+
+            if (patientId.value === requestedPatientId) {
+                await loadMonthOptions()
+                const refreshedOption = monthOptions.value.find(
+                    monthOption => monthOption.month === option.month,
+                )
+                if (refreshedOption?.status === 'ready') {
+                    await selectDekurzMonth(option.month)
+                }
+            }
+            return
+        }
+
+        if (status === 'failed') {
+            stopTimelineStatusPolling()
+            timelineCalculationMonth.value = null
+            toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+            toast.add({
+                severity: 'error',
+                summary: 'Chyba výpočtu',
+                detail: response.data?.data?.error_message || 'Časovú os sa nepodarilo vypočítať.',
+                life: 6000,
+            })
+            return
+        }
+    } catch (pollError) {
+        if (timelineStatusAttempts >= 120) {
+            stopTimelineStatusPolling()
+            timelineCalculationMonth.value = null
+            toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+            toast.add({
+                severity: 'error',
+                summary: 'Stav výpočtu sa nepodarilo overiť',
+                detail: errorMessage(pollError, 'Skúste stránku načítať znova.'),
+                life: 6000,
+            })
+            return
+        }
+    }
+
+    if (timelineStatusAttempts >= 120) {
+        stopTimelineStatusPolling()
+        timelineCalculationMonth.value = null
+        toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+        toast.add({
+            severity: 'warn',
+            summary: 'Výpočet pokračuje na pozadí',
+            detail: 'Výpočet trvá dlhšie ako obvykle. Dostupnosť mesiaca skontrolujte neskôr.',
+            life: 6000,
+        })
+        return
+    }
+
+    timelineStatusTimer = setTimeout(() => {
+        void pollTimelineCalculation(
+            option,
+            requestedAt,
+            branchId,
+            nurseId,
+            requestedPatientId,
+        )
+    }, 5000)
+}
+
+async function recalculateTimeline(option: DekurzMonthOption): Promise<void> {
+    if (option.status !== 'timeline_required' || timelineCalculationMonth.value) return
+
+    const branchId = Number(patientStore.current?.branch_id ?? 0)
+    const nurseId = Number(patientStore.current?.nurse_id ?? 0)
+    const requestedPatientId = patientId.value
+
+    if (!branchId || !nurseId || !requestedPatientId) {
+        toast.add({
+            severity: 'error',
+            summary: 'Výpočet sa nedá spustiť',
+            detail: 'Pacient nemá priradenú pobočku alebo sestru.',
+            life: 5000,
+        })
+        return
+    }
+
+    timelineCalculationMonth.value = option.month
+    timelineStatusAttempts = 0
+    stopTimelineStatusPolling()
+
+    try {
+        const response = await api.post('/v1/visits/timeline', {
+            month: `${option.month}-01`,
+            branch_id: branchId,
+            user_id: nurseId,
+            persist: true,
+        })
+        const requestedAt = response.data?.data?.requested_at
+        if (typeof requestedAt !== 'string') {
+            throw new Error('Timeline request timestamp is missing.')
+        }
+
+        toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+        toast.add({
+            group: TIMELINE_CALC_TOAST_GROUP,
+            severity: 'info',
+            summary: 'Prebieha výpočet časovej osi.',
+            detail: `Počítajú sa časy návštev pre ${option.label}.`,
+            life: 0,
+            closable: false,
+        })
+
+        timelineStatusTimer = setTimeout(() => {
+            void pollTimelineCalculation(
+                option,
+                requestedAt,
+                branchId,
+                nurseId,
+                requestedPatientId,
+            )
+        }, 500)
+    } catch (calculationError) {
+        timelineCalculationMonth.value = null
+        toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+        toast.add({
+            severity: 'error',
+            summary: 'Výpočet sa nepodarilo spustiť',
+            detail: errorMessage(calculationError, 'Skúste to znova.'),
+            life: 6000,
+        })
+    }
 }
 
 async function fetchPatientTexts(id: number): Promise<string[] | null> {
@@ -292,35 +648,104 @@ async function loadDocumentSnapshot(documentId: number) {
     }
 
     const savedSections = snapshotSections(payload)
+    const snapshotDays = Array.isArray(payload.days)
+        ? payload.days as Array<Record<string, any>>
+        : []
     sections.value = (savedSections.length ? savedSections : [{ text: '', dates: [] }])
         .map(section => makeSection(section.text, section.dates))
     snapshotAvailableDates.value = Array.from(new Set([
         ...savedSections.flatMap(section => section.dates),
-        ...(Array.isArray(payload.days)
-            ? payload.days.map((day: Record<string, any>) => String(day?.date ?? '').slice(0, 10))
-            : []),
+        ...snapshotDays.map(day => String(day?.date ?? '').slice(0, 10)),
     ].filter(Boolean)))
+    snapshotCoverageDays.value = snapshotDays
+        .map(day => {
+            const entries = Array.isArray(day.entries)
+                ? day.entries as Array<Record<string, any>>
+                : []
+            const procedures = Array.from(new Set(entries.map(entry => {
+                const procedure = entry.procedure as Record<string, any> | null
+                const code = String(procedure?.code ?? '').trim()
+                const name = String(
+                    procedure?.description ??
+                    entry.track_name ??
+                    entry.custom_track?.name ??
+                    '',
+                ).trim()
+                if (code && name) return `${code} – ${name}`
+                return code || name
+            }).filter(Boolean)))
+            const procedureCodes = Array.from(new Set(entries.map(entry => {
+                const procedure = entry.procedure as Record<string, any> | null
+                return String(
+                    procedure?.code ??
+                    entry.track_name ??
+                    entry.custom_track?.name ??
+                    '',
+                ).trim()
+            }).filter(Boolean)))
+
+            return {
+                date: String(day?.date ?? '').slice(0, 10),
+                procedures,
+                procedureCodes,
+            }
+        })
+        .filter(day => day.date !== '')
     snapshotDekurzNumber.value = String(payload.dekurz_number ?? '')
     dekurzNumber.value = snapshotDekurzNumber.value
+    draftInitializationError.value = ''
+    builder.value = null
     snapshotEditingDocumentId.value = documentId
     snapshotEditMode.value = true
     editingDocumentMonthKey.value = documentMonth
+    selectedCreationMonthKey.value = null
     sectionErrors.value = {}
     previousSectionTextById.value = {}
     sectionsBeforeAiPrefill.value = null
 
-    if (monthKey.value !== documentMonth) {
-        const [year, month] = documentMonth.split('-').map(Number)
-        selectedMonth.value = new Date(year, month - 1, 1)
-    }
+    const [year, month] = documentMonth.split('-').map(Number)
+    selectedMonth.value = new Date(year, month - 1, 1)
 }
 
 function clearSnapshotEditMode() {
     snapshotEditMode.value = false
     snapshotEditingDocumentId.value = null
     snapshotAvailableDates.value = []
+    snapshotCoverageDays.value = []
     snapshotDekurzNumber.value = ''
     snapshotSaveState.value = 'idle'
+    editingDocumentMonthKey.value = null
+}
+
+function resetUnselectedCreationState(): void {
+    clearSnapshotEditMode()
+    selectedCreationMonthKey.value = null
+    builder.value = null
+    sections.value = [makeSection()]
+    sectionErrors.value = {}
+    draftInitializationError.value = ''
+    previewHtml.value = ''
+    previewError.value = null
+    isPreviewLoading.value = false
+    isPreviewPaginationReady.value = false
+}
+
+async function openDocumentSnapshot(documentId: number): Promise<void> {
+    loadingSnapshot.value = true
+    error.value = ''
+
+    try {
+        await loadDocumentSnapshot(documentId)
+        schedulePreview()
+    } catch (snapshotError) {
+        clearSnapshotEditMode()
+        error.value = errorMessage(
+            snapshotError,
+            'Vybraný Dekurz sa nepodarilo načítať.',
+        )
+    } finally {
+        loadingSnapshot.value = false
+    }
 }
 
 async function syncEditModeWithLoadedDraft() {
@@ -900,6 +1325,14 @@ async function loadAndInitialize() {
     await flushSectionSaves()
     if (token !== loadToken) return
 
+    if (
+        snapshotEditMode.value &&
+        editingDocumentMonthKey.value === monthKey.value
+    ) {
+        schedulePreview()
+        return
+    }
+
     const id = patientId.value
     if (!id || !monthKey.value) {
         loadingTexts.value = false
@@ -911,16 +1344,6 @@ async function loadAndInitialize() {
 
     try {
         await load()
-
-        if (
-            token === loadToken &&
-            snapshotEditMode.value &&
-            editingDocumentMonthKey.value === monthKey.value
-        ) {
-            dekurzNumber.value = snapshotDekurzNumber.value
-            schedulePreview()
-            return
-        }
 
         if (
             token === loadToken &&
@@ -967,7 +1390,7 @@ async function loadAndInitialize() {
 /* Mutations                                                                  */
 /* -------------------------------------------------------------------------- */
 
-async function handleFinalize() {
+function validateFinalizeContent(): boolean {
     const errors: Record<string, string> = {}
     for (const section of sections.value) {
         if (!section.text.trim()) errors[`${section.id}-text`] = 'Text sekcie je povinný.'
@@ -975,7 +1398,55 @@ async function handleFinalize() {
         if (!section.dates.length) errors[`${section.id}-dates`] = 'Vyberte aspoň jeden dátum.'
     }
     sectionErrors.value = errors
-    if (Object.keys(errors).length || !await persistSections()) return
+    if (Object.keys(errors).length) return false
+
+    if (missingCoverageDates.value.length) {
+        toast.add({
+            severity: 'warn',
+            summary: 'Nie všetky dni majú priradený text',
+            detail: `Chýbajú dátumy: ${missingCoverageDates.value
+                .map(day => day.formattedDate)
+                .join(', ')}.`,
+            life: 6000,
+        })
+        return false
+    }
+
+    return true
+}
+
+async function requestFinalize(): Promise<void> {
+    if (!validateFinalizeContent()) return
+
+    if (snapshotEditMode.value) {
+        await handleFinalize()
+        return
+    }
+
+    const suggestedNumber = Number(dekurzNumber.value)
+    pendingDekurzNumber.value = Number.isInteger(suggestedNumber) && suggestedNumber > 0
+        ? suggestedNumber
+        : null
+    finalizeConfirmationVisible.value = true
+}
+
+async function confirmFinalize(): Promise<void> {
+    if (
+        pendingDekurzNumber.value === null ||
+        !Number.isInteger(pendingDekurzNumber.value) ||
+        pendingDekurzNumber.value < 1
+    ) {
+        return
+    }
+
+    dekurzNumber.value = String(pendingDekurzNumber.value)
+    finalizeConfirmationVisible.value = false
+    await handleFinalize()
+}
+
+async function handleFinalize() {
+    if (!validateFinalizeContent()) return
+    if (!await persistSections()) return
 
     if (snapshotEditMode.value && snapshotEditingDocumentId.value) {
         toast.add({
@@ -1052,35 +1523,6 @@ async function reloadDekurz() {
 /* -------------------------------------------------------------------------- */
 
 watch(
-    monthKey,
-    async newMonthKey => {
-        if (
-            isEditingDocument.value &&
-            editingDocumentMonthKey.value &&
-            newMonthKey !== editingDocumentMonthKey.value
-        ) {
-            await flushSectionSaves()
-
-            const query = {
-                ...router.currentRoute.value.query,
-            }
-
-            delete query.editDocumentId
-
-            await router.replace({
-                query,
-            })
-
-            editingDocumentMonthKey.value =
-                null
-            clearSnapshotEditMode()
-        }
-
-        await loadAndInitialize()
-    },
-)
-
-watch(
     patientIdRef,
     async () => {
         dekurzNumber.value =
@@ -1090,7 +1532,33 @@ watch(
                     '',
             )
 
-        await loadAndInitialize()
+        if (editDocumentId.value) {
+            const query = { ...router.currentRoute.value.query }
+            delete query.editDocumentId
+            await router.replace({ query })
+        }
+
+        resetUnselectedCreationState()
+        await loadMonthOptions()
+        await selectFirstReadyMonth()
+    },
+)
+
+watch(
+    editDocumentId,
+    async (documentId, previousDocumentId) => {
+        if (documentId === previousDocumentId) return
+
+        if (documentId) {
+            await openDocumentSnapshot(documentId)
+            return
+        }
+
+        if (previousDocumentId) {
+            resetUnselectedCreationState()
+            await loadMonthOptions()
+            await selectFirstReadyMonth()
+        }
     },
 )
 
@@ -1123,23 +1591,22 @@ watch(
 
 onMounted(
     async () => {
-        let selectedDocumentChangedMonth = false
-
         if (editDocumentId.value) {
-            const previousMonth = monthKey.value
-            await loadDocumentSnapshot(editDocumentId.value)
-            selectedDocumentChangedMonth = previousMonth !== monthKey.value
+            await openDocumentSnapshot(editDocumentId.value)
+        } else {
+            resetUnselectedCreationState()
+            await loadMonthOptions()
+            await selectFirstReadyMonth()
         }
 
         await loadMacros()
-
-        if (!selectedDocumentChangedMonth) {
-            await loadAndInitialize()
-        }
     },
 )
 
 onBeforeUnmount(() => {
+    stopTimelineStatusPolling()
+    toast.removeGroup(TIMELINE_CALC_TOAST_GROUP)
+
     if (saveTimer) {
         clearTimeout(saveTimer)
         void persistSections()
@@ -1266,10 +1733,13 @@ onBeforeUnmount(() => {
                 <LoadingOverlay
                     :show="
                         loading ||
-                        initializing
+                        initializing ||
+                        loadingSnapshot
                     "
                     :text="
-                        initializing
+                        loadingSnapshot
+                            ? 'Načítavam uložený Dekurz…'
+                            : initializing
                             ? 'Pripravujem koncept…'
                             : 'Načítavam Dekurz…'
                     "
@@ -1347,30 +1817,175 @@ onBeforeUnmount(() => {
                                 gap-8
                             "
                         >
-                            <div class="grid grid-cols-12 gap-4">
-                                <FormField label="Mesiac dekurzu" class="col-span-6">
-                                    <DatePicker
-                                        v-model="selectedMonth"
-                                        view="month"
-                                        dateFormat="mm/yy"
-                                        :showIcon="false"
-                                        class="w-full"
-                                        inputClass="w-full! cursor-pointer! border-none!"
-                                    />
-                                </FormField>
+                            <div
+                                v-if="!isEditingDocument"
+                                class="grid grid-cols-12 gap-4"
+                            >
+                                <FormField label="Mesiac dekurzu" class="col-span-12">
+                                    <Select
+                                        :modelValue="selectedCreationMonthKey"
+                                        :options="monthOptions"
+                                        optionLabel="label"
+                                        optionValue="month"
+                                        :loading="loadingMonthOptions"
+                                        placeholder="Vyberte mesiac"
+                                        class="w-full border-0!"
+                                        @update:modelValue="selectDekurzMonth"
+                                    >
+                                        <template #option="{ option }">
+                                            <div class="flex w-full items-center justify-between gap-3">
+                                                <span>{{ option.label }}</span>
+                                                <Tag
+                                                    v-if="option.status === 'issued'"
+                                                    value="Vytvorený"
+                                                    class="bg-darkgrey!"
+                                                />
+                                                <Tag
+                                                    v-else-if="option.status === 'ready'"
+                                                    value="Pripravený"
+                                                    class="bg-darkgrey!"   
+                                                />
+                                                <div v-else class="flex flex-wrap items-center gap-2">
+                                                    <AppButton
+                                                        type="button"
+                                                        variant="text"
+                                                        label="Prepočítať časy"
+                                                        :loading="timelineCalculationMonth === option.month"
+                                                        :disabled="timelineCalculationMonth !== null"
+                                                        @pointerdown.stop
+                                                        @mousedown.stop
+                                                        @click.stop.prevent="recalculateTimeline(option)"
+                                                    />
 
-                                <FormField label="Číslo dekurzu" class="col-span-6">
-                                    <InputText
-                                        v-model="dekurzNumber"
-                                        class="w-full cursor-default border-0! bg-tag3!"
-                                    />
+                                                    <Tag
+                                                        value="Nepripravený"
+                                                        class="bg-darkgrey!"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </Select>
                                 </FormField>
                             </div>
 
-                            <div
-                                v-if="!hasDraft"
-                                class="flex items-start gap-3 rounded-md bg-danger p-4"
-                            >
+                            <template v-if="hasActiveDekurz">
+                                <section
+                                    v-if="dateCoverage.length"
+                                >
+                                
+                                    <div class="mb-2 flex items-center justify-between gap-3">
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-normal">
+                                                Pokrytie dní
+                                            </span>
+                                        </div>
+
+                                        <div class="flex items-center gap-4 text-mini">
+                                            <span class="flex items-center gap-1 text-success">
+                                                <i class="bi bi-check-circle-fill" aria-hidden="true" />
+                                                Vybrané {{ dateCoverage.length - missingCoverageDates.length }}
+                                            </span>
+                                            <span
+                                                v-if="missingCoverageDates.length"
+                                                class="flex items-center gap-1 text-danger"
+                                            >
+                                                <i class="bi bi-exclamation-circle-fill" aria-hidden="true" />
+                                                Chýba {{ missingCoverageDates.length }}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        ref="dateCoverageScroller"
+                                        class="flex scroll-smooth gap-2 overflow-x-auto pb-1"
+                                    >
+                                        <div
+                                            v-for="day in dateCoverage"
+                                            :key="day.date"
+                                            class="
+                                                flex
+                                                flex-none
+                                                flex-col
+                                                gap-2
+                                                rounded-md
+                                                px-2
+                                                py-2
+                                            "
+                                            :class="
+                                                day.selected
+                                                    ? 'bg-success'
+                                                    : 'bg-danger'
+                                            "
+                                            :title="
+                                                day.procedureSummary ||
+                                                'Bez priradeného výkonu'
+                                            "
+                                        >
+                                            <div class="flex items-center justify-between gap-2">
+                                                <span class="text-normal text-white">
+                                                    {{ day.formattedDate }}
+                                                </span>
+                                            </div>
+
+                                            <div class="flex flex-col gap-1">
+                                                <Tag
+                                                    v-for="procedureCode in day.procedureCodes"
+                                                    :key="procedureCode"
+                                                    class="bg-white! w-fit"
+                                                    :pt="{ label: { class: 'text-darkgrey!' } }"
+                                                    :value="procedureCode"
+                                                />
+
+                                                <Tag
+                                                    v-if="!day.procedureCodes.length"
+                                                    class="bg-darkgrey!"
+                                                >
+                                                    Bez výkonu
+                                                </Tag>
+                                            </div>
+                                        </div>
+                                        </div>
+                                             <div class="items-center gap-4 flex justify-end mt-2">
+                                                <button
+                                                    type="button"
+                                                    class="
+                                                        flex
+                                                        cursor-pointer
+                                                        items-center
+                                                        justify-center
+                                                        text-darkgrey
+                                                        text-normal
+                                                    "
+                                                    aria-label="Posunúť dni doľava"
+                                                    title="Predchádzajúce dni"
+                                                    @click="scrollDateCoverage(-1)"
+                                                >
+                                                    <i class="bi bi-chevron-left" aria-hidden="true" />
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    class="
+                                                        flex
+                                                        cursor-pointer
+                                                        items-center
+                                                        justify-center
+                                                        text-darkgrey
+                                                        text-normal
+                                                    "
+                                                    aria-label="Posunúť dni doprava"
+                                                    title="Nasledujúce dni"
+                                                    @click="scrollDateCoverage(1)"
+                                                >
+                                                    <i class="bi bi-chevron-right" aria-hidden="true" />
+                                                </button>
+                                        </div>
+                                </section>
+
+                                <div
+                                    v-if="!hasDraft"
+                                    class="flex items-start gap-3 rounded-md bg-danger p-4"
+                                >
                                 <i class="bi bi-clock-history mt-0.5 text-white" />
                                 <div class="min-w-0 flex-1">
                                     <p class="text-normal font-medium text-white">
@@ -1380,10 +1995,10 @@ onBeforeUnmount(() => {
                                         {{ draftInitializationError || 'Kontrolujem vypočítané časy návštev.' }}
                                     </p>
                                 </div>
-                            </div>
+                                </div>
 
-                            <section v-for="(section) in sections" :key="section.id"
-                                class="flex flex-col gap-4 rounded-md bg-white p-4">
+                                <section v-for="(section) in sections" :key="section.id"
+                                    class="flex flex-col gap-4 rounded-md bg-white p-4">
                                 <FormField label="Text dekurzu" :error="sectionErrors[`${section.id}-text`]">
                                     <div class="relative">
                                         <Textarea v-model="section.text" rows="8" autoResize class="w-full pb-12!"
@@ -1460,9 +2075,9 @@ onBeforeUnmount(() => {
                                         @click="addSection(section.id)"
                                     />
                                 </div>
-                            </section>
+                                </section>
 
-                            <Popover ref="macroPopover" @hide="macroSectionId = null">
+                                <Popover ref="macroPopover" @hide="macroSectionId = null">
                                 <div class="flex w-70 max-w-[calc(100vw-2rem)] flex-col gap-2">
                                     <div v-if="!macros.length" class="px-2 py-3 text-mini text-darkgrey/60">
                                         Nemáte žiadne makrá. Vytvorte si ich v
@@ -1477,9 +2092,9 @@ onBeforeUnmount(() => {
                                         </button>
                                     </div>
                                 </div>
-                            </Popover>
+                                </Popover>
 
-                            <div class="flex items-center justify-end gap-2">
+                                <div class="flex items-center justify-end gap-2">
                                 <AppButton 
                                     type="button" 
                                     variant="accent"
@@ -1507,9 +2122,10 @@ onBeforeUnmount(() => {
                                     :label="snapshotEditMode ? 'Aktualizovať dokument' : builder?.draft?.final_document_id ? 'Znovu vygenerovať dokument' : 'Generovať dokument'"
                                     :loading="finalizing"
                                     :disabled="!hasDraft || sectionsLocked || isPreviewLoading || !isPreviewPaginationReady || sectionSaveState === 'saving'"
-                                    @click="handleFinalize"
+                                    @click="requestFinalize"
                                 />
-                            </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </section>
@@ -1533,11 +2149,56 @@ onBeforeUnmount(() => {
                     :html="previewHtml"
                     :loading="isPreviewLoading"
                     :error="previewError"
-                    title="Náhľad Dekurzu"
+                    :title="previewHtml ? 'Náhľad Dekurzu' : ''"
                     @page-count-change="handlePreviewPageCountChange"
                 />
             </section>
         </div>
-    </div>
 
+        <Dialog
+            v-if="!snapshotEditMode"
+            v-model:visible="finalizeConfirmationVisible"
+            modal
+            :closable="!finalizing"
+            :dismissableMask="!finalizing"
+            header="Potvrdenie čísla dekurzu"
+            :style="{ width: 'min(440px, 94vw)' }"
+        >
+            <div class="flex flex-col gap-5">
+                <FormField label="Potvrďte číslo dekurzu">
+                    <InputNumber
+                        v-model="pendingDekurzNumber"
+                        :min="1"
+                        :maxFractionDigits="0"
+                        :useGrouping="false"
+                        autofocus
+                        class="w-full"
+                        inputClass="w-full"
+                        @keyup.enter="confirmFinalize"
+                    />
+                </FormField>
+            </div>
+
+            <template #footer>
+                <div class="flex w-full justify-end gap-2">
+                    <AppButton
+                        type="button"
+                        variant="text"
+                        label="Zrušiť"
+                        :disabled="finalizing"
+                        @click="finalizeConfirmationVisible = false"
+                    />
+
+                    <AppButton
+                        type="button"
+                        variant="accent"
+                        label="Generovať dokument"
+                        :loading="finalizing"
+                        :disabled="pendingDekurzNumber === null || pendingDekurzNumber < 1"
+                        @click="confirmFinalize"
+                    />
+                </div>
+            </template>
+        </Dialog>
+    </div>
 </template>

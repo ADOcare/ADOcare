@@ -14,7 +14,7 @@ class InitializeDekurzDraftRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'month' => ['required', 'date_format:Y-m'],
+            'month' => ['required', 'date_format:Y-m', 'after_or_equal:2026-08'],
         ];
     }
 }

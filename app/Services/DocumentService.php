@@ -6,6 +6,7 @@ use App\Http\Filters\ApiQuery;
 use App\Mail\GenericEmail;
 use App\Models\Branch;
 use App\Models\Company;
+use App\Models\DekurzDraft;
 use App\Models\Document;
 use App\Models\InsuranceCompany;
 use App\Models\Invoice;
@@ -14,6 +15,8 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
@@ -246,11 +249,22 @@ class DocumentService
         return true;
     }
 
+    public function deleteDocumentRecord(Document $document): void
+    {
+        DB::transaction(function () use ($document): void {
+            $this->reopenDekurzDraftsForDocuments(collect([$document]));
+            $document->delete();
+        });
+    }
+
     public function deleteManyDocumentsWithAssets(array $ids): void
     {
         $documents = Document::query()->whereIn('id', $ids)->get();
 
-        Document::whereIn('id', $documents->modelKeys())->delete();
+        DB::transaction(function () use ($documents): void {
+            $this->reopenDekurzDraftsForDocuments($documents);
+            Document::whereIn('id', $documents->modelKeys())->delete();
+        });
 
         foreach ($documents as $document) {
             if (! $document instanceof Document) {
@@ -273,6 +287,30 @@ class DocumentService
                 ]);
             }
         }
+    }
+
+    /** @param Collection<int, Document> $documents */
+    private function reopenDekurzDraftsForDocuments(Collection $documents): void
+    {
+        $dekurzDocumentIds = $documents
+            ->where('type', 'dekurz')
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+
+        if ($dekurzDocumentIds === []) {
+            return;
+        }
+
+        DekurzDraft::query()
+            ->whereIn('final_document_id', $dekurzDocumentIds)
+            ->update([
+                'status' => DekurzDraft::STATUS_DRAFT,
+                'final_document_id' => null,
+                'completed_at' => null,
+                'updated_at' => now(),
+            ]);
     }
 
     public function documentExists(array $data, int $userId): array

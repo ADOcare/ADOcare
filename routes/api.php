@@ -516,6 +516,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware(['role:any', 'can:update,patient']);
     Route::get('/patients/{patient}/dekurz-builder', [DekurzV2Controller::class, 'builder'])
         ->middleware(['role:any', 'can:view,patient']);
+    Route::get('/patients/{patient}/dekurz-months', [DekurzV2Controller::class, 'months'])
+        ->middleware(['role:any', 'can:view,patient']);
     Route::post('/patients/{patient}/dekurz-drafts', [DekurzV2Controller::class, 'initializeDraft'])
         ->middleware(['role:any', 'can:update,patient']);
     Route::post('/patients/{patient}/dekurz-drafts/{draft}/finalize', [DekurzV2Controller::class, 'finalize'])

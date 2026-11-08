@@ -371,7 +371,7 @@ class DocumentController extends Controller
             ]);
         }
 
-        $document->delete();
+        $this->service->deleteDocumentRecord($document);
 
         $this->immediateAudit->documentsChanged([$document]);
 

@@ -17,6 +17,7 @@ use App\Services\DekurzDocumentService;
 use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzEntryBatchService;
 use App\Services\DekurzFinalizationValidator;
+use App\Services\DekurzMonthOptionsService;
 use App\Services\DekurzNarrativeService;
 use App\Services\DekurzProcedureClassifier;
 use App\Services\DekurzScoringConsistencyService;
@@ -32,6 +33,7 @@ use App\Services\PatientDekurzTextService;
 use App\Services\PatientProcedureDekurzTemplateService;
 use App\Services\Vertex\VertexFeedbackRecorder;
 use App\Services\VisitTimelineFreshnessService;
+use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Config\Repository;
 use Illuminate\Container\Container;
@@ -217,6 +219,83 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame(7, $this->builder()->build($patient->fresh(), '2026-08')['patient']['dekurz_number']);
     }
 
+    public function test_month_options_classify_ready_stale_and_issued_months_from_august_2026(): void
+    {
+        PatientPoint::create($this->pointAttributes(105, '3416', 10, '2026-08-03', 1));
+        PatientPoint::create($this->pointAttributes(106, '3416', 10, '2026-07-03', 1));
+        PatientPoint::create($this->pointAttributes(108, '3416', 10, '2026-09-03', 1));
+        Procedure::create([
+            'id' => 14,
+            'code' => '3437',
+            'description' => 'Doprava biologického materiálu',
+            'default_dekurz_text' => 'Doprava biologického materiálu.',
+        ]);
+        PatientPoint::create($this->pointAttributes(107, '3437', 14, '2026-11-03', 1));
+        DB::table('visits')->insert([
+            [
+                'patient_id' => 1,
+                'user_id' => 1,
+                'branch_id' => 1,
+                'date' => '2026-09-03',
+                'terrain_time' => '08:00:00',
+                'administrative_time' => '14:00:00',
+                'time_on_location' => 900,
+            ],
+            [
+                'patient_id' => 1,
+                'user_id' => 1,
+                'branch_id' => 1,
+                'date' => '2026-11-03',
+                'terrain_time' => '08:00:00',
+                'administrative_time' => '14:00:00',
+                'time_on_location' => 900,
+            ],
+        ]);
+        DB::table('visit_calculations')->insert([
+            'user_id' => 1,
+            'branch_id' => 1,
+            'month' => '2026-11-01',
+            'status' => 'completed',
+            'completed_at' => now()->addMinute(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $this->createDocument(300, 'dekurz', '2026-09', 'dekurz/september.json', '2026-09-30');
+        $draft = DekurzDraft::query()->create([
+            'patient_id' => 1,
+            'branch_id' => 1,
+            'period' => '2026-09-01',
+            'dekurz_number' => 6,
+            'status' => DekurzDraft::STATUS_COMPLETED,
+            'created_by' => 1,
+            'updated_by' => 1,
+            'final_document_id' => 300,
+            'completed_at' => now(),
+        ]);
+
+        $options = (new DekurzMonthOptionsService(
+            new DekurzTimelineReadinessService,
+            new DekurzProcedureClassifier,
+        ))->forPatient(Patient::findOrFail(1), User::findOrFail(1));
+
+        self::assertSame(['2026-11', '2026-10', '2026-09', '2026-08'], array_column($options, 'month'));
+        self::assertSame(['ready', 'ready', 'issued', 'timeline_required'], array_column($options, 'status'));
+
+        Document::findOrFail(300)->delete();
+        $optionsAfterDeletion = (new DekurzMonthOptionsService(
+            new DekurzTimelineReadinessService,
+            new DekurzProcedureClassifier,
+        ))->forPatient(Patient::findOrFail(1), User::findOrFail(1));
+
+        self::assertSame(['2026-11', '2026-10', '2026-09', '2026-08'], array_column($optionsAfterDeletion, 'month'));
+        self::assertSame(['ready', 'ready', 'ready', 'timeline_required'], array_column($optionsAfterDeletion, 'status'));
+
+        $this->builder()->build(Patient::findOrFail(1), '2026-09');
+        self::assertSame(DekurzDraft::STATUS_DRAFT, $draft->fresh()->status);
+        self::assertNull($draft->fresh()->final_document_id);
+        self::assertNull($draft->fresh()->completed_at);
+    }
+
     public function test_new_draft_requires_calculated_visit_times_for_every_documentable_day(): void
     {
         DB::table('visits')
@@ -261,7 +340,7 @@ class DekurzV2BuilderTest extends TestCase
         self::assertSame(0, DB::table('dekurz_drafts')->count());
     }
 
-    public function test_patient_point_changes_invalidate_the_month_visit_timeline(): void
+    public function test_adding_a_procedure_to_an_existing_day_keeps_the_visit_timeline_current(): void
     {
         $point = PatientPoint::findOrFail(100);
 
@@ -273,8 +352,72 @@ class DekurzV2BuilderTest extends TestCase
             ->where('month', '2026-10-01')
             ->first();
 
+        self::assertSame('completed', $calculation->status);
+        self::assertNotNull($calculation->completed_at);
+    }
+
+    public function test_removing_the_last_procedure_from_a_day_invalidates_the_visit_timeline(): void
+    {
+        $point = PatientPoint::findOrFail(104);
+        $point->delete();
+
+        (new VisitTimelineFreshnessService)->invalidatePoint($point);
+
+        $calculation = DB::table('visit_calculations')
+            ->where('user_id', 1)
+            ->where('branch_id', 1)
+            ->where('month', '2026-10-01')
+            ->first();
+
         self::assertSame('pending', $calculation->status);
         self::assertNull($calculation->completed_at);
+    }
+
+    public function test_existing_draft_requires_recalculation_when_a_visit_day_is_removed(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $initializer = $this->initializer();
+        $draft = $initializer->initialize($patient, '2026-10', $actor);
+        $point = PatientPoint::findOrFail(104);
+        $point->delete();
+        (new VisitTimelineFreshnessService)->invalidatePoint($point);
+
+        try {
+            $initializer->initialize($patient, '2026-10', $actor);
+            self::fail('ValidationException was not thrown.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            self::assertArrayHasKey('timeline', $exception->errors());
+            self::assertStringContainsString('Časy návštev', $exception->errors()['timeline'][0]);
+        }
+
+        self::assertNotNull(
+            $draft->fresh('days')->days->first(
+                fn ($day): bool => $day->date->toDateString() === '2026-10-05',
+            ),
+        );
+    }
+
+    public function test_existing_draft_stays_blocked_when_stale_day_was_already_reconciled(): void
+    {
+        $patient = Patient::findOrFail(1);
+        $actor = User::findOrFail(1);
+        $initializer = $this->initializer();
+        $draft = $initializer->initialize($patient, '2026-10', $actor);
+        $point = PatientPoint::findOrFail(104);
+        $point->delete();
+        (new VisitTimelineFreshnessService)->invalidatePoint($point);
+        $draft->days()
+            ->whereDate('date', '2026-10-05')
+            ->delete();
+
+        try {
+            $initializer->initialize($patient, '2026-10', $actor);
+            self::fail('ValidationException was not thrown.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            self::assertArrayHasKey('timeline', $exception->errors());
+            self::assertStringContainsString('aktuálne', $exception->errors()['timeline'][0]);
+        }
     }
 
     public function test_v1_patient_text_is_materialized_as_an_editable_custom_section(): void
@@ -377,6 +520,7 @@ class DekurzV2BuilderTest extends TestCase
         ]);
         PatientPoint::findOrFail(101)->delete();
         PatientPoint::findOrFail(102)->delete();
+        PatientPoint::create($this->pointAttributes(105, '3416', 10, '2026-10-03', 1));
 
         $draft = $initializer->initialize($patient, '2026-10', $actor);
         $entries = $draft->days->flatMap->entries->whereNull('custom_track_id');
@@ -386,9 +530,19 @@ class DekurzV2BuilderTest extends TestCase
             ->values()
             ->all();
 
-        self::assertSame([100, 104], $snapshotIds);
+        self::assertSame([100, 104, 105], $snapshotIds);
         self::assertSame(2, $draft->days->count());
         self::assertSame(2, $entries->firstWhere('patient_point_snapshot_id', 100)?->quantity);
+        self::assertSame(
+            [10, 11],
+            $draft->days
+                ->first(fn ($day): bool => Carbon::parse($day->date)->toDateString() === '2026-10-03')
+                ->entries
+                ->pluck('procedure_id')
+                ->sort()
+                ->values()
+                ->all(),
+        );
 
         $changes = $this->builder()->build($patient, '2026-10')['scoring_changes'];
         self::assertSame([], $changes['added']);

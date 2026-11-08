@@ -257,7 +257,7 @@ export interface PointClaimLine {
   // columns
   id: number
   batch_id: number
-  patient_point_id: number
+  patient_point_id: number | null
   coverage_id: number | null
   previous_claim_line_id: number | null
   selection_source: string

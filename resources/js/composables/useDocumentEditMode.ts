@@ -4,6 +4,10 @@ import { useRoute } from 'vue-router'
 export function useDocumentEditMode() {
     const route = useRoute()
     const editDocumentId = computed<number | null>(() => {
+        if (route.meta.documentEditor !== true) {
+            return null
+        }
+
         const raw = route.query.editDocumentId
         const value = Array.isArray(raw) ? raw[0] : raw
         const id = Number(value)

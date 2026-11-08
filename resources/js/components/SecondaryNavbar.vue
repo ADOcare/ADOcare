@@ -48,7 +48,7 @@ const links = computed<SectionLink[]>(() => {
         (child.meta?.link as string) ??
         (child.meta?.title as string) ??
         child.name?.toString(),
-      to: { name: child.name }
+      to: { name: child.name, query: {} }
     }))
 })
 

@@ -44,6 +44,14 @@ class DekurzBuilderService
             ->whereDate('period', $period)
             ->first();
 
+        if ($draft?->final_document_id && ! $draft->finalDocument) {
+            $draft->update([
+                'status' => DekurzDraft::STATUS_DRAFT,
+                'final_document_id' => null,
+                'completed_at' => null,
+            ]);
+        }
+
         $existingDocuments = Document::query()
             ->where('patient_id', $patient->id)
             ->where('type', 'dekurz')

@@ -14,6 +14,7 @@ use App\Http\Requests\UpsertPatientProcedureDekurzTemplateRequest;
 use App\Models\DekurzDay;
 use App\Models\DekurzDraft;
 use App\Models\DekurzEntry;
+use App\Models\Document;
 use App\Models\Patient;
 use App\Models\PatientDekurzCustomTrack;
 use App\Models\PatientDekurzCustomTrackPeriod;
@@ -21,6 +22,7 @@ use App\Models\Procedure;
 use App\Services\DekurzBuilderService;
 use App\Services\DekurzDraftInitializer;
 use App\Services\DekurzEntryBatchService;
+use App\Services\DekurzMonthOptionsService;
 use App\Services\DekurzNarrativeService;
 use App\Services\DekurzV2Finalizer;
 use App\Services\DekurzV2PreviewService;
@@ -36,6 +38,7 @@ class DekurzV2Controller extends Controller
         private DekurzBuilderService $builder,
         private DekurzDraftInitializer $draftInitializer,
         private DekurzEntryBatchService $entryBatch,
+        private DekurzMonthOptionsService $monthOptions,
         private DekurzV2Finalizer $finalizer,
         private DekurzV2PreviewService $preview,
         private PatientProcedureDekurzTemplateService $templates,
@@ -48,10 +51,33 @@ class DekurzV2Controller extends Controller
         return $this->success($this->builder->build($patient, $request->validated('month')), 'Podklady pre Dekurz boli načítané.');
     }
 
+    public function months(Request $request, Patient $patient)
+    {
+        $this->authorize('view', $patient);
+
+        return $this->success(
+            $this->monthOptions->forPatient($patient, $request->user()),
+            'Dostupné mesiace Dekurzu boli načítané.',
+        );
+    }
+
     public function initializeDraft(InitializeDekurzDraftRequest $request, Patient $patient)
     {
         $this->authorize('update', $patient);
         $month = $request->validated('month');
+        $issuedDocument = Document::query()
+            ->where('patient_id', $patient->id)
+            ->where('type', 'dekurz')
+            ->where('period', $month)
+            ->latest('id')
+            ->first();
+
+        if ($issuedDocument) {
+            throw ValidationException::withMessages([
+                'month' => 'Dekurz pre tento mesiac už bol vydaný. Otvorte jeho historický dokument na úpravu.',
+                'document_id' => [(string) $issuedDocument->id],
+            ]);
+        }
 
         $this->draftInitializer->initialize(
             $patient,

@@ -326,7 +326,7 @@ watch(branchOptions, async (newOpts) => {
                     lazy: true,
                     onLazyLoad: onLazyLoadPatients,
                     appendOnly: true,
-                    itemSize: 56,
+                    itemSize: 40,
                     showLoader: false,
                     loading: patientsLoading,
                     delay: 10,

@@ -42,9 +42,9 @@ class DekurzDraftInitializer
                 ->sortBy(fn (PatientPoint $point): string => Carbon::parse($point->date)->format('Y-m-d').sprintf('-%010d', $point->id))
                 ->values();
 
-            if (! $draft) {
-                $this->timelineReadiness->assertReady($lockedPatient, $actor, $points, $month);
+            $this->timelineReadiness->assertReady($lockedPatient, $actor, $points, $month);
 
+            if (! $draft) {
                 $draft = DekurzDraft::query()->create([
                     'patient_id' => $lockedPatient->id,
                     'branch_id' => $lockedPatient->branch_id,

@@ -6,6 +6,7 @@ use App\Models\Branch;
 use App\Models\Patient;
 use App\Models\PatientCoverage;
 use App\Models\User;
+use App\Support\AccentInsensitiveSearch;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -16,10 +17,78 @@ class PatientService
 
     public function queryForUserBranch(User $nurse, Branch $branch): Builder
     {
-        return Patient::with(['doctor', 'visits', 'insuranceCompany', 'latestCoverage.insuranceCompany'])
+        return Patient::query()
             ->withCount('openPatientAuditIssues')
             ->where('nurse_id', $nurse->id)
             ->where('branch_id', $branch->id);
+    }
+
+    public function queryForPatientSelector(
+        User $nurse,
+        Branch $branch,
+        ?string $search = null,
+    ): Builder {
+        $query = Patient::query()
+            ->select([
+                'patients.id',
+                'patients.first_name',
+                'patients.last_name',
+                'patients.personal_number',
+                'patients.branch_id',
+                'patients.nurse_id',
+            ]);
+
+        $search = trim((string) $search);
+
+        $companyWideSearch = mb_strlen($search) >= 2;
+
+        if (! $companyWideSearch) {
+            $query
+                ->where('patients.branch_id', $branch->id)
+                ->where('patients.nurse_id', $nurse->id);
+        } else {
+            $query->with([
+                'branch:id,code,identificator,city',
+                'nurse:id,title,first_name,last_name',
+            ])
+                ->whereHas('branch', function (Builder $query) use ($branch) {
+                    $query->where('company_id', $branch->company_id);
+                });
+        }
+
+        $tokens = $search !== ''
+            ? (preg_split('/\s+/u', mb_strtolower($search)) ?: [])
+            : [];
+
+        foreach ($tokens as $token) {
+            $pattern = '%'.AccentInsensitiveSearch::normalizeTerm($token).'%';
+            $identifier = preg_replace('/[^[:alnum:]]/u', '', $token) ?: $token;
+            $firstName = AccentInsensitiveSearch::expression('patients.first_name');
+            $lastName = AccentInsensitiveSearch::expression('patients.last_name');
+
+            $query->where(function (Builder $query) use ($pattern, $identifier, $firstName, $lastName) {
+                $query
+                    ->whereRaw("{$firstName} LIKE ?", [$pattern])
+                    ->orWhereRaw("{$lastName} LIKE ?", [$pattern])
+                    ->orWhereRaw(
+                        "REPLACE(REPLACE(COALESCE(patients.personal_number, ''), '/', ''), ' ', '') LIKE ?",
+                        ['%'.$identifier.'%'],
+                    );
+            });
+        }
+
+        if ($companyWideSearch) {
+            $query->selectRaw(
+                'CASE WHEN patients.branch_id = ? AND patients.nurse_id = ? THEN 0 ELSE 1 END AS selection_priority',
+                [$branch->id, $nurse->id],
+            )
+                ->orderBy('selection_priority');
+        }
+
+        return $query
+            ->orderBy('patients.last_name')
+            ->orderBy('patients.first_name')
+            ->orderBy('patients.id');
     }
 
     public function create(array $data): Patient

@@ -2,6 +2,7 @@
 
 namespace App\Http\Filters;
 
+use App\Support\AccentInsensitiveSearch;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 
@@ -47,8 +48,7 @@ class ApiQuery
         array|string $allowedFilters = 'all',
         array $defaults = [],
         bool $allowTrashed = true,
-    )
-    {
+    ) {
 
         // Validate inputs
         $request->validate([
@@ -66,7 +66,6 @@ class ApiQuery
             'with_deleted' => 'sometimes|boolean',
         ]);
 
-
         // Apply modular parts
         static::applyWith($request, $query, $defaults);
         static::applyCount($request, $query, $defaults);
@@ -79,9 +78,9 @@ class ApiQuery
 
         // store raw SQL for debugging
         $result->sql = $query->toRawSql();
+
         return $result;
     }
-
 
     /**
      * Apply eager loading (with)
@@ -122,7 +121,7 @@ class ApiQuery
     protected static function applyCount(Request $request, Builder $query, array $defaults = []): void
     {
         $count = $request->input('count', $defaults['count'] ?? null);
-        if (!$count) {
+        if (! $count) {
             return;
         }
 
@@ -154,8 +153,7 @@ class ApiQuery
         array|string $allowedFilters = 'all',
         array $defaults = [],
         bool $allowTrashed = true,
-    ): void
-    {
+    ): void {
 
         // handle trashed/deleted filtering globally
         $model = $query->getModel();
@@ -167,15 +165,13 @@ class ApiQuery
             }
         }
 
-
-
         $filters = $request->input('filter', $defaults['filter'] ?? []);
-        if (!is_array($filters)) {
+        if (! is_array($filters)) {
             return;
         }
 
         foreach ($filters as $key => $value) {
-            if (is_array($allowedFilters) && !in_array($key, $allowedFilters, true)) {
+            if (is_array($allowedFilters) && ! in_array($key, $allowedFilters, true)) {
                 continue;
             }
 
@@ -214,6 +210,7 @@ class ApiQuery
                             $query->where($key, $operand);
                     }
                 }
+
                 continue;
             }
 
@@ -223,6 +220,7 @@ class ApiQuery
                     $op = $m[1];
                     $val = $m[2];
                     $query->where($key, $op, $val);
+
                     continue;
                 }
             }
@@ -244,7 +242,7 @@ class ApiQuery
         }
 
         $tokens = preg_split('/\s+/', $q, -1, PREG_SPLIT_NO_EMPTY);
-        if (!$tokens || count($tokens) === 0) {
+        if (! $tokens || count($tokens) === 0) {
             $tokens = [$q];
         }
 
@@ -255,6 +253,7 @@ class ApiQuery
         foreach ((array) $searchable as $k => $v) {
             if (is_int($k)) {
                 $rootColumns[] = $v;
+
                 continue;
             }
 
@@ -269,7 +268,7 @@ class ApiQuery
         // Build search: tokens are ANDed; within a token, columns/relations are ORed
         $query->where(function (Builder $outer) use ($rootColumns, $relationColumns, $tokens, $query) {
             foreach ($tokens as $token) {
-                $like = "%{$token}%";
+                $like = '%'.AccentInsensitiveSearch::normalizeTerm($token).'%';
 
                 $outer->where(function (Builder $inner) use ($rootColumns, $relationColumns, $like, $query) {
                     $first = true;
@@ -277,7 +276,7 @@ class ApiQuery
 
                     // root columns on the main model
                     foreach ($rootColumns as $col) {
-                        $expr = "public.immutable_unaccent(lower(cast({$table}.{$col} as text))) LIKE public.immutable_unaccent(lower(?))";
+                        $expr = AccentInsensitiveSearch::expression("{$table}.{$col}").' LIKE ?';
                         if ($first) {
                             $inner->whereRaw($expr, [$like]);
                             $first = false;
@@ -294,8 +293,8 @@ class ApiQuery
                             // if '*' is present, resolve related model fillable columns
                             if (in_array('*', $cols, true)) {
                                 $model = $query->getModel();
-                                if (!method_exists($model, $relation)) {
-                                    throw new \Exception("Cannot resolve relation '{$relation}' for searching on model " . get_class($model));
+                                if (! method_exists($model, $relation)) {
+                                    throw new \Exception("Cannot resolve relation '{$relation}' for searching on model ".get_class($model));
                                 }
                                 /** @var \Illuminate\Database\Eloquent\Relations\Relation $modelRelation */
                                 $modelRelation = $model->$relation();
@@ -311,7 +310,7 @@ class ApiQuery
 
                             $table = $q->getModel()->getTable();
                             foreach ($resolved as $i => $col) {
-                                $expr = "public.immutable_unaccent(lower(cast({$table}.{$col} as text))) LIKE public.immutable_unaccent(lower(?))";
+                                $expr = AccentInsensitiveSearch::expression("{$table}.{$col}").' LIKE ?';
                                 if ($i === 0) {
                                     $q->whereRaw($expr, [$like]);
                                 } else {
@@ -331,7 +330,7 @@ class ApiQuery
     protected static function applySort(Request $request, Builder $query, array $defaults = []): void
     {
         $sort = $request->input('sort', $defaults['sort'] ?? null);
-        if (!$sort) {
+        if (! $sort) {
             return;
         }
 
@@ -360,10 +359,11 @@ class ApiQuery
             $limit = -1;
         }
 
-        if (!$paginate) {
+        if (! $paginate) {
             if ($limit > 0) {
                 $query->limit($limit);
             }
+
             return $query->get();
         }
 
@@ -388,7 +388,7 @@ class ApiQuery
     protected static function applyScopeToRelation($q, Request $request): void
     {
         $user = $request->user();
-        if (!$user) {
+        if (! $user) {
             return;
         }
 
@@ -415,6 +415,7 @@ class ApiQuery
                 if (method_exists($related, 'scopeForCompany')) {
                     $q->forCompany($companyId);
                 }
+
                 return;
             }
         }
@@ -424,6 +425,7 @@ class ApiQuery
             if (method_exists($related, 'scopeForBranch')) {
                 $q->forBranch($branchId);
             }
+
             return;
         }
 
@@ -436,6 +438,7 @@ class ApiQuery
             if (method_exists($related, 'scopeForCompany')) {
                 $q->forCompany($user->company_id);
             }
+
             return;
         }
 
@@ -443,6 +446,7 @@ class ApiQuery
         $branch = $request->route('branch') ?? null;
         if ($branch && method_exists($related, 'scopeForBranch')) {
             $q->forBranch($branch->id);
+
             return;
         }
 

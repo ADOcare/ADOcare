@@ -2,33 +2,33 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use App\Http\Filters\ApiQuery;
 use App\Http\Requests\DestroyManyCompanyRequest;
 use App\Http\Resources\BaseCollection;
+use App\Http\Resources\PatientTableResource;
 use App\Http\Resources\UserCollection;
-use App\Http\Responses\ApiResponse;
 use App\Models\Branch;
 use App\Models\Company;
 use App\Models\Patient;
 use App\Models\User;
 use App\Services\StudioKristianBillingService;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use \App\Http\Controllers\Controller;
-use Illuminate\Http\Response;
 
 class CompanyController extends Controller
 {
-    public function __construct(private StudioKristianBillingService $billing)
-    {
-    }
+    public function __construct(private StudioKristianBillingService $billing) {}
 
     /**
      * List companies
      *
      * @group Companies
+     *
      * @queryParam q string Search query. Example: "Acme"
+     *
      * @response 200 {
      *  "data": [ {"id":1, "name":"Acme"} ],
      *  "meta": {"total":1}
@@ -38,6 +38,7 @@ class CompanyController extends Controller
     {
         $query = Company::query();
         $results = ApiQuery::apply(request(), $query);
+
         return $this->success(new BaseCollection($results), 'Companies retrieved');
     }
 
@@ -45,12 +46,15 @@ class CompanyController extends Controller
      * Create a company
      *
      * @group Companies
+     *
      * @bodyParam name string required Company name. Example: "Acme"
+     *
      * @response 201 {"id":1, "name":"Acme"}
      */
     public function store(\App\Http\Requests\StoreCompanyRequest $request)
     {
         $item = Company::create($request->validated());
+
         return $this->success($item, 'Created', Response::HTTP_CREATED);
     }
 
@@ -58,7 +62,9 @@ class CompanyController extends Controller
      * Get a company
      *
      * @group Companies
+     *
      * @urlParam company int required The ID of the company. Example: 1
+     *
      * @response 200 {"id":1, "name":"Acme"}
      */
     public function show(Company $company)
@@ -70,7 +76,9 @@ class CompanyController extends Controller
      * Return overview statistics for a single company.
      *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @response 200 {
      *   "data": {"branches":1,"users":5,"patients":23}
      * }
@@ -90,8 +98,11 @@ class CompanyController extends Controller
      * Update a company
      *
      * @group Companies
+     *
      * @urlParam company int required The ID of the company. Example: 1
+     *
      * @bodyParam name string Company name. Example: "Acme Updated"
+     *
      * @response 200 {"id":1, "name":"Acme Updated"}
      */
     public function update(\App\Http\Requests\UpdateCompanyRequest $request, Company $company)
@@ -165,8 +176,8 @@ class CompanyController extends Controller
     {
         $company->load([
             'subscriptionTier',
-            'subscriptionPayments' => fn($q) => $q->orderByDesc('received_at')->orderByDesc('id'),
-            'subscriptionPaidMonths' => fn($q) => $q->orderByDesc('year')->orderBy('month'),
+            'subscriptionPayments' => fn ($q) => $q->orderByDesc('received_at')->orderByDesc('id'),
+            'subscriptionPaidMonths' => fn ($q) => $q->orderByDesc('year')->orderBy('month'),
         ]);
 
         return [
@@ -178,7 +189,7 @@ class CompanyController extends Controller
             'subscription_status' => $company->subscription_status,
             'subscription_notes' => $company->subscription_notes,
             'subscription_tier' => $company->subscriptionTier,
-            'payments' => $company->subscriptionPayments->map(fn($payment) => [
+            'payments' => $company->subscriptionPayments->map(fn ($payment) => [
                 'id' => $payment->id,
                 'received_at' => optional($payment->received_at)->toDateString(),
                 'amount' => $payment->amount,
@@ -186,9 +197,9 @@ class CompanyController extends Controller
             ])->values(),
             'paid_months_by_year' => $company->subscriptionPaidMonths
                 ->groupBy('year')
-                ->map(fn($items, $year) => [
+                ->map(fn ($items, $year) => [
                     'year' => (int) $year,
-                    'months' => $items->pluck('month')->map(fn($m) => (int) $m)->values(),
+                    'months' => $items->pluck('month')->map(fn ($m) => (int) $m)->values(),
                 ])
                 ->values()
                 ->sortByDesc('year')
@@ -200,12 +211,14 @@ class CompanyController extends Controller
      * Get the stamp image for a company
      *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @response 200 {}
      */
     public function stamp(Company $company)
     {
-        if (!$company->stamp_path || !Storage::disk('local')->exists($company->stamp_path)) {
+        if (! $company->stamp_path || ! Storage::disk('local')->exists($company->stamp_path)) {
             abort(404);
         }
 
@@ -216,7 +229,9 @@ class CompanyController extends Controller
      * Delete the stamp for a company
      *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @response 204 {}
      */
     public function deleteStamp(Company $company)
@@ -233,8 +248,11 @@ class CompanyController extends Controller
      * List patients for a company
      *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data": [{"id":1, "first_name":"John", "last_name":"Doe"}], "meta": {"total":1}}
      */
     public function patients(Request $request, Company $company)
@@ -255,19 +273,27 @@ class CompanyController extends Controller
             defaults: ['sort' => 'last_name'],
             allowTrashed: false,
         );
-        return $this->success(new BaseCollection(resource: $results), 'Patients retrieved');
+        $collection = $request->boolean('table')
+            ? new BaseCollection($results, PatientTableResource::class)
+            : new BaseCollection(resource: $results);
+
+        return $this->success($collection, 'Patients retrieved');
     }
 
     /**
      * List users for a company
+     *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data": [{"id":1, "first_name":"John", "last_name":"Doe"}], "meta": {"total":1}}
      */
     public function users(Request $request, Company $company)
     {
-        if (!$company) {
+        if (! $company) {
             return $this->success(new UserCollection(collect([])), 'Users retrieved');
         }
 
@@ -275,34 +301,42 @@ class CompanyController extends Controller
             $q->where('company.id', $company->id);
         });
         $results = ApiQuery::apply($request, $query);
+
         return $this->success(new UserCollection($results), 'Users retrieved');
     }
+
     /**
      * List branches for a company
+     *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @queryParam per_page int The number of items per page. Example: 15
+     *
      * @response 200 {"data": [{"id":1, "name":"Main Branch
      *"}], "meta": {"total":1}}
      */
     public function branches(Request $request, Company $company)
     {
         $companyId = $company->id ?? null;
-        if (!$companyId) {
+        if (! $companyId) {
             return $this->success(new BaseCollection(collect([])), 'Company branches retrieved');
         }
 
         $query = Branch::query()->where('company_id', $companyId);
         $results = ApiQuery::apply($request, $query);
+
         return $this->success(new BaseCollection($results), 'Company branches retrieved');
     }
-
 
     /**
      * Delete a company
      *
      * @group Companies
+     *
      * @urlParam company int required Company ID. Example: 1
+     *
      * @response 204 {}
      */
     public function destroy(Company $company)
@@ -319,7 +353,9 @@ class CompanyController extends Controller
      * Bulk delete companies
      *
      * @group Companies
+     *
      * @bodyParam ids array required Array of company IDs to delete. Example: [1,2,3]
+     *
      * @response 204 {}
      */
     public function destroyMany(DestroyManyCompanyRequest $request)
@@ -333,6 +369,4 @@ class CompanyController extends Controller
 
         return $this->success(null, 'Deleted', Response::HTTP_NO_CONTENT);
     }
-
-
 }

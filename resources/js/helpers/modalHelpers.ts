@@ -4,6 +4,7 @@ import { markRaw } from "vue"
 import PatientDocumentsForm from "@/pages/Patients/partials/form/PatientDocumentsForm.vue"
 import EditPatientForm from "@/pages/Patients/partials/form/EditPatientForm.vue"
 import ScanNewDocumentModal from "@/pages/Patients/Scan/ScanNewDocumentModal.vue"
+import CreatePatientForm from "@/pages/Patients/partials/form/CreatePatientForm.vue"
 
 export async function openPatientDocumentsModal(patientId?: number) {
     if (!patientId) return
@@ -18,6 +19,16 @@ export async function openPatientEditModal(patientId?: number) {
     const isManagerView = useAuthStore().isManager;
     // open via modal provider
     return await openModal(markRaw(EditPatientForm), { patientId, isManagerView }, { header: 'Upraviť pacienta', style: { width: '90%' } });
+}
+
+export async function openPatientCreateModal() {
+    return await openModal(markRaw(CreatePatientForm), {}, {
+        header: 'Pridať pacienta',
+        style: {
+            width: '90%',
+            maxWidth: 'calc(100vw - 2rem)',
+        },
+    })
 }
 
 export async function openScanDocumentModal(patientId: number, branchId: number) {

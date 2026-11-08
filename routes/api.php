@@ -263,6 +263,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware('role:manager,superadmin');
     Route::get('branches/{branch}/patients', [BranchPatientController::class, 'index'])
         ->middleware('role:any');
+    Route::get('branches/{branch}/patient-selector', [BranchPatientController::class, 'selector'])
+        ->middleware('role:any');
     Route::post('branches/{branch}/patients', [BranchPatientController::class, 'store'])
         ->middleware('role:any');
     Route::get('branches/{branch}/nurses', [BranchController::class, 'nurses'])

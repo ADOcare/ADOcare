@@ -11,6 +11,7 @@ import {
 
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
+import { useToast } from 'primevue/usetoast'
 
 import UniversalDataTable from '@/components/UniversalDataTable.vue'
 import ActionButtons from '@/components/table-columns/ActionButtons.vue'
@@ -98,6 +99,9 @@ const patientStore =
 
 const authStore =
     useAuthStore()
+
+const toast =
+    useToast()
 
 const { openModal } =
     useModal()
@@ -211,6 +215,34 @@ function getNurseName(
     return nurse
         ? formatUserFullName(nurse)
         : ''
+}
+
+async function pinPatient(
+    patientId: number,
+) {
+    try {
+        await patientStore.fetchPatient(
+            patientId,
+        )
+
+        await router.push(
+            '/patient/points',
+        )
+    } catch (error) {
+        console.error(
+            'Failed to pin patient',
+            error,
+        )
+
+        toast.add({
+            severity:
+                'error',
+            summary:
+                'Pacienta sa nepodarilo načítať.',
+            life:
+                5000,
+        })
+    }
 }
 
 watch(
@@ -467,13 +499,8 @@ const options =
                                     row:
                                         Patient,
                                 ) => {
-                                    patientStore
-                                        .setPatient(
-                                            row,
-                                        )
-
-                                    void router.push(
-                                        '/patient/points',
+                                    void pinPatient(
+                                        row.id,
                                     )
                                 },
                         },
@@ -571,17 +598,17 @@ const options =
                     },
 
                 extraParams: {
+                    table:
+                        true,
+
                     ...(
                         authStore
                             .isManager
                             ? {
                                 with:
-                                    'nurse,doctor,branch',
+                                    'nurse,branch',
                             }
-                            : {
-                                with:
-                                    'doctor',
-                            }
+                            : {}
                     ),
 
                     ...(

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Popover from 'primevue/popover'
 
+import AppButton from '@/components/AppButton.vue'
 import { useAuthStore } from '@/stores/auth'
 import { usePatientStore } from '@/stores/patientStore'
 import usePatients from '@/composables/usePatients'
@@ -12,6 +13,7 @@ import {
     type AppNotification,
 } from '@/composables/useNotifications'
 import {
+    openPatientCreateModal,
     openPatientEditModal,
     openScanDocumentModal,
 } from '@/helpers/modalHelpers'
@@ -156,7 +158,9 @@ const {
     patientOptions,
     selectedPatient,
     patientsLoading,
+    patientsLoadError,
     patientFilterString,
+    showCreatePatientAction,
     loadPatients,
     onLazyLoadPatients,
     onFilterPatients,
@@ -179,12 +183,30 @@ async function loadPatientsForSelectedBranch() {
 }
 
 /* when patient is selected from navbar → save & go to detail page */
-watch(selectedPatient, (opt) => {
+watch(selectedPatient, async (opt) => {
     if (!opt) return
-    patientStore.setPatient(opt.raw)
-    router.push('/patient/points')
-    selectedPatient.value = null
+    if (!opt.selectable) {
+        selectedPatient.value = null
+        return
+    }
+
+    try {
+        await patientStore.fetchPatient(opt.id)
+        await router.push('/patient/points')
+    } catch (error) {
+        console.error('Failed to select patient', error)
+    } finally {
+        selectedPatient.value = null
+    }
 })
+
+async function openCreatePatientFromSearch() {
+    const created = await openPatientCreateModal()
+    if (created) {
+        patientFilterString.value = ''
+        await loadPatients(true)
+    }
+}
 
 /* ------------ NAVIGATION / ACTIONS ------------ */
 
@@ -299,18 +321,19 @@ watch(branchOptions, async (newOpts) => {
                 v-model="selectedPatient"
                 :options="patientOptions"
                 optionLabel="name"
+                optionDisabled="disabled"
                 :virtualScrollerOptions="{
                     lazy: true,
                     onLazyLoad: onLazyLoadPatients,
                     appendOnly: true,
-                    itemSize: 38,
+                    itemSize: 56,
                     showLoader: false,
                     loading: patientsLoading,
                     delay: 10,
                 }"
                 :placeholder="patientsLoading ? 'Načítavam pacientov...' : 'Vyberte pacienta'"
                 dropdownIcon="bi bi-chevron-down text-white!"
-                class="w-60 h-7! flex items-center border-none! bg-tag2! text-normal text-white!"
+                class="w-110 h-7! flex items-center border-none! bg-tag2! text-normal text-white!"
             >
                 <template #value>
                     <span class="text-normal text-white">Vyberte pacienta</span>
@@ -330,7 +353,7 @@ watch(branchOptions, async (newOpts) => {
                                 class="cursor-pointer"
                                 @click="patientFilterString = ''; onFilterPatients()"
                             >
-                                <i v-if="patientFilterString" class="bi bi-x-lg text-darkgrey text-sm" />
+                                <i v-if="patientFilterString" class="bi bi-x-lg text-darkgrey" />
                                 <i v-else class="bi bi-search text-darkgrey" />
                             </InputIcon>
                         </IconField>
@@ -338,20 +361,45 @@ watch(branchOptions, async (newOpts) => {
                 </template>
 
                 <template #option="{ option }">
-                    <div class="flex">
-                        <span class="text-normal text-darkgrey pr-2">{{ option.name }}</span>
-                        <span class="bg-darkgrey rounded-md text-mini text-white px-2 content-center">
-                            {{ option.personalNumber }}
-                        </span>
+                    <div class="flex min-w-0 flex-col gap-1">
+                        <div class="flex min-w-0 items-center gap-2">
+                            <span class="truncate text-normal text-darkgrey">{{ option.name }}</span>
+                            <Tag
+                                v-if="option.personalNumber"
+                                class="bg-darkgrey! text-white!"
+                            >
+                                {{ option.personalNumber }}
+                            </Tag>
+                            <Tag
+                                v-if="!option.selectable && option.nurseLabel"
+                                class="bg-darkgrey!"
+                            >
+                                {{ option.nurseLabel ?? '' }}
+                            </Tag>
+                        </div>
                     </div>
                 </template>
 
                 <template #empty>
-                    <div class="flex items-center gap-2 px-2 py-1 text-normal text-darkgrey">
-                        <i v-if="patientsLoading" class="bi bi-arrow-repeat animate-spin" />
-                        <span>
-                            {{ patientsLoading ? 'Načítavam pacientov...' : 'Pacienti neboli nájdení' }}
-                        </span>
+                    <div class="flex flex-col gap-2 py-1 text-normal text-darkgrey p-0!">
+                        <div class="flex items-center gap-2">
+                            <i v-if="patientsLoading" class="bi bi-arrow-repeat animate-spin" />
+                            <span>
+                                {{
+                                    patientsLoading
+                                        ? 'Načítavam pacientov...'
+                                        : patientsLoadError || 'Pacienti neboli nájdení'
+                                }}
+                            </span>
+                        </div>
+                        <AppButton
+                            v-if="showCreatePatientAction"
+                            type="button"
+                            icon="bi bi-plus-lg"
+                            label="Pridať nového pacienta"
+                            class="w-full!"
+                            @click.stop="openCreatePatientFromSearch"
+                        />
                     </div>
                 </template>
             </Select>

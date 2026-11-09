@@ -2261,7 +2261,14 @@ onBeforeUnmount(() => {
           @submit.prevent="saveRecord"
         >
           <Tabs v-model:value="activeTab" class="flex h-full min-h-0 flex-col bg-transparent!">
-            <div class="shrink-0 border-b border-darkgrey/10 px-8 pt-6">
+            <template #previcon>
+                <i class="bi bi-chevron-left" aria-hidden="true"></i>
+            </template>
+
+            <template #nexticon>
+                <i class="bi bi-chevron-right" aria-hidden="true"></i>
+            </template>
+            <div class="shrink-0 px-8 pt-6">
               <TabList class="bg-transparent!">
                 <Tab v-for="tab in tabsWithSections" :key="tab.id" :value="tab.id">
                   {{ tab.label }}
@@ -2276,7 +2283,7 @@ onBeforeUnmount(() => {
                 :value="tab.id"
                 class="h-full! min-h-0! bg-transparent! p-0!"
               >
-                <div class="h-full overflow-y-auto p-8">
+                <div class="h-full overflow-y-auto px-8">
                   <div class="flex flex-col gap-8">
                     <section
                       v-for="section in tab.sections"
@@ -2481,12 +2488,8 @@ onBeforeUnmount(() => {
           </Tabs>
 
           <div
-            class="flex shrink-0 items-center justify-between border-t border-darkgrey/10 px-8 py-4"
+            class="flex shrink-0 items-center justify-between px-8 py-4"
           >
-            <span class="text-mini text-lightgrey">
-              {{ tabsWithSections.find((tab) => tab.id === activeTab)?.label }}
-            </span>
-
             <AppButton
               v-if="!isLastTab"
               type="button"
@@ -2494,6 +2497,7 @@ onBeforeUnmount(() => {
               label="Ďalej"
               icon="bi bi-arrow-right"
               @click="goToNextTab"
+              align="right"
             />
 
             <AppButton
@@ -2502,6 +2506,7 @@ onBeforeUnmount(() => {
               variant="accent"
               :label="isEditingDocument ? 'Aktualizovať dokument' : 'Generovať dokument'"
               :disabled="!patientId"
+              align="right"
             />
           </div>
         </form>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\PreviewRecordDocumentRequest;
 use App\Http\Requests\StoreRecordDocumentRequest;
 use App\Models\Document;
 use App\Models\Patient;
@@ -52,7 +53,7 @@ class RecordDocumentController extends Controller
     /**
      * Preview a record document from unsaved form data.
      */
-    public function previewDraft(StoreRecordDocumentRequest $request, RecordDocumentService $service)
+    public function previewDraft(PreviewRecordDocumentRequest $request, RecordDocumentService $service)
     {
         $user = $request->user();
         if (! $user instanceof User) {

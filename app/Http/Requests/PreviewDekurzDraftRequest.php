@@ -15,7 +15,7 @@ class PreviewDekurzDraftRequest extends FormRequest
     {
         return [
             'patient_id' => ['required', 'integer', 'exists:patients,id'],
-            'month' => ['required', 'date_format:Y-m'],
+            'month' => ['nullable', 'date_format:Y-m'],
             'dekurz_number' => ['nullable', 'integer', 'min:1'],
             'days' => ['nullable', 'array', 'max:31'],
             'days.*.date' => ['required_with:days', 'date_format:Y-m-d'],

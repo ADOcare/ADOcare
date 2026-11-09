@@ -275,6 +275,33 @@ function toIsoDateTime(
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
 }
 
+function parseLocalDateTime(
+    value: unknown,
+): Date | null {
+    const match =
+        String(value).match(
+            /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/,
+        )
+
+    if (!match) {
+        return null
+    }
+
+    const parsed =
+        new Date(
+            Number(match[1]),
+            Number(match[2]) - 1,
+            Number(match[3]),
+            Number(match[4] ?? 0),
+            Number(match[5] ?? 0),
+            Number(match[6] ?? 0),
+        )
+
+    return Number.isNaN(parsed.getTime())
+        ? null
+        : parsed
+}
+
 function toLocalYMD(
     value: Date,
 ) {
@@ -934,7 +961,15 @@ watch(
         if (!payload) return
 
         if (payload.date) {
-            date.value = new Date(`${String(payload.date).slice(0, 10)}T00:00:00`)
+            const savedDate =
+                parseLocalDateTime(
+                    payload.date,
+                )
+
+            if (savedDate) {
+                date.value =
+                    savedDate
+            }
         }
         selectedProblems.value = Array.isArray(payload.problems) ? [...payload.problems] : []
         otherFindings.value = String(payload.other_findings ?? '')
@@ -1392,45 +1427,30 @@ onBeforeUnmount(
                                     <!-- Date -->
 
                                     <FormField
-                                        v-model="
-                                            date
-                                        "
-                                        control="date"
-                                        label="
-                                            Dátum
-                                        "
+                                        label="Dátum"
                                         required
-                                        :error="
-                                            submitted
-                                                ? errors.date
-                                                : null
-                                        "
-                                        :outlined="
-                                            false
-                                        "
-                                        date-format="
-                                            dd.mm.yy
-                                        "
-                                        time-format="
-                                            HH:mm
-                                        "
-                                        show-time
-                                        :show-icon="
-                                            false
-                                        "
-                                        input-class="
-                                            w-full!
-                                            cursor-pointer!
-                                            border-none!
-                                        "
-                                        control-class="
-                                            w-full
-                                            bg-white!
-                                        "
+                                        :error="submitted ? errors.date : null"
+                                        v-slot="{ id, invalid, describedBy }"
                                         class="
                                             col-span-12
                                         "
-                                    />
+                                    >
+                                        <DatePicker
+                                            :input-id="id"
+                                            v-model="date"
+                                            date-format="dd.mm.yy"
+                                            show-time
+                                            hour-format="24"
+                                            :show-icon="false"
+                                            :manual-input="false"
+                                            :invalid="invalid"
+                                            :aria-describedby="describedBy"
+                                            class="w-full"
+                                            :input-class="[
+                                                'w-full! cursor-pointer! rounded-md! bg-white! px-3! py-3! text-normal! text-darkgrey! border-none!',
+                                            ]"
+                                        />
+                                    </FormField>
                                 </div>
 
                                 <!-- ======================================================== -->

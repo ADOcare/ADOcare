@@ -459,6 +459,13 @@ class DekurzV2BuilderTest extends TestCase
         $actor = User::findOrFail(1);
         $preview = new DekurzV2PreviewService($this->builder(), new DekurzDocumentService);
 
+        $emptyPreview = $preview->buildEmpty($patient, $actor, 11);
+
+        self::assertSame(11, $emptyPreview['dekurz_number']);
+        self::assertSame('Anna Pacientová', $emptyPreview['patient_name']);
+        self::assertNull($emptyPreview['month']);
+        self::assertSame([], $emptyPreview['days']);
+
         $beforeDraft = $preview->build($patient, '2026-10', $actor, 12);
 
         self::assertSame(12, $beforeDraft['dekurz_number']);

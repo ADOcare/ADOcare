@@ -95,7 +95,10 @@ class DekurzV2Controller extends Controller
     {
         $patient = Patient::query()->findOrFail($request->integer('patient_id'));
         $this->authorize('view', $patient);
-        $payload = $this->preview->build($patient, $request->validated('month'), $request->user(), $request->validated('dekurz_number'), $request->validated('days'), $request->validated('sections'));
+        $month = $request->validated('month');
+        $payload = $month
+            ? $this->preview->build($patient, $month, $request->user(), $request->validated('dekurz_number'), $request->validated('days'), $request->validated('sections'))
+            : $this->preview->buildEmpty($patient, $request->user(), $request->validated('dekurz_number'));
 
         return response()->view('pdf.dekurz', [
             'dekurzData' => $payload,

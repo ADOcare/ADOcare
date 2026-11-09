@@ -280,37 +280,71 @@ export default {
 
         tabs: {
             root: {
-                class: 'flex flex-col'
+                class: 'flex! flex-col! gap-2! bg-transparent!'
             }
         },
 
+
         tablist: {
             root: {
-                class: 'flex flex-row'
+                class: 'relative! w-full! min-w-0! border-0! bg-transparent! pb-9!'
             },
             tabList: {
-                class: 'flex flex-row !gap-1 border-0! -mb-6!'
+                class: 'flex! flex-row! flex-nowrap! items-center! gap-2! m-0! border-0! bg-transparent! p-0!'
             },
             activeBar: {
                 class: 'hidden!'
             },
+            prevButton: {
+                class: [
+                    'absolute! bottom-0! top-auto! left-auto! right-8!',
+                    'z-10! flex! h-7! w-4! items-center! justify-center!',
+                    'cursor-pointer! border-0! bg-transparent! p-0!',
+                    'text-darkgrey! text-normal! shadow-none!',
+                    'hover:text-accent!',
+                ].join(' ')
+            },
+            nextButton: {
+                class: [
+                    'absolute! bottom-0! top-auto! left-auto! right-0!',
+                    'z-10! flex! h-7! w-4! items-center! justify-center!',
+                    'cursor-pointer! border-0! bg-transparent! p-0!',
+                    'text-darkgrey! text-normal! shadow-none!',
+                    'hover:text-accent!'
+                ].join(' ')
+            }
         },
+
 
         tab: {
             root: {
-                class: 'relative z-0 flex items-center cursor-pointer select-none transition-all duration-200 text-mini! text-darkgrey! pt-2! px-3! pb-10! lowercase! rounded-t-md border-0! bg-transparent! hover:bg-tag3! hover:text-accent! hover:no-underline! data-[p-active=true]:bg-tag3! data-[p-active=true]:text-accent! data-[p-active=true]:no-underline!'
+                class: [
+                    // Match AppButton: height, radius, font and spacing.
+                    'flex! h-7! min-h-7! shrink-0! items-center! justify-center! gap-2! mr-1!',
+                    'm-0! cursor-pointer! select-none! whitespace-nowrap!',
+                    'rounded-md! border-0! px-3! py-0! text-normal! font-normal! normal-case!',
+                    'shadow-none! no-underline! transition-colors! duration-200!',
+                    // Inactive = AppButton secondary.
+                    'bg-accent! text-white! hover:bg-darkgrey!',
+                    // Active = AppButton accent.
+                    'data-[p-active=true]:bg-darkgrey! data-[p-active=true]:text-white!',
+                    'data-[p-active=true]:hover:bg-darkgrey! data-[p-active=true]:hover:text-white!',
+                    // Accessible focus and disabled state.
+                    'focus-visible:outline-2! focus-visible:outline-offset-2! focus-visible:outline-accent!',
+                    'data-[p-disabled=true]:cursor-not-allowed! data-[p-disabled=true]:opacity-50!',
+                ].join(' ')
             }
         },
 
         tabpanels: {
             root: {
-                class: 'relative z-10 -mt-2 p-0! border-0! bg-transparent! rounded-md!'
+                class: 'relative mt-0! rounded-md! border-0! bg-transparent! p-0! text-darkgrey!'
             }
         },
 
         tabpanel: {
             root: {
-                class: 'relative px-0! bg-transparent! text-darkgrey! rounded-md!'
+                class: 'relative rounded-md! border-0! bg-transparent! p-0! text-darkgrey!'
             }
         },
 

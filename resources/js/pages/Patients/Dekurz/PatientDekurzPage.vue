@@ -1078,8 +1078,7 @@ let previewRequestId =
 
 async function loadPreview() {
     if (
-        !patientId.value ||
-        !monthKey.value
+        !patientId.value
     ) {
         previewRequestId++
 
@@ -1118,7 +1117,7 @@ async function loadPreview() {
             }
             : {
                 patient_id: patientId.value,
-                month: monthKey.value,
+                month: monthKey.value || null,
                 dekurz_number: dekurzNumber.value || undefined,
                 sections: sectionPayload(),
             }
@@ -1541,6 +1540,7 @@ watch(
         resetUnselectedCreationState()
         await loadMonthOptions()
         await selectFirstReadyMonth()
+        schedulePreview()
     },
 )
 
@@ -1597,6 +1597,7 @@ onMounted(
             resetUnselectedCreationState()
             await loadMonthOptions()
             await selectFirstReadyMonth()
+            schedulePreview()
         }
 
         await loadMacros()

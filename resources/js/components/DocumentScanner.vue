@@ -7,6 +7,7 @@ import {
     type CornerPoints,
     type Point,
 } from 'scanic'
+import AppButton from '@/components/AppButton.vue'
 
 const props = withDefaults(defineProps<{
     paused?: boolean
@@ -26,11 +27,11 @@ const emit = defineEmits<{
     reviewingChange: [reviewing: boolean]
 }>()
 
-const DETECTION_INTERVAL_MS = 300
+const DETECTION_INTERVAL_MS = 400
 const MIN_CONFIDENCE = 0.80
 const STABLE_FRAMES = 2
 const FRAMES_WITHOUT_PAPER_TO_REARM = 6
-const CAPTURE_MAX_DIMENSION = 3200
+const CAPTURE_MAX_DIMENSION = 2400
 
 const video = ref<HTMLVideoElement | null>(null)
 const editorHost = ref<HTMLDivElement | null>(null)
@@ -47,7 +48,22 @@ const torchEnabled = ref(false)
 const liveCorners = ref<CornerPoints | null>(null)
 const editedCorners = ref<CornerPoints | null>(null)
 const reviewSource = ref<'camera' | 'gallery' | null>(null)
-const videoSize = ref({ width: 1, height: 1 })
+const videoSize = ref({ width: 9, height: 16 })
+const reviewSize = ref<{ width: number; height: number } | null>(null)
+
+// Match the exact dimensions of the camera (or the gallery image while reviewing).
+// Limit height so portrait footage does not extend beyond the mobile viewport.
+const frameAspectRatio = computed(() => {
+    const size = reviewing.value && reviewSize.value
+        ? reviewSize.value
+        : videoSize.value
+
+    return size.width > 0 && size.height > 0
+        ? size.width / size.height
+        : 9 / 16
+})
+
+const frameMaxWidth = computed(() => `${(frameAspectRatio.value * 72).toFixed(3)}dvh`)
 
 const scanner = new Scanner()
 let stream: MediaStream | null = null
@@ -311,7 +327,7 @@ function toBlob(canvas: HTMLCanvasElement): Promise<Blob> {
         canvas.toBlob(
             (blob) => blob ? resolve(blob) : reject(new Error('Fotku sa nepodarilo uložiť.')),
             'image/jpeg',
-            0.95,
+            0.88,
         )
     })
 }
@@ -330,6 +346,7 @@ function enableVideo() {
 function resetReview() {
     destroyEditor()
     sourceCanvas = null
+    reviewSize.value = null
     editedCorners.value = null
     reviewing.value = false
     reviewSource.value = null
@@ -351,6 +368,7 @@ async function beginReview(
 ) {
     stopDetection()
     sourceCanvas = canvas
+    reviewSize.value = { width: canvas.width, height: canvas.height }
     editedCorners.value = corners
     reviewSource.value = source
     reviewing.value = true
@@ -373,12 +391,12 @@ async function beginReview(
             enabled: true,
             size: 96,
             zoom: 2,
-            borderColor: '#22c55e',
-            crosshairColor: '#22c55e',
+            borderColor: '#5C9EAD',
+            crosshairColor: '#5C9EAD',
         },
         theme: {
-            accent: '#22c55e',
-            edgeColor: '#22c55e',
+            accent: '#5C9EAD',
+            edgeColor: '#5C9EAD',
             edgeWidth: 2,
             handleSize: 18,
             handleHit: 54,
@@ -673,10 +691,14 @@ onBeforeUnmount(stopScanner)
 </script>
 
 <template>
-    <div class=" overflow-hidden rounded-md bg-black text-white">
+    <div
+        class="mx-auto flex w-full flex-col gap-2 bg-transparent text-darkgrey"
+        :style="{ maxWidth: frameMaxWidth }"
+    >
         <div
             id="scan-preview-anchor"
-            class="relative mx-auto aspect-[9/16] w-full max-w-[43.875dvh] overflow-hidden bg-black"
+            class="relative w-full overflow-hidden rounded-md bg-tag3"
+            :style="{ aspectRatio: frameAspectRatio }"
         >
             <video
                 ref="video"
@@ -684,7 +706,7 @@ onBeforeUnmount(stopScanner)
                 muted
                 playsinline
                 webkit-playsinline
-                class="absolute inset-0 h-full w-full object-cover"
+                class="absolute inset-0 h-full w-full object-contain"
                 @loadedmetadata="initializeCamera"
                 @resize="syncVideoSize"
                 @loadeddata="initializeCamera"
@@ -700,150 +722,148 @@ onBeforeUnmount(stopScanner)
             >
                 <polygon
                     :points="polygonPoints"
-                    fill="none"
-                    stroke="#22c55e"
-                    stroke-width="2"
+                    fill="rgba(92, 158, 173, 0.3)"
+                    stroke="#5C9EAD"
+                    stroke-width="1"
                     vector-effect="non-scaling-stroke"
                 />
             </svg>
 
-            <div v-if="reviewing" ref="editorHost" class="absolute inset-0 z-10 touch-none bg-black" />
+            <!-- Scanic reserves 12px per edge; extending its host keeps the image flush with the viewport. -->
+            <div v-if="reviewing" ref="editorHost" class="absolute -inset-3 z-10 touch-none bg-black" />
 
-            <div
-                v-if="loading"
-                class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60 text-center"
-            >
-                <i class="bi bi-arrow-repeat animate-spin text-2xl" aria-hidden="true" />
-                <p class="text-normal">Zapínam fotoaparát…</p>
-            </div>
-
-            <div
-                v-if="error && !reviewing"
-                class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/80 px-5 text-center"
-                role="alert"
-            >
-                <i class="bi bi-camera-video-off text-3xl" aria-hidden="true" />
-                <p class="max-w-sm text-normal">{{ error }}</p>
-                <button
-                    type="button"
-                    class="mt-2 min-h-11 rounded-md bg-white px-4 text-normal text-darkgrey"
-                    @click="retryCamera"
-                >
-                    Skúsiť znova
-                </button>
-            </div>
-
-            <Transition name="scan-success">
                 <div
-                    v-if="savedAnimation"
-                    class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-black/25"
-                    role="status"
+                    v-if="loading"
+                    class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black text-center text-white"
                 >
-                    <div class="flex items-center gap-3 rounded-md bg-white px-5 py-3 text-darkgrey shadow-xl">
-                        <i class="bi bi-check-circle-fill text-2xl text-accent" aria-hidden="true" />
-                        <span class="text-normal font-semibold">Strana pridaná</span>
-                    </div>
+                    <i class="bi bi-arrow-repeat animate-spin text-xl" aria-hidden="true" />
                 </div>
-            </Transition>
 
-            <button
-                v-if="!reviewing && !error && !loading"
-                type="button"
-                class="
-                    absolute
-                    bottom-4
-                    left-1/2
-                    z-20
-                    flex
-                    size-16
-                    -translate-x-1/2
-                    items-center
-                    justify-center
-                    rounded-full
-                    border-4
-                    border-white
-                    bg-black/30
-                    shadow-xl
-                    transition-transform
-                    active:scale-95
-                    disabled:opacity-50
-                "
-                :disabled="!canTakePhoto"
-                aria-label="Odfotiť dokument"
-                title="Odfotiť"
-                @click="captureManually"
-            >
-                <span class="size-12 rounded-full bg-white" aria-hidden="true" />
-            </button>
+                <div
+                    v-if="error && !reviewing"
+                    class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black px-5 text-center text-white"
+                    role="alert"
+                >
+                    <i class="bi bi-camera-video-off text-xl" aria-hidden="true" />
+                    <p class="text-normal">{{ error }}</p>
+                    <AppButton
+                        type="button"
+                        variant="accent"
+                        label="Skúsiť znova"
+                        @click="retryCamera"
+                    />
+                </div>
 
-            <button
-                v-if="!reviewing && !error && !loading"
-                type="button"
-                class="
-                    absolute
-                    bottom-[1.625rem]
-                    right-4
-                    z-20
-                    flex
-                    h-11
-                    items-center
-                    justify-center
-                    gap-2
-                    px-3
-                    text-2xl
-                    text-white
-                    disabled:opacity-50
-                "
-                :disabled="!canOpenGallery"
-                @click="emit('galleryRequested')"
-            >
-                <i class="bi bi-images" aria-hidden="true" />
-            </button>
+                <Transition name="scan-success">
+                    <div
+                        v-if="savedAnimation"
+                        class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-accent/10"
+                        role="status"
+                    >
+                        <div class="flex items-center gap-3 rounded-md bg-white px-5 py-3 text-darkgrey shadow-xl">
+                            <i class="bi bi-check-circle-fill text-xl text-accent" aria-hidden="true" />
+                            <span class="text-normal">Strana pridaná</span>
+                        </div>
+                    </div>
+                </Transition>
 
-        </div>
-
-        <div
-            v-if="!reviewing && !error"
-            class="flex min-h-16 items-center justify-between gap-3 bg-black px-3 py-3"
-        >
-            <p class="min-w-0 flex-1 text-mini text-white/90" role="status" aria-live="polite">
-                {{ status }}
-            </p>
-            <div class="flex shrink-0 items-center gap-2">
                 <button
-                    v-if="torchAvailable"
+                    v-if="!reviewing && !error && !loading"
                     type="button"
-                    class="flex h-11 w-11 items-center justify-center rounded-md bg-white/15 text-white"
+                    class="
+                        absolute
+                        bottom-4
+                        left-1/2
+                        z-20
+                        flex
+                        size-16
+                        -translate-x-1/2
+                        items-center
+                        justify-center
+                        rounded-full
+                        border-4
+                        border-white
+                        bg-black/30
+                        shadow-xl
+                        transition-transform
+                        disabled:opacity-50
+                    "
+                    :disabled="!canTakePhoto"
+                    aria-label="Odfotiť dokument"
+                    title="Odfotiť"
+                    @click="captureManually"
+                >
+                    <span class="size-12 rounded-full bg-white" aria-hidden="true" />
+                </button>
+
+                <button
+                    v-if="!reviewing && !error && !loading && torchAvailable"
+                    type="button"
+                    class="
+                        absolute
+                        bottom-[1.625rem]
+                        left-4
+                        z-20
+                        flex
+                        h-11
+                        items-center
+                        justify-center
+                        gap-2
+                        px-3
+                        text-2xl
+                        text-white
+                    "
                     :aria-label="torchEnabled ? 'Vypnúť svetlo' : 'Zapnúť svetlo'"
+                    :title="torchEnabled ? 'Vypnúť svetlo' : 'Zapnúť svetlo'"
                     @click="toggleTorch"
                 >
                     <i :class="torchEnabled ? 'bi bi-lightning-fill' : 'bi bi-lightning'" aria-hidden="true" />
                 </button>
-            </div>
+
+                <button
+                    v-if="!reviewing && !error && !loading"
+                    type="button"
+                    class="
+                        absolute
+                        bottom-[1.625rem]
+                        right-4
+                        z-20
+                        flex
+                        h-11
+                        items-center
+                        justify-center
+                        gap-2
+                        px-3
+                        text-2xl
+                        text-white
+                        disabled:opacity-50
+                    "
+                    :disabled="!canOpenGallery"
+                    @click="emit('galleryRequested')"
+                >
+                    <i class="bi bi-images" aria-hidden="true" />
+                </button>
+
         </div>
 
-        <div v-if="reviewing" class="flex flex-col gap-2 bg-black px-3 py-3">
-            <p class="text-center text-mini text-white/90">
-                Posuňte rohy na okraje papiera a pridajte stranu.
-            </p>
+        <div v-if="reviewing" class="flex flex-col gap-2 px-1 py-2">
             <p v-if="error" class="rounded-md bg-danger px-3 py-2 text-mini text-white" role="alert">{{ error }}</p>
             <div class="grid grid-cols-2 gap-2">
-                <button
+                <AppButton
                     type="button"
-                    class="min-h-12 rounded-md border border-white/40 bg-black/70 px-4 text-normal text-white disabled:opacity-50"
+                    :label="capturing ? 'Ukladám…' : (reviewSource === 'gallery' ? 'Preskočiť fotku' : 'Odfotiť znova')"
+                    variant="text"
                     :disabled="capturing"
                     @click="cancelReview"
-                >
-                    {{ reviewSource === 'gallery' ? 'Preskočiť fotku' : 'Odfotiť znova' }}
-                </button>
-                <button
+                />
+                
+                <AppButton
                     type="button"
-                    class="min-h-12 rounded-md bg-white px-4 text-normal font-semibold text-darkgrey disabled:opacity-50"
+                    :label="capturing ? 'Ukladám…' : 'Pridať stranu'"
+                    variant="accent"
                     :disabled="capturing"
                     @click="confirmCapture"
-                >
-                    {{ capturing ? 'Ukladám…' : 'Pridať stranu' }}
-                </button>
+                />
             </div>
         </div>
     </div>
@@ -867,12 +887,6 @@ onBeforeUnmount(stopScanner)
 @keyframes scan-confirm {
     from { transform: translateY(14px) scale(0.9); }
     to { transform: translateY(0) scale(1); }
-}
-
-:deep(.scanic-corner-editor),
-:deep(.scanic-corner-editor canvas) {
-    width: 100%;
-    height: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {

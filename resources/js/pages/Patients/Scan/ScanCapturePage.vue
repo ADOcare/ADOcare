@@ -254,13 +254,13 @@ const finalSeverity =
 const MAX_SOURCE_FILE_BYTES =
     25 * 1024 * 1024
 const TARGET_FILE_BYTES =
-    4 * 1024 * 1024
+    2 * 1024 * 1024
 const MAX_FILE_BYTES =
-    8 * 1024 * 1024
+    6 * 1024 * 1024
 const MAX_TOTAL_BYTES =
-    80 * 1024 * 1024
+    160 * 1024 * 1024
 const MAX_IMAGE_DIMENSION =
-    3200
+    2400
 /* -------------------------------------------------------------------------- */
 /* Session helpers                                                            */
 /* -------------------------------------------------------------------------- */
@@ -957,7 +957,7 @@ onBeforeUnmount(() => {
             :class="finalSeverity === 'success' ? 'bg-accent' : 'bg-danger'"
             role="status"
         >
-            <div class="final-message flex w-full max-w-md flex-col items-center text-center text-white">
+            <div class="final-message flex w-full flex-col items-center text-center text-white">
                 <div class="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-white/15">
                     <i
                         :class="finalSeverity === 'success' ? 'bi bi-check-lg' : 'bi bi-x-lg'"
@@ -977,29 +977,13 @@ onBeforeUnmount(() => {
         class="flex min-h-[100dvh] w-full flex-col bg-tag3 px-3 py-5 text-darkgrey sm:px-6 sm:py-8 lg:px-8"
     >
         <header class="mb-5 flex flex-col items-start justify-between gap-3 sm:mb-7">
-            <div
-                v-if="sessionValid"
-                class="w-full shrink-0"
-                role="timer"
-                aria-live="off"
-            >
-                <div class="mt-1 h-1 overflow-hidden bg-white rounded-md">
-                    <div
-                        class="h-full rounded-full bg-accent transition-[width] duration-500"
-                        :style="{ width: `${expiryProgress}%` }"
-                    />
-                </div>
-            </div>
-
             <div class="min-w-0 flex gap-2">
-                <h1 class="break-words text-normal text-darkgrey!">{{ patientName }}</h1>
+                <h1 class="break-words text-heading text-darkgrey!">{{ patientName }}</h1>
                 <Tag 
                     value="Lekársky nález"
                     class="bg-darkgrey!"
                 />
             </div>
-
-
         </header>
 
         <form class="flex w-full flex-col gap-7 sm:gap-9" @submit.prevent="finalizeScan">
@@ -1019,9 +1003,6 @@ onBeforeUnmount(() => {
 
             <!-- Second: pages appear here automatically, and can be opened or removed. -->
             <section class="flex w-full flex-col gap-3" aria-labelledby="pages-title">
-                <p v-if="galleryQueue.length" class="text-mini text-darkgrey/70" role="status">
-                    Vyberte okraje každej fotky. Zostáva: {{ galleryQueue.length }}.
-                </p>
 
                 <input
                     ref="galleryInputRef"
@@ -1101,8 +1082,7 @@ onBeforeUnmount(() => {
                         :manualInput="false"
                         class="w-full"
                         :inputClass="[
-                            'w-full! cursor-pointer! rounded-md! bg-white! px-3! py-3! text-normal! text-darkgrey!',
-                            invalid ? 'border-danger!' : 'border-none!'
+                            'w-full! cursor-pointer! rounded-md! bg-white! px-3! py-3! text-normal! text-darkgrey! border-none!',
                         ]"
                         :invalid="invalid"
                         :aria-invalid="invalid || undefined"
@@ -1118,6 +1098,20 @@ onBeforeUnmount(() => {
                     class="w-full! rounded-md!"
                     :align="'center'"
                 />
+
+                <div
+                    v-if="sessionValid"
+                    class="w-full shrink-0"
+                    role="timer"
+                    aria-live="off"
+                >
+                    <div class="mt-1 h-1 overflow-hidden bg-white rounded-md">
+                        <div
+                            class="h-full rounded-full bg-accent transition-[width] duration-500"
+                            :style="{ width: `${expiryProgress}%` }"
+                        />
+                    </div>
+                </div>
             </section>
         </form>
     </main>

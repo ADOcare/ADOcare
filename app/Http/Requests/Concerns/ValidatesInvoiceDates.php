@@ -15,7 +15,6 @@ trait ValidatesInvoiceDates
 
         return [
             'issued_at' => [$presence, 'date_format:Y-m-d'],
-            'sent_at' => [$presence, 'date_format:Y-m-d'],
             'due_date' => [$presence, 'date_format:Y-m-d'],
         ];
     }
@@ -28,19 +27,15 @@ trait ValidatesInvoiceDates
 
             $period = (string) $this->input('period', $invoice?->period ?? '');
             $type = (string) $this->input('type', $invoice?->type ?? '');
+            $batchMode = (string) $this->input('batch_mode', $invoice?->batch_mode?->value ?? '');
             $issuedAt = $this->input('issued_at', $invoice?->issued_at?->toDateString());
-            $sentAt = $this->input('sent_at', $invoice?->sent_at?->toDateString());
             $dueDate = $this->input('due_date', $invoice?->due_date?->toDateString());
 
-            if (!$issuedAt) {
+            if (! $issuedAt) {
                 $validator->errors()->add('issued_at', 'Dátum vystavenia je povinný.');
             }
 
-            if (!$sentAt) {
-                $validator->errors()->add('sent_at', 'Dátum odoslania je povinný.');
-            }
-
-            if (!$dueDate) {
+            if (! $dueDate) {
                 $validator->errors()->add('due_date', 'Dátum splatnosti je povinný.');
             }
 
@@ -50,21 +45,27 @@ trait ValidatesInvoiceDates
 
             try {
                 $issued = CarbonImmutable::createFromFormat('!Y-m-d', (string) $issuedAt, 'Europe/Bratislava');
-                $sent = CarbonImmutable::createFromFormat('!Y-m-d', (string) $sentAt, 'Europe/Bratislava');
                 $due = CarbonImmutable::createFromFormat('!Y-m-d', (string) $dueDate, 'Europe/Bratislava');
             } catch (\Throwable) {
                 return;
-            }
-
-            if ($sent->lt($issued)) {
-                $validator->errors()->add('sent_at', 'Dátum odoslania nemôže byť skorší ako dátum vystavenia.');
             }
 
             if ($due->lt($issued)) {
                 $validator->errors()->add('due_date', 'Dátum splatnosti nemôže byť skorší ako dátum vystavenia.');
             }
 
-            if (!$period || !InvoiceDates::appliesToMonthlyService($type)) {
+            if ($this->isMethod('post')) {
+                $today = CarbonImmutable::now('Europe/Bratislava')->startOfDay();
+
+                if (! $issued->equalTo($today)) {
+                    $validator->errors()->add(
+                        'issued_at',
+                        'Dátum vystavenia nového dokladu musí byť dnešný deň '.$today->format('d.m.Y').'.'
+                    );
+                }
+            }
+
+            if (! $period || ! InvoiceDates::requiresMonthlyIssueDeadline($type, $batchMode)) {
                 return;
             }
 
@@ -78,14 +79,14 @@ trait ValidatesInvoiceDates
             if ($issued->lt($deliveryDate)) {
                 $validator->errors()->add(
                     'issued_at',
-                    'Dátum vystavenia nemôže byť skorší ako dátum dodania služby ' . $deliveryDate->format('d.m.Y') . '.'
+                    'Dátum vystavenia nemôže byť skorší ako dátum dodania služby '.$deliveryDate->format('d.m.Y').'.'
                 );
             }
 
             if ($issued->gt($latestIssueDate)) {
                 $validator->errors()->add(
                     'issued_at',
-                    'Faktúra musí byť vystavená najneskôr ' . $latestIssueDate->format('d.m.Y') . '.'
+                    'Faktúra musí byť vystavená najneskôr '.$latestIssueDate->format('d.m.Y').'.'
                 );
             }
         });

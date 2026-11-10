@@ -1,16 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import api from '@/services/api'
-import {
-    automaticInvoiceDates,
-    defaultInvoiceDueDate,
-    formatSlovakDate,
-    latestInvoiceIssueDate,
-    serviceDeliveryDate,
-    toApiDate,
-    validateInvoiceDates,
-} from '@/utils/invoiceDates'
 
 type InsuranceCompanyOption = {
   id: number
@@ -27,35 +18,6 @@ const saving = ref(false)
 const loadingCompanies = ref(false)
 const period = ref<Date | null>(props.initialPeriod ?? null)
 const insuranceCompanies = ref<InsuranceCompanyOption[]>([])
-const now = new Date()
-const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-const issuedAt = ref<Date | null>(today)
-const sentAt = ref<Date | null>(today)
-const dueDate = ref<Date | null>(null)
-const deliveryDate = computed(() => serviceDeliveryDate(period.value))
-const latestIssueDate = computed(() => latestInvoiceIssueDate(period.value))
-
-watch(
-  period,
-  (selectedPeriod) => {
-    if (!selectedPeriod) {
-      issuedAt.value = null
-      sentAt.value = null
-      dueDate.value = null
-      return
-    }
-
-    const automatic = automaticInvoiceDates(selectedPeriod)
-    issuedAt.value = automatic.issuedAt
-    sentAt.value = automatic.sentAt
-    dueDate.value = automatic.dueDate
-  },
-  { immediate: true },
-)
-
-watch(sentAt, (value) => {
-  dueDate.value = defaultInvoiceDueDate(value)
-})
 
 void loadInsuranceCompanies()
 
@@ -103,24 +65,6 @@ async function submit() {
     return
   }
 
-  const dateError = validateInvoiceDates(
-    period.value,
-    'procedures',
-    issuedAt.value,
-    sentAt.value,
-    dueDate.value,
-  )
-
-  if (dateError) {
-    toast.add({
-      severity: 'error',
-      summary: 'Nesprávne dátumy',
-      detail: dateError,
-      life: 5000,
-    })
-    return
-  }
-
   saving.value = true
 
   try {
@@ -143,9 +87,6 @@ async function submit() {
                 batch_mode: batchMode,
                 period: periodValue,
                 type,
-                issued_at: toApiDate(issuedAt.value),
-                sent_at: toApiDate(sentAt.value),
-                due_date: toApiDate(dueDate.value),
               })
 
               successCount += 1
@@ -229,55 +170,6 @@ async function submit() {
         class="w-full"
         inputClass="w-full!"
       />
-    </div>
-
-    <div class="col-span-12">
-      <label class="block text-normal mb-1">Dátum dodania služby</label>
-      <InputText :model-value="formatSlovakDate(deliveryDate)" disabled fluid />
-      <small class="text-muted">Automaticky posledný deň vybraného mesiaca.</small>
-    </div>
-
-    <div class="col-span-12 md:col-span-6">
-      <label class="block text-normal mb-1">Dátum vystavenia *</label>
-      <DatePicker
-        v-model="issuedAt"
-        dateFormat="dd.mm.yy"
-        :manualInput="false"
-        :minDate="deliveryDate ?? undefined"
-        :maxDate="latestIssueDate ?? undefined"
-        class="w-full"
-        inputClass="w-full!"
-      />
-      <small v-if="latestIssueDate" class="text-muted">
-        Najneskôr {{ formatSlovakDate(latestIssueDate) }}.
-      </small>
-    </div>
-
-    <div class="col-span-12 md:col-span-6">
-      <label class="block text-normal mb-1">Dátum odoslania *</label>
-      <DatePicker
-        v-model="sentAt"
-        dateFormat="dd.mm.yy"
-        :manualInput="false"
-        :minDate="issuedAt ?? undefined"
-        class="w-full"
-        inputClass="w-full!"
-      />
-    </div>
-
-    <div class="col-span-12">
-      <label class="block text-normal mb-1">Dátum splatnosti *</label>
-      <DatePicker
-        v-model="dueDate"
-        dateFormat="dd.mm.yy"
-        :manualInput="false"
-        :minDate="issuedAt ?? undefined"
-        class="w-full"
-        inputClass="w-full!"
-      />
-      <small class="text-muted">
-        Automaticky 30 dní od odoslania; upravte podľa zmluvy s poisťovňou.
-      </small>
     </div>
 
     <div class="col-span-12 mt-4 flex items-center justify-end gap-2">

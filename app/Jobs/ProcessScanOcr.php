@@ -53,20 +53,23 @@ class ProcessScanOcr implements ShouldQueue
                 Log::error('ProcessScanOcr: OCR failed', [
                     'document_id' => $this->document->id,
                     'status' => $response->status(),
-                    'body' => $response->body(),
                 ]);
                 throw new \Exception("OCR returned status {$response->status()}");
             }
 
+            // Never log OCR response bodies; they may contain personal health data.
             Log::info('ProcessScanOcr: success', [
                 'document_id' => $this->document->id,
-                'response' => $response->json(),
+                'status' => $response->status(),
             ]);
+
+            if (config('ai.enabled', false) && config('ai_ocr.auto_enhance', false)) {
+                EnhanceScanOcr::dispatch((int) $this->document->id);
+            }
         } catch (\Throwable $e) {
             Log::error('ProcessScanOcr: exception', [
                 'document_id' => $this->document->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'exception_class' => get_class($e),
             ]);
 
             // Rethrow so queue knows to retry

@@ -28,8 +28,14 @@ final class InvoiceDates
         return in_array($type, ['procedures', 'transport'], true);
     }
 
+    public static function requiresMonthlyIssueDeadline(string $type, string $batchMode): bool
+    {
+        return self::appliesToMonthlyService($type)
+            && ! in_array($batchMode, ['corrective', 'additive'], true);
+    }
+
     /**
-     * @return array{issued_at: string, sent_at: string, due_date: string}
+     * @return array{issued_at: string, due_date: string}
      */
     public static function automaticDates(
         string $period,
@@ -37,21 +43,11 @@ final class InvoiceDates
         int $dueDays = self::DEFAULT_DUE_DAYS,
     ): array {
         $referenceDate = ($referenceDate ?? CarbonImmutable::now('Europe/Bratislava'))->startOfDay();
-        $deliveryDate = self::deliveryDate($period);
-        $latestIssueDate = self::latestIssueDate($period);
-
-        $issuedAt = match (true) {
-            $referenceDate->lt($deliveryDate) => $deliveryDate,
-            $referenceDate->gt($latestIssueDate) => $latestIssueDate,
-            default => $referenceDate,
-        };
-
-        $sentAt = $referenceDate->lt($issuedAt) ? $issuedAt : $referenceDate;
-        $dueDate = $sentAt->addDays($dueDays);
+        $issuedAt = $referenceDate;
+        $dueDate = $issuedAt->addDays($dueDays);
 
         return [
             'issued_at' => $issuedAt->toDateString(),
-            'sent_at' => $sentAt->toDateString(),
             'due_date' => $dueDate->toDateString(),
         ];
     }

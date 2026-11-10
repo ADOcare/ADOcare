@@ -17,9 +17,9 @@ use App\Services\DocumentService;
 use App\Support\InvoiceDates;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 
@@ -28,7 +28,7 @@ class InvoiceController extends Controller
     public function index(Request $request)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$actor->company_id) {
+        if (! $actor instanceof User || ! $actor->company_id) {
             return $this->error('Používateľ nie je autentifikovaný', Response::HTTP_UNAUTHORIZED);
         }
 
@@ -38,8 +38,8 @@ class InvoiceController extends Controller
                 'user:id,title,first_name,last_name,company_id',
                 'relatedInvoice:id,invoice_number,type,patient_category,batch_mode',
             ])
-            ->whereHas('user', fn($q) => $q->where('company_id', $actor->company_id))
-            ->when($request->filled('period'), fn($q) => $q->where('period', $request->string('period')->toString()));
+            ->whereHas('user', fn ($q) => $q->where('company_id', $actor->company_id))
+            ->when($request->filled('period'), fn ($q) => $q->where('period', $request->string('period')->toString()));
 
         $results = ApiQuery::apply(
             $request,
@@ -50,9 +50,9 @@ class InvoiceController extends Controller
         );
 
         if ($results instanceof LengthAwarePaginator) {
-            $results->setCollection($results->getCollection()->map(fn(Invoice $invoice) => $this->toRow($invoice)));
+            $results->setCollection($results->getCollection()->map(fn (Invoice $invoice) => $this->toRow($invoice)));
         } elseif ($results instanceof Collection) {
-            $results = $results->map(fn(Invoice $invoice) => $this->toRow($invoice));
+            $results = $results->map(fn (Invoice $invoice) => $this->toRow($invoice));
         }
 
         return $this->success($results, 'Faktúry boli načítané');
@@ -61,7 +61,7 @@ class InvoiceController extends Controller
     public function store(StoreInvoiceRequest $request)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$actor->company_id) {
+        if (! $actor instanceof User || ! $actor->company_id) {
             return $this->error('Používateľ nie je autentifikovaný', Response::HTTP_UNAUTHORIZED);
         }
 
@@ -70,12 +70,12 @@ class InvoiceController extends Controller
         try {
             $invoice = DB::transaction(function () use ($actor, $validated) {
                 $company = Company::query()->lockForUpdate()->find($actor->company_id);
-                if (!$company) {
+                if (! $company) {
                     throw new \RuntimeException('Spoločnosť pre vystavenie faktúry nebola nájdená.');
                 }
 
                 // Guard: keep one invoice per service, period, insurer and patient category.
-                if (!$this->isNoteType((string) $validated['type'])) {
+                if (! $this->isNoteType((string) $validated['type'])) {
                     $this->deletePreviousScopedInvoices($actor, $validated);
                 }
 
@@ -98,7 +98,6 @@ class InvoiceController extends Controller
                     'total' => 0,
                     'invoice_number' => null,
                     'issued_at' => $validated['issued_at'],
-                    'sent_at' => $validated['sent_at'],
                     'due_date' => $validated['due_date'],
                     'related_invoice_id' => $validated['related_invoice_id'] ?? null,
                     'mime_type' => 'application/json',
@@ -109,7 +108,7 @@ class InvoiceController extends Controller
                         ? Invoice::query()->find($validated['related_invoice_id'])
                         : null;
 
-                    if (!$relatedInvoice || !$this->canAccess($actor, $relatedInvoice)) {
+                    if (! $relatedInvoice || ! $this->canAccess($actor, $relatedInvoice)) {
                         throw new \RuntimeException('Súvisiaca faktúra nebola nájdená alebo k nej nemáte prístup.');
                     }
 
@@ -143,7 +142,7 @@ class InvoiceController extends Controller
     public function show(Request $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
@@ -158,7 +157,7 @@ class InvoiceController extends Controller
     public function preview(Request $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
@@ -175,17 +174,17 @@ class InvoiceController extends Controller
     public function download(Request $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
         $this->currentInvoicePayload($invoice);
         $pdfPath = app(DocumentService::class)->getInvoicePdfPath($invoice);
-        if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
+        if (! $pdfPath || ! Storage::disk('local')->exists($pdfPath)) {
             return $this->error('PDF faktúry sa nenašlo', 500);
         }
 
-        $downloadName = 'faktúra_' . $invoice->invoice_number . '.pdf';
+        $downloadName = 'faktúra_'.$invoice->invoice_number.'.pdf';
 
         return response()->download(Storage::disk('local')->path($pdfPath), $downloadName, [
             'Content-Type' => 'application/pdf',
@@ -196,7 +195,9 @@ class InvoiceController extends Controller
      * Public, signed access to an invoice PDF.
      *
      * @group Invoices
+     *
      * @urlParam invoice int required Invoice ID. Example: 1
+     *
      * @queryParam format string optional Set to html for preview. Example: html
      * @queryParam download int optional Set to 1 for file download. Example: 1
      */
@@ -205,11 +206,11 @@ class InvoiceController extends Controller
         if ($request->query('download') === '1') {
             $this->currentInvoicePayload($invoice);
             $pdfPath = app(DocumentService::class)->getInvoicePdfPath($invoice);
-            if (!$pdfPath || !Storage::disk('local')->exists($pdfPath)) {
+            if (! $pdfPath || ! Storage::disk('local')->exists($pdfPath)) {
                 abort(500, 'Chyba pri generovaní PDF faktúry');
             }
 
-            $downloadName = 'faktúra_' . $invoice->invoice_number . '.pdf';
+            $downloadName = 'faktúra_'.$invoice->invoice_number.'.pdf';
             $absolutePath = Storage::disk('local')->path($pdfPath);
 
             return response()->download($absolutePath, $downloadName);
@@ -217,7 +218,7 @@ class InvoiceController extends Controller
 
         if ($request->query('format') === 'html') {
             $payload = $this->currentInvoicePayload($invoice);
-            if (!is_array($payload)) {
+            if (! is_array($payload)) {
                 abort(404, 'Náhľad faktúry nie je dostupný');
             }
 
@@ -229,7 +230,7 @@ class InvoiceController extends Controller
         // Request expires is a string time stamp, convert to int for URL generation
         $expires = is_numeric($request->query('expires')) ? (int) $request->query('expires') : null;
 
-        if (!$expires) {
+        if (! $expires) {
             abort(400, 'Neplatný alebo chýbajúci parameter expires');
         }
 
@@ -247,7 +248,6 @@ class InvoiceController extends Controller
 
         );
 
-
         // Extract signatures from the generated URLs to pass to the SPA for subsequent requests
         $query = [];
         parse_str(parse_url($dataUrl, PHP_URL_QUERY), $query);
@@ -255,6 +255,7 @@ class InvoiceController extends Controller
 
         parse_str(parse_url($mainUrl, PHP_URL_QUERY), $query);
         $main_signature = $query['signature'] ?? null;
+
         return redirect()->route('spa', [
             'any' => "public/invoices/{$invoice->id}",
             'main_signature' => $main_signature,
@@ -269,7 +270,7 @@ class InvoiceController extends Controller
     public function publicInvoiceData(Invoice $invoice)
     {
         $payload = $this->currentInvoicePayload($invoice);
-        if (!is_array($payload)) {
+        if (! is_array($payload)) {
             abort(404, 'Údaje faktúry nie sú dostupné');
         }
 
@@ -287,7 +288,7 @@ class InvoiceController extends Controller
     public function previewUrl(Request $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
@@ -303,7 +304,7 @@ class InvoiceController extends Controller
     public function update(UpdateInvoiceRequest $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie upraviť túto faktúru');
         }
 
@@ -322,18 +323,18 @@ class InvoiceController extends Controller
 
             // Validate uniqueness within the same year
             $existing = Invoice::query()
-                ->whereHas('user', fn($q) => $q->where('company_id', $actor->company_id))
+                ->whereHas('user', fn ($q) => $q->where('company_id', $actor->company_id))
                 ->where('invoice_number', $proposedNumber)
-                ->where('period', 'LIKE', $invoiceYear . '%')
+                ->where('period', 'LIKE', $invoiceYear.'%')
                 ->where('id', '!=', $invoice->id)
                 ->exists();
 
             if ($existing) {
-                return $this->error('Číslo faktúry ' . $proposedNumber . ' je už použité v roku ' . $invoiceYear . '.', Response::HTTP_UNPROCESSABLE_ENTITY);
+                return $this->error('Číslo faktúry '.$proposedNumber.' je už použité v roku '.$invoiceYear.'.', Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             // Update file name with the assigned number
-            $invoice->name = 'invoice_' . $proposedNumber . '.json';
+            $invoice->name = 'invoice_'.$proposedNumber.'.json';
         } else {
             // Remove invoice_number from update if not being set
             unset($validated['invoice_number']);
@@ -347,13 +348,13 @@ class InvoiceController extends Controller
         $invoice->update($validated);
 
         if ($this->isNoteType((string) $invoice->type)) {
-            if (!$invoice->related_invoice_id) {
+            if (! $invoice->related_invoice_id) {
                 return $this->error('Pre dobropis/ťarchopis je povinná súvisiaca faktúra.', Response::HTTP_UNPROCESSABLE_ENTITY);
             }
 
             if ($invoice->related_invoice_id) {
                 $relatedInvoice = Invoice::query()->find($invoice->related_invoice_id);
-                if (!$relatedInvoice || !$this->canAccess($actor, $relatedInvoice)) {
+                if (! $relatedInvoice || ! $this->canAccess($actor, $relatedInvoice)) {
                     return $this->forbidden('Nemáte oprávnenie použiť zvolenú súvisiacu faktúru');
                 }
 
@@ -384,7 +385,7 @@ class InvoiceController extends Controller
     public function destroy(Request $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie odstrániť túto faktúru');
         }
 
@@ -398,14 +399,14 @@ class InvoiceController extends Controller
     public function destroyMany(DestroyManyInvoiceRequest $request)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$actor->company_id) {
+        if (! $actor instanceof User || ! $actor->company_id) {
             return $this->error('Používateľ nie je autentifikovaný', Response::HTTP_UNAUTHORIZED);
         }
 
         $ids = $request->validated()['ids'];
         $invoices = Invoice::query()
             ->whereIn('id', $ids)
-            ->whereHas('user', fn($q) => $q->where('company_id', $actor->company_id))
+            ->whereHas('user', fn ($q) => $q->where('company_id', $actor->company_id))
             ->get();
 
         foreach ($invoices as $invoice) {
@@ -420,11 +421,11 @@ class InvoiceController extends Controller
     public function file(Request $request, Invoice $invoice)
     {
         $actor = $request->user();
-        if (!$actor instanceof User || !$this->canAccess($actor, $invoice)) {
+        if (! $actor instanceof User || ! $this->canAccess($actor, $invoice)) {
             return $this->forbidden('Nemáte oprávnenie na prístup k tejto faktúre');
         }
 
-        if (!Storage::disk('local')->exists($invoice->path)) {
+        if (! Storage::disk('local')->exists($invoice->path)) {
             return $this->notFound('Súbor faktúry neexistuje');
         }
 
@@ -433,13 +434,13 @@ class InvoiceController extends Controller
 
         return response()->file($absolutePath, [
             'Content-Type' => $mimeType ?: 'application/octet-stream',
-            'Content-Disposition' => 'inline; filename="' . addslashes($invoice->name) . '"',
+            'Content-Disposition' => 'inline; filename="'.addslashes($invoice->name).'"',
         ]);
     }
 
     private function canAccess(User $actor, Invoice $invoice): bool
     {
-        if (!$actor->company_id) {
+        if (! $actor->company_id) {
             return false;
         }
 
@@ -448,7 +449,7 @@ class InvoiceController extends Controller
 
     private function deleteStoredFile(?string $path): void
     {
-        if (!$path) {
+        if (! $path) {
             return;
         }
 
@@ -485,7 +486,7 @@ class InvoiceController extends Controller
 
         $actor = $invoice->user;
 
-        if (!$actor instanceof User) {
+        if (! $actor instanceof User) {
             return $payload;
         }
 
@@ -516,7 +517,7 @@ class InvoiceController extends Controller
             : null;
 
         return [
-            'invoice_payload_version' => 4,
+            'invoice_payload_version' => 5,
             'company_name' => $invoice->user?->company?->name,
             'company_address' => $invoice->user?->company?->address,
             'company_city' => $invoice->user?->company?->city,
@@ -534,7 +535,6 @@ class InvoiceController extends Controller
             'due_date' => $invoice->due_date?->toDateString(),
             'payment_method' => 'bankový prevod',
             'invoice_created_at' => $invoice->issued_at?->toDateString(),
-            'invoice_sent_at' => $invoice->sent_at?->toDateString(),
             'services_delivered_at' => $servicesDeliveredAt,
 
             'insurance_company_id' => $invoice->insurance_company_id,
@@ -559,7 +559,7 @@ class InvoiceController extends Controller
             'related_invoice_number' => $invoice->relatedInvoice?->invoice_number,
             'associated_documents' => $association['documents'],
             'created_by_user_id' => $actor->id,
-            'created_by_user' => trim(($actor->title ?? '') . ' ' . ($actor->first_name ?? '') . ' ' . ($actor->last_name ?? '')),
+            'created_by_user' => trim(($actor->title ?? '').' '.($actor->first_name ?? '').' '.($actor->last_name ?? '')),
             'created_at' => now()->toDateTimeString(),
             'updated_at' => now()->toDateTimeString(),
         ];
@@ -582,7 +582,7 @@ class InvoiceController extends Controller
         $documentsQuery = Document::query()
             ->where('type', $targetType)
             ->where('period', $invoice->period)
-            ->whereHas('user', fn($q) => $q->where('company_id', $companyId))
+            ->whereHas('user', fn ($q) => $q->where('company_id', $companyId))
             ->with([
                 'user:id,code,initials',
                 'branch:id,code',
@@ -623,7 +623,6 @@ class InvoiceController extends Controller
             ];
         }
 
-
         return [
             'total' => round($total, 2),
             'documents' => $rows,
@@ -635,16 +634,17 @@ class InvoiceController extends Controller
      */
     private function readDocumentJson(?string $path): ?array
     {
-        if (!$path || !Storage::disk('local')->exists($path)) {
+        if (! $path || ! Storage::disk('local')->exists($path)) {
             return null;
         }
 
         $decoded = json_decode((string) Storage::disk('local')->get($path), true);
+
         return is_array($decoded) ? $decoded : null;
     }
 
     /**
-     * @param array<string, mixed> $validated
+     * @param  array<string, mixed>  $validated
      */
     private function deletePreviousScopedInvoices(User $actor, array $validated): void
     {
@@ -653,7 +653,7 @@ class InvoiceController extends Controller
             ->where('period', (string) $validated['period'])
             ->where('patient_category', (string) $validated['patient_category'])
             ->where('batch_mode', (string) $validated['batch_mode'])
-            ->whereHas('user', fn($q) => $q->where('company_id', $actor->company_id));
+            ->whereHas('user', fn ($q) => $q->where('company_id', $actor->company_id));
 
         if (array_key_exists('insurance_company_id', $validated) && $validated['insurance_company_id']) {
             $query->where('insurance_company_id', (int) $validated['insurance_company_id']);
@@ -704,7 +704,6 @@ class InvoiceController extends Controller
             'total' => (float) $invoice->total,
             'invoice_number' => $invoice->invoice_number,
             'issued_at' => $invoice->issued_at?->toDateString(),
-            'sent_at' => $invoice->sent_at?->toDateString(),
             'due_date' => $invoice->due_date?->toDateString(),
             'related_invoice_id' => $invoice->related_invoice_id,
             'related_invoice_number' => $invoice->relatedInvoice?->invoice_number,

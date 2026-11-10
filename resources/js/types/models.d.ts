@@ -891,7 +891,6 @@ export interface Invoice {
   related_invoice_id: number | null
   deleted_at: string | null
   issued_at: string | null
-  sent_at: string | null
   due_date: string | null
   patient_category: InvoicePatientCategory
   batch_mode: InvoiceBatchMode

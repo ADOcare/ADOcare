@@ -28,7 +28,6 @@ type InvoicePayload = {
     due_date: string
     payment_method: string
     invoice_created_at: string
-    invoice_sent_at: string
     services_delivered_at: string
     insurance_company_id: number
     insurance_company_name: string
@@ -76,7 +75,6 @@ const formattedTotal = computed(() => {
 
 const issueDate = computed(() => formatDate(invoice.value?.invoice_created_at ?? ''))
 const deliveryDate = computed(() => formatDate(invoice.value?.services_delivered_at ?? ''))
-const sentDate = computed(() => formatDate(invoice.value?.invoice_sent_at ?? ''))
 const dueDate = computed(() => formatDate(invoice.value?.due_date ?? ''))
 
 const periodLabel = computed(() => {
@@ -211,7 +209,6 @@ watchEffect(() => {
                             <div class="text-sm text-right">
                                 <div><strong>Konštatný symbol: </strong> {{ invoice.constant_symbol || '' }}</div>
                                 <div><strong>Spôsob úhrady:</strong> {{ invoice.payment_method || '' }}</div>
-                                <div><strong>Dátum splatnosti:</strong> {{ dueDate || '' }}</div>
                             </div>
                         </div>
 
@@ -278,18 +275,24 @@ watchEffect(() => {
                         <table class="w-full border-collapse text-sm mb-2">
                             <tbody>
                                 <tr>
-                                    <td class="border border-black p-3 w-1/3">
+                                    <td
+                                        class="border border-black p-3"
+                                        :class="invoice.type === 'transport' || invoice.type === 'procedures' ? 'w-1/3' : 'w-1/2'"
+                                    >
                                         <strong>Dátum vystavenia</strong><br />
                                         {{ issueDate || '' }}
-                                    </td>
-                                    <td class="border border-black p-3 w-1/3">
-                                        <strong>Dátum odoslania</strong><br />
-                                        {{ sentDate || '' }}
                                     </td>
                                     <td class="border border-black p-3 w-1/3"
                                         v-if="invoice.type === 'transport' || invoice.type === 'procedures'">
                                         <strong>Dátum dodania služby</strong><br />
                                         {{ deliveryDate || '' }}
+                                    </td>
+                                    <td
+                                        class="border border-black p-3"
+                                        :class="invoice.type === 'transport' || invoice.type === 'procedures' ? 'w-1/3' : 'w-1/2'"
+                                    >
+                                        <strong>Dátum splatnosti</strong><br />
+                                        {{ dueDate || '' }}
                                     </td>
                                 </tr>
                             </tbody>

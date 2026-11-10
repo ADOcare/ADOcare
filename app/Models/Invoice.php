@@ -24,7 +24,6 @@ class Invoice extends Model
         'total',
         'invoice_number',
         'issued_at',
-        'sent_at',
         'due_date',
         'related_invoice_id',
         'mime_type',
@@ -34,7 +33,6 @@ class Invoice extends Model
         'patient_category' => InvoicePatientCategory::class,
         'batch_mode' => InvoiceBatchMode::class,
         'issued_at' => 'date',
-        'sent_at' => 'date',
         'due_date' => 'date',
     ];
 

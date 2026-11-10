@@ -9,6 +9,7 @@ use App\Services\Claims\InsuredClaimResolver;
 use App\Services\PointsBatchNumberService;
 use App\Services\Transport\ClaimExportService;
 use App\Services\Transport\ClaimSelectionService;
+use App\Services\Transport\DzcExportService;
 use App\Services\Transport\XlsxWriter;
 
 class ExportFormatTest extends TransportTestCase
@@ -83,5 +84,30 @@ class ExportFormatTest extends TransportTestCase
             $zip->close();
             unlink($path);
         }
+    }
+
+    public function test_dzc_xlsx_vehicle_sheet_contains_vin(): void
+    {
+        $service = (new \ReflectionClass(DzcExportService::class))->newInstanceWithoutConstructor();
+        $sheets = $service->sheets([
+            'user_name' => 'Test Driver',
+            'company_name' => 'Test Ltd',
+            'company_ico' => '12345678',
+            'car_model' => 'Test car',
+            'car_license_plate' => 'AB123CD',
+            'car_vin' => 'WVWZZZ1JZXW000001',
+            'start_date' => '2026-11-01',
+            'end_date' => '2026-11-30',
+            'last_journey_date' => '2026-11-25',
+            'day_totals' => [],
+        ], [
+            'legs' => [],
+            'start_km' => 1000,
+            'end_km' => 1010,
+        ], null);
+
+        $metadata = array_column($sheets['Vozidlo a údaje'], 1, 0);
+
+        self::assertSame('WVWZZZ1JZXW000001', $metadata['VIN']);
     }
 }

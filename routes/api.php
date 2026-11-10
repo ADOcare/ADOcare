@@ -614,6 +614,14 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::patch('/scan/{document}/text', [ScanFileController::class, 'updateText'])
         ->middleware(['role:any', 'can:update,document']);
 
+    // AI OCR results are separate from the original scan OCR. Policy protected.
+    Route::get('/scan/{document}/ai-ocr', [\App\Http\Controllers\Api\ScanAiOcrController::class, 'show'])
+        ->middleware(['role:any', 'can:view,document']);
+    Route::get('/ai-medical-products', [\App\Http\Controllers\Api\AiMedicalProductController::class, 'index'])
+        ->middleware('role:any');
+    Route::patch('/ai-medical-products/{product}', [\App\Http\Controllers\Api\AiMedicalProductController::class, 'update'])
+        ->middleware('role:superadmin');
+
 });
 
 // Public scan upload routes (no auth required - guest access with token)

@@ -104,7 +104,7 @@ class DzcExportService
         }
         $metadata = [
             ['Údaj', 'Hodnota'], ['Spoločnosť', $payload['company_name']], ['IČO', $payload['company_ico']],
-            ['Vozidlo', $payload['car_model']], ['EČV', $payload['car_license_plate']], ['VIN', $payload['car_vin']],
+            ['Vozidlo', $payload['car_model']], ['EČV', $payload['car_license_plate']], ['VIN', $payload['car_vin'] ?? ''],
             ['Obdobie od', $payload['start_date']], ['Obdobie do', $payload['end_date']],
             ['Konečný stav tachometra', $calculation['end_km']], ['Konečný stav patrí k poslednej jazde dňa', $payload['last_journey_date']],
             ['Počiatočný stav tachometra', $calculation['start_km']],

@@ -161,7 +161,8 @@
                     </td>
                     <td>
                         Dopravný prostriedok:<br>
-                        <strong>{{ $dzcData['car_model'] ?? '' }} - {{ $dzcData['car_license_plate'] ?? '' }}</strong>
+                        <strong>{{ $dzcData['car_model'] ?? '' }} - {{ $dzcData['car_license_plate'] ?? '' }}</strong><br>
+                        VIN: <strong>{{ $dzcData['car_vin'] ?? '' }}</strong>
                     </td>
                     <td>
                         Spotreba:<br>

@@ -213,7 +213,6 @@
             <div class="invoice-info-right">
                 <div><strong>Konštatný symbol: </strong> {{ $invoiceData['constant_symbol'] ?? '' }}</div>
                 <div><strong>Spôsob úhrady:</strong> {{ $invoiceData['payment_method'] ?? '' }}</div>
-                <div><strong>Dátum splatnosti:</strong> {{ formatDate($invoiceData['due_date'] ?? '') }}</div>
             </div>
         </div>
 
@@ -275,20 +274,20 @@
         <table class="dates-section">
             <tbody>
                 <tr>
-                    <td style="border: 1px solid #000; width: 33.33%;">
-                        <strong>Dátum vystavenia</strong><br />
-                        {{ formatDate($invoiceData['invoice_created_at'] ?? '') }}
-                    </td>
-                    <td style="border: 1px solid #000; width: 33.33%;">
-                        <strong>Dátum odoslania</strong><br />
-                        {{ formatDate($invoiceData['invoice_sent_at'] ?? '') }}
-                    </td>
                     @if ($type === 'transport' || $type === 'procedures')
                         <td style="border: 1px solid #000; width: 33.33%;">
                             <strong>Dátum dodania služby</strong><br />
                             {{ formatDate($invoiceData['services_delivered_at'] ?? '') }}
                         </td>
                     @endif
+                    <td style="border: 1px solid #000; width: {{ $type === 'transport' || $type === 'procedures' ? '33.33%' : '50%' }};">
+                        <strong>Dátum vystavenia</strong><br />
+                        {{ formatDate($invoiceData['invoice_created_at'] ?? '') }}
+                    </td>
+                    <td style="border: 1px solid #000; width: {{ $type === 'transport' || $type === 'procedures' ? '33.33%' : '50%' }};">
+                        <strong>Dátum splatnosti</strong><br />
+                        {{ formatDate($invoiceData['due_date'] ?? '') }}
+                    </td>
                 </tr>
             </tbody>
         </table>

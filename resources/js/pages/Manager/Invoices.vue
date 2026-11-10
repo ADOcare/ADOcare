@@ -25,7 +25,6 @@ type InvoiceRow = {
   total?: number
   invoice_number?: string
   issued_at?: string | null
-  sent_at?: string | null
   due_date?: string | null
   type?: string
   patient_category?: 'domestic' | 'eu' | 'special'

@@ -6,7 +6,6 @@ use App\Enums\InvoiceBatchMode;
 use App\Enums\InvoicePatientCategory;
 use App\Http\Requests\Concerns\ValidatesInvoiceDates;
 use App\Support\InvoiceDates;
-use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -21,13 +20,13 @@ class StoreInvoiceRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if (!$this->has('patient_category')) {
+        if (! $this->has('patient_category')) {
             $this->merge([
                 'patient_category' => InvoicePatientCategory::DOMESTIC->value,
             ]);
         }
 
-        if (!$this->has('batch_mode')) {
+        if (! $this->has('batch_mode')) {
             $this->merge([
                 'batch_mode' => InvoiceBatchMode::COMBINED->value,
             ]);
@@ -35,7 +34,7 @@ class StoreInvoiceRequest extends FormRequest
 
         $period = (string) $this->input('period', '');
 
-        if (!preg_match('/^\d{4}-\d{2}$/', $period)) {
+        if (! preg_match('/^\d{4}-\d{2}$/', $period)) {
             return;
         }
 
@@ -45,50 +44,10 @@ class StoreInvoiceRequest extends FormRequest
             return;
         }
 
-        $issuedAt = (string) $this->input('issued_at', '');
-        $sentAt = (string) $this->input('sent_at', '');
-        $dueDate = (string) $this->input('due_date', '');
-
-        if (InvoiceDates::appliesToMonthlyService((string) $this->input('type', ''))) {
-            $deliveryDate = InvoiceDates::deliveryDate($period)->toDateString();
-            $latestIssueDate = InvoiceDates::latestIssueDate($period)->toDateString();
-
-            if (!$this->isIsoDate($issuedAt) || $issuedAt < $deliveryDate || $issuedAt > $latestIssueDate) {
-                $issuedAt = $automaticDates['issued_at'];
-            }
-        } elseif (!$this->isIsoDate($issuedAt)) {
-            $issuedAt = $automaticDates['issued_at'];
-        }
-
-        if (!$this->isIsoDate($sentAt) || $sentAt < $issuedAt) {
-            $sentAt = max($automaticDates['sent_at'], $issuedAt);
-        }
-
-        if (!$this->isIsoDate($dueDate) || $dueDate < $issuedAt) {
-            $dueDate = CarbonImmutable::parse($sentAt, 'Europe/Bratislava')
-                ->addDays(InvoiceDates::DEFAULT_DUE_DAYS)
-                ->toDateString();
-        }
-
         $this->merge([
-            'issued_at' => $issuedAt,
-            'sent_at' => $sentAt,
-            'due_date' => $dueDate,
+            'issued_at' => $automaticDates['issued_at'],
+            'due_date' => $automaticDates['due_date'],
         ]);
-    }
-
-    private function isIsoDate(string $value): bool
-    {
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
-            return false;
-        }
-
-        try {
-            return CarbonImmutable::createFromFormat('!Y-m-d', $value, 'Europe/Bratislava')
-                ->toDateString() === $value;
-        } catch (\Throwable) {
-            return false;
-        }
     }
 
     /**

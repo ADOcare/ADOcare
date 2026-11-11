@@ -51,7 +51,7 @@ class BackfillAiOcr extends Command
                     ->where('document_id', $document->id)
                     ->where('source_sha256', $hash)
                     ->where('pipeline_version', (string) config('ai_ocr.pipeline_version', 'ocr-v1'))
-                    ->whereIn('status', ['ready_for_review', 'approved', 'rejected'])
+                    ->whereIn('status', ['completed', 'approved'])
                     ->exists();
                 $status = $done && ! $this->option('force') ? 'already_done' : 'candidate';
                 if ($status === 'candidate' && $this->option('run')) {

@@ -16,9 +16,12 @@ use App\Models\Document;
 use App\Models\Patient;
 use App\Models\PatientPoint;
 use App\Models\Procedure;
+use App\Services\Patients\PatientHistoryJournal;
+use App\Services\Patients\PatientHistoryWriter;
 use App\Services\PatientService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PatientController extends Controller
 {
@@ -73,6 +76,7 @@ class PatientController extends Controller
     public function store(PatientStoreRequest $request): JsonResponse
     {
         $data = $request->validated();
+        $this->authorize('create', [Patient::class, (int) $data['branch_id']]);
 
         $patient = $this->service->create($data);
 
@@ -110,11 +114,110 @@ class PatientController extends Controller
      */
     public function update(PatientUpdateRequest $request, Patient $patient): JsonResponse
     {
+        $this->authorize('update', $patient);
+        if ($request->input('change_type') === 'correction') {
+            $this->authorize('correctHistory', $patient);
+        }
+        if ($request->exists('branch_id') || $request->exists('nurse_id')) {
+            $this->authorize('manageAssignments', $patient);
+        }
         $data = $request->validated();
 
         $patient = $this->service->update($patient, $data);
 
         return $this->success(new PatientResource($patient), 'Pacient bol uspesne aktualizovany.');
+    }
+
+    public function history(Patient $patient, PatientHistoryJournal $journal): JsonResponse
+    {
+        $this->authorize('view', $patient);
+
+        return $this->success($journal->revisionsFor($patient), 'História pacienta bola načítaná.');
+    }
+
+    public function stateOnDate(Request $request, Patient $patient, PatientHistoryJournal $journal): JsonResponse
+    {
+        $this->authorize('view', $patient);
+        $data = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+        ]);
+
+        return $this->success(
+            $journal->stateOnDate($patient, $data['date']),
+            'Historické údaje pacienta boli načítané.',
+        );
+    }
+
+    public function historyImpact(Request $request, Patient $patient, PatientHistoryJournal $journal): JsonResponse
+    {
+        $this->authorize('view', $patient);
+        $data = $request->validate([
+            'effective_dates' => ['required', 'array', 'min:1'],
+            'effective_dates.*' => ['required', 'date_format:Y-m-d'],
+        ]);
+
+        return $this->success(
+            $journal->impactFor($patient, $data['effective_dates']),
+            'Vplyv spätnej zmeny bol vyhodnotený.',
+        );
+    }
+
+    public function correctHistory(
+        Request $request,
+        Patient $patient,
+        PatientHistoryWriter $writer,
+        PatientHistoryJournal $journal,
+        PatientService $service,
+    ): JsonResponse {
+        $this->authorize('update', $patient);
+        $data = $request->validate([
+            'category' => ['required', 'in:insurance,nurse,branch,doctor,name,address,identity,contact'],
+            'record_id' => ['required', 'integer'],
+            'values' => ['required', 'array', 'min:1'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $correction = DB::transaction(function () use ($patient, $writer, $journal, $service, $request, $data): array {
+            if (
+                $data['category'] === 'identity'
+                && array_key_exists('personal_number', $data['values'])
+            ) {
+                $data['values']['personal_number'] = $service->normalizePersonalNumber(
+                    (string) ($data['values']['personal_number'] ?? ''),
+                ) ?: null;
+                $service->assertIdentityCanBeCorrected($patient, $data['values']['personal_number']);
+            }
+
+            $correction = $writer->correct(
+                $patient,
+                $data['category'],
+                (int) $data['record_id'],
+                $data['values'],
+                (int) $request->user()->id,
+                $data['reason'],
+            );
+            if (! $correction) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'values' => ['Oprava neobsahuje žiadnu skutočnú zmenu.'],
+                ]);
+            }
+            $service->syncCurrentProjection($patient);
+            $historyChangeId = $journal->record(
+                $patient,
+                'correction',
+                (int) $request->user()->id,
+                [$correction['journal_item']],
+                $data['reason'],
+            );
+            DB::table('patient_history_corrections')
+                ->where('id', $correction['id'])
+                ->update(['history_change_id' => $historyChangeId]);
+            unset($correction['journal_item']);
+
+            return $correction;
+        });
+
+        return $this->success($correction, 'Oprava histórie pacienta bola zaznamenaná.');
     }
 
     /**

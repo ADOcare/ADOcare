@@ -30,6 +30,10 @@ const createPatient = async () => {
     if (!patient.value.first_name || !patient.value.last_name) return
 
     try {
+        const now = new Date()
+        patient.value.effective_date = new Date(now.getTime() - now.getTimezoneOffset() * 60_000)
+            .toISOString()
+            .slice(0, 10)
         const branchId = authStore.currentBranch?.id ?? null
         if (!branchId) {
             throw new Error('Nie ste priradený k žiadnej pobočke. Skúste sa znovu prihlásiť.')

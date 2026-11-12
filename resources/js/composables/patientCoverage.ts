@@ -23,6 +23,10 @@ export type PatientCoverageSource = Patient & {
 
 export type PatientWithCoverage = Patient & {
     coverage: PatientCoverageForm
+    effective_date?: string | null
+    effective_dates?: Partial<Record<string, string>>
+    change_type?: 'change' | 'correction'
+    change_reason?: string | null
 }
 
 export function createEmptyPatientCoverage(): PatientCoverageForm {
@@ -40,7 +44,6 @@ export function createEmptyPatientCoverage(): PatientCoverageForm {
 export function normalizePatientCoverage(patient?: PatientCoverageSource): PatientWithCoverage {
     const source = patient ?? ({} as PatientCoverageSource)
     const {
-        country_id: _countryId,
         insurance_company_id: legacyInsuranceCompanyId,
         ...patientWithoutLegacyFields
     } = source

@@ -5,6 +5,11 @@ import AddressAutocomplete from './AddressAutocomplete.vue'
 import MapSelector from './MapSelector.vue'
 import { addressDistanceKm, useAddressForm } from '@/composables/address'
 import { useAuthStore } from '@/stores/auth'
+import {
+    patientHistoryAutocompleteHighlightPt,
+    patientHistoryHighlightPt,
+    patientHistoryHighlightStyle,
+} from '@/utils/patientHistoryHighlight'
 
 const INSUFFICIENT_ADDRESS_MESSAGE = 'Vyberte inú adresu, pretože táto adresa nie je dostatočná na uloženie.'
 
@@ -30,6 +35,7 @@ const props = withDefaults(defineProps<{
     submitted?: boolean
     disabled?: boolean
     mapDisabled?: boolean
+    highlightedFields?: string[]
 }>(), {
     address: null,
     city: null,
@@ -40,6 +46,7 @@ const props = withDefaults(defineProps<{
     submitted: false,
     disabled: false,
     mapDisabled: false,
+    highlightedFields: () => [],
 })
 
 const emit = defineEmits<{
@@ -65,6 +72,10 @@ const distanceWarning = computed(() => {
     if (distance === null || distance <= 30) return ''
     return `Adresa je vzdialená viac ako 30 km od aktuálnej prevádzky.`
 })
+
+function isHighlighted(...fields: string[]): boolean {
+    return fields.some((field) => props.highlightedFields.includes(field))
+}
 const addressEntity = ref<Record<string, unknown> | null>(null)
 const { addressQuery, init: initAddressForm, onMapClick: addressOnMapClick } = useAddressForm(addressEntity)
 
@@ -238,7 +249,10 @@ async function onMapAddressUpdate(geo: { lat: number | null; lon: number | null 
                 class="w-full"
                 :disabled="disabled"
                 :invalid="Boolean(localAddressError) || Boolean(errors.address) || (submitted && !address)"
-                :class="{ 'opacity-50!': disabled }"
+                :class="[
+                    { 'opacity-50!': disabled },
+                ]"
+                :pt="patientHistoryAutocompleteHighlightPt(isHighlighted('address'))"
                 @selected="onAutocompleteAddressSelected"
             />
             <small v-if="localAddressError" class="text-danger">{{ localAddressError }}</small>
@@ -255,7 +269,10 @@ async function onMapAddressUpdate(geo: { lat: number | null; lon: number | null 
                 :disabled="disabled"
                 fluid
                 :invalid="Boolean(errors.city) || (submitted && !city)"
-                :class="{ 'bg-transparent!': disabled, 'opacity-50!': disabled }"
+                :class="[
+                    { 'bg-transparent!': disabled, 'opacity-50!': disabled },
+                ]"
+                :pt="patientHistoryHighlightPt(isHighlighted('city'))"
             />
             <small v-if="submitted && errors.city" class="text-danger">{{ errors.city }}</small>
             <small v-else-if="submitted && !city" class="text-danger">Zadajte mesto.</small>
@@ -268,7 +285,10 @@ async function onMapAddressUpdate(geo: { lat: number | null; lon: number | null 
                 :disabled="disabled"
                 fluid
                 :invalid="Boolean(errors.zip)"
-                :class="{ 'bg-transparent!': disabled, 'opacity-50!': disabled }"
+                :class="[
+                    { 'bg-transparent!': disabled, 'opacity-50!': disabled },
+                ]"
+                :pt="patientHistoryHighlightPt(isHighlighted('zip'))"
             />
             <small v-if="submitted && errors.zip" class="text-danger">{{ errors.zip }}</small>
         </div>
@@ -278,6 +298,7 @@ async function onMapAddressUpdate(geo: { lat: number | null; lon: number | null 
                 :latitude="latitude"
                 :longitude="longitude"
                 :disabled="disabled || mapDisabled"
+                :style="isHighlighted('latitude', 'longitude') ? patientHistoryHighlightStyle : undefined"
                 @update="onMapAddressUpdate"
             />
             <small v-if="submitted && errors.coordinates" class="text-danger">

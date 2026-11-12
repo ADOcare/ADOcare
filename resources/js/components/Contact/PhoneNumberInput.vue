@@ -7,6 +7,7 @@ import {
     getCountryCallingCode,
     type CountryCode,
 } from 'libphonenumber-js'
+import { patientHistoryHighlightPt } from '@/utils/patientHistoryHighlight'
 
 const DEFAULT_COUNTRY_CODE = '+421'
 
@@ -15,11 +16,15 @@ const props = withDefaults(defineProps<{
     countryCode?: string | null
     disabled?: boolean
     invalid?: boolean
+    highlighted?: boolean
+    highlightCountryCode?: boolean
 }>(), {
     modelValue: null,
     countryCode: null,
     disabled: false,
     invalid: false,
+    highlighted: false,
+    highlightCountryCode: false,
 })
 
 const emit = defineEmits<{
@@ -76,6 +81,7 @@ watch(
             :disabled="disabled"
             :invalid="invalid"
             class="w-48 shrink-0"
+            :pt="patientHistoryHighlightPt(highlightCountryCode)"
         />
 
         <InputText
@@ -88,6 +94,7 @@ watch(
             maxlength="30"
             fluid
             :class="{ 'opacity-50!': disabled }"
+            :pt="patientHistoryHighlightPt(highlighted)"
         />
     </div>
 </template>

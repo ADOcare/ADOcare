@@ -8,7 +8,6 @@ import {
 
 import {
     RouterLink,
-    useRouter,
 } from 'vue-router'
 
 import {
@@ -30,8 +29,6 @@ defineOptions({
 })
 
 const attrs = useAttrs()
-
-const router = useRouter()
 
 const patientStore =
     usePatientStore()
@@ -103,25 +100,6 @@ function openScanDocument(
             branchId,
         )
     }
-}
-
-/* -------------------------------------------------------------------------- */
-/* Close patient                                                              */
-/* -------------------------------------------------------------------------- */
-
-const isHovered =
-    ref(false)
-
-function closePatient() {
-    isHovered.value =
-        false
-
-    patientStore.clear()
-
-    router.push({
-        name:
-            'patients',
-    })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -605,4 +583,5 @@ watch(
             </div>
         </template>
     </Menubar>
+
 </template>

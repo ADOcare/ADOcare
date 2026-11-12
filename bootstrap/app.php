@@ -7,6 +7,7 @@ use App\Console\Commands\SendSubscriptionNotifications;
 use App\Console\Commands\SendTrialNotifications;
 use App\Console\Commands\RunMonthlyVertexRetraining;
 use App\Console\Commands\RunDocumentationAudit;
+use App\Console\Commands\SyncPatientHistoryProjections;
 use App\Http\Responses\ApiResponseClass;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
@@ -37,6 +38,9 @@ return Application::configure(basePath: dirname(__DIR__))
             App\Http\Middleware\ForceJsonResponse::class,
         ]);
     })->withSchedule(function (Schedule $schedule): void {
+        $schedule->command(SyncPatientHistoryProjections::class)
+            ->dailyAt('00:05')
+            ->withoutOverlapping();
         $schedule->command(CheckPatientStatuses::class)
             ->dailyAt('02:00')
             ->withoutOverlapping();

@@ -336,6 +336,11 @@ class PatientAuditServiceTest extends TestCase
             $table->string('foreign_insured_id')->nullable();
             $table->string('special_category')->nullable();
             $table->boolean('is_verified')->default(false);
+            $table->date('valid_from')->nullable();
+            $table->date('valid_to')->nullable();
+            $table->timestamp('verified_at')->nullable();
+            $table->unsignedBigInteger('changed_by')->nullable();
+            $table->string('change_reason')->nullable();
             $table->timestamps();
         });
         Schema::create('app_notifications', function ($table): void {

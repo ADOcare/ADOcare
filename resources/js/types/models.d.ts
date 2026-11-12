@@ -200,13 +200,20 @@ export interface PatientCoverage {
   updated_at: string | null
   category: PatientCoverageCategory
   identification_method: PatientIdentificationMethod
+  valid_from: string | null
+  valid_to: string | null
+  verified_at: string | null
+  changed_by: number | null
+  change_reason: string | null
   // relations
   patient: Patient
   insurance_company: InsuranceCompany
+  changed_by_user: User
   // counts
   // exists
   patient_exists: boolean
   insurance_company_exists: boolean
+  changed_by_user_exists: boolean
 }
 
 export interface InsuranceCompany {

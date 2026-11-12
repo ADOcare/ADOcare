@@ -2,7 +2,6 @@
 import { closeModal, modalState } from '@/composables/useModal';
 import Dialog from 'primevue/dialog';
 
-
 </script>
 
 <template>

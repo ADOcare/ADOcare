@@ -13,6 +13,7 @@ import { useApi } from '@/composables/useApi'
 import { useToast } from 'primevue/usetoast'
 import type { Branch, Doctor, InsuranceCompany, User } from '@/types/models'
 import { formatBranchFullName, formatUserFullName } from '@/utils/formatUtils'
+import { patientHistoryHighlightPt } from '@/utils/patientHistoryHighlight'
 import PatientCoverageFields from './PatientCoverageFields.vue'
 import {
     normalizePatientCoverage,
@@ -27,6 +28,12 @@ const props = defineProps<{
     disabled?: boolean
     allowAssignmentEditing?: boolean
     companyId?: number
+    highlightedFields?: Record<string, string[]>
+    showAssignments?: boolean
+    assignmentDisplayValues?: {
+        branch?: string
+        nurse?: string
+    }
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +43,14 @@ const emit = defineEmits<{
 
 const submitted = computed(() => !!props.submitted)
 const errors = computed(() => props.errors ?? {})
+
+function isHighlighted(category: string, field: string): boolean {
+    return props.highlightedFields?.[category]?.includes(field) ?? false
+}
+
+function highlightPt(category: string, field: string) {
+    return patientHistoryHighlightPt(isHighlighted(category, field))
+}
 
 const authStore = useAuthStore()
 const patientStore = usePatientStore()
@@ -373,6 +388,7 @@ async function ensureSelectedDoctorOption(selectedId: number | null | undefined)
 const canEditAssignments = computed(
     () => (props.allowAssignmentEditing ?? (authStore.isManager || authStore.isSuperadmin)),
 )
+const canShowAssignments = computed(() => props.showAssignments ?? canEditAssignments.value)
 
 async function loadFavouriteDoctors() {
     const branchId = (localPatient.value.branch_id as unknown as number | null | undefined) ?? authStore.currentBranch?.id
@@ -617,7 +633,8 @@ watch(
                 :disabled="disabled"
                 :error="submitted ? errors.first_name : null"
                 class="col-span-4"
-                :control-class="{ 'bg-transparent!': disabled }"
+                :control-class="disabled && 'bg-transparent!'"
+                :pt="highlightPt('name', 'first_name')"
                 @blur="prefillInsurance()"
             />
 
@@ -628,7 +645,8 @@ watch(
                 :disabled="disabled"
                 :error="submitted ? errors.last_name : null"
                 class="col-span-4"
-                :control-class="{ 'bg-transparent!': disabled }"
+                :control-class="disabled && 'bg-transparent!'"
+                :pt="highlightPt('name', 'last_name')"
                 @blur="prefillInsurance()"
             />
 
@@ -637,6 +655,7 @@ watch(
                 label="Titul"
                 :disabled="disabled"
                 class="col-span-2"
+                :pt="highlightPt('name', 'title')"
             />
 
             <FormField
@@ -650,6 +669,7 @@ watch(
                 option-value="value"
                 :error="submitted ? errors.sex : null"
                 class="col-span-2"
+                :pt="highlightPt('identity', 'sex')"
             />
         </div>
 
@@ -678,6 +698,7 @@ watch(
                     filter
                     :invalid="invalid"
                     :class="{ 'opacity-50!': disabled }"
+                    :pt="highlightPt('doctor', 'doctor_id')"
                     @show="onDoctorSelectShow"
                 >
                     <template #footer>
@@ -691,6 +712,7 @@ watch(
                             />
                         </div>
                     </template>
+
                 </Select>
             </FormField>
 
@@ -708,6 +730,8 @@ watch(
             :can-load-insurance="canPrefillInsurance"
             :can-verify-insurance="canVerifyInsurance"
             :verification-has-unsaved-changes="insuranceVerificationHasUnsavedChanges"
+            :highlighted-fields="highlightedFields?.insurance"
+            :highlight-personal-number="isHighlighted('identity', 'personal_number')"
             @clear-error="emit('clear-error', $event)"
             @verify="verifyInsurance"
             @load-insurance="prefillInsurance(true)"
@@ -722,6 +746,7 @@ watch(
             :errors="errors"
             :submitted="submitted"
             :disabled="disabled"
+            :highlighted-fields="highlightedFields?.address"
             @clear-error="emit('clear-error', $event)"
         />
 
@@ -739,6 +764,7 @@ watch(
                     v-model="localPatient.contact"
                     :disabled="disabled"
                     :error="submitted ? errors.contact : null"
+                    :highlighted="isHighlighted('contact', 'contact')"
                 />
             </FormField>
 
@@ -753,11 +779,13 @@ watch(
                     v-model:country-code="localPatient.country_code_phone"
                     :disabled="disabled"
                     :invalid="Boolean(errors.phone)"
+                    :highlight-country-code="isHighlighted('contact', 'country_code_phone')"
+                    :highlighted="isHighlighted('contact', 'phone')"
                 />
             </FormField>
         </div>
 
-        <div v-if="canEditAssignments" class="grid grid-cols-12 gap-4">
+        <div v-if="canShowAssignments" class="grid grid-cols-12 gap-4">
             <FormField
                 label="Prevádzka"
                 required
@@ -773,10 +801,15 @@ watch(
                     optionValue="id"
                     fluid
                     :invalid="invalid"
+                    :pt="highlightPt('branch', 'branch_id')"
                 >
                     <template #value="slotProps">
                         <span v-if="slotProps.value">
-                            {{ formatBranchFullName(branchOptions.find(b => b.id === slotProps.value) as Branch) }}
+                            {{
+                                branchOptions.some(b => b.id === slotProps.value)
+                                    ? formatBranchFullName(branchOptions.find(b => b.id === slotProps.value) as Branch)
+                                    : assignmentDisplayValues?.branch ?? slotProps.value
+                            }}
                         </span>
                         <span v-else>Vybrať prevádzku</span>
                     </template>
@@ -803,13 +836,19 @@ watch(
                     optionValue="id"
                     fluid
                     :invalid="invalid"
+                    :pt="highlightPt('nurse', 'nurse_id')"
                 >
                     <template #value="slotProps">
                         <span v-if="slotProps.value">
-                            {{ formatUserFullName(nurseOptions.find(n => n.id === slotProps.value) as User) }}
+                            {{
+                                nurseOptions.some(n => n.id === slotProps.value)
+                                    ? formatUserFullName(nurseOptions.find(n => n.id === slotProps.value) as User)
+                                    : assignmentDisplayValues?.nurse ?? slotProps.value
+                            }}
                         </span>
                         <span v-else>Vybrať sestru</span>
                     </template>
+
                     <template #option="slotProps">
                         <span v-if="slotProps.option">
                             {{ formatUserFullName(slotProps.option) }}
@@ -818,5 +857,6 @@ watch(
                 </Select>
             </FormField>
         </div>
+
     </div>
 </template>

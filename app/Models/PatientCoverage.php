@@ -21,6 +21,11 @@ class PatientCoverage extends Model
         'foreign_insured_id',
         'special_category',
         'is_verified',
+        'valid_from',
+        'valid_to',
+        'verified_at',
+        'changed_by',
+        'change_reason',
     ];
 
     protected $casts = [
@@ -28,6 +33,9 @@ class PatientCoverage extends Model
         'identification_method' => PatientIdentificationMethod::class,
         'special_category' => PatientSpecialCoverageCategory::class,
         'is_verified' => 'boolean',
+        'valid_from' => 'date:Y-m-d',
+        'valid_to' => 'date:Y-m-d',
+        'verified_at' => 'datetime',
     ];
 
     public function patient()
@@ -38,5 +46,10 @@ class PatientCoverage extends Model
     public function insuranceCompany()
     {
         return $this->belongsTo(InsuranceCompany::class);
+    }
+
+    public function changedByUser()
+    {
+        return $this->belongsTo(User::class, 'changed_by');
     }
 }

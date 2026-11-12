@@ -37,10 +37,15 @@ trait ValidatesPatientCoverage
 
     public function withValidator(Validator $validator): void
     {
+        $this->validatePatientCoverage($validator);
+    }
+
+    protected function validatePatientCoverage(Validator $validator): void
+    {
         $validator->after(function (Validator $validator) {
             $coverage = $this->input('coverage');
 
-            if (!is_array($coverage)) {
+            if (! is_array($coverage)) {
                 return;
             }
 

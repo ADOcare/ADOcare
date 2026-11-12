@@ -32,6 +32,7 @@ class PatientResource extends JsonResource
             'address' => $this->address,
             'city' => $this->city,
             'zip' => $this->zip,
+            'country_id' => $this->country_id,
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
             'created_at' => $this->created_at,

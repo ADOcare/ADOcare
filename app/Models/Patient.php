@@ -15,7 +15,7 @@ class Patient extends Model
 
     protected $table = 'patients';
 
-    protected $fillable = ['first_name', 'last_name', 'title', 'personal_number', 'sex', 'contact', 'country_code_phone', 'phone', 'doctor_id', 'insurance_company_id', 'address', 'city', 'zip', 'latitude', 'longitude', 'reference_date', 'dekurz_number', 'branch_id', 'nurse_id', 'death_date'];
+    protected $fillable = ['first_name', 'last_name', 'title', 'personal_number', 'sex', 'contact', 'country_code_phone', 'phone', 'doctor_id', 'insurance_company_id', 'address', 'city', 'zip', 'country_id', 'latitude', 'longitude', 'reference_date', 'dekurz_number', 'branch_id', 'nurse_id', 'death_date'];
 
     protected $hidden = ['dekurz_texts'];
 
@@ -107,13 +107,22 @@ class Patient extends Model
             ->whereHas('patient.branch', fn ($query) => $query->whereColumn('branches.company_id', 'ados_episodes.company_id'));
     }
 
+    public function latestCoverage()
+    {
+        $today = now()->toDateString();
+
+        return $this->hasOne(PatientCoverage::class)
+            ->where(fn (Builder $query) => $query
+                ->whereNull('valid_from')
+                ->orWhereDate('valid_from', '<=', $today))
+            ->where(fn (Builder $query) => $query
+                ->whereNull('valid_to')
+                ->orWhereDate('valid_to', '>=', $today))
+            ->latestOfMany();
+    }
+
     public function currentCoverage()
     {
         return $this->latestCoverage();
-    }
-
-    public function latestCoverage()
-    {
-        return $this->hasOne(PatientCoverage::class)->latestOfMany();
     }
 }

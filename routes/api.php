@@ -241,6 +241,9 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         ->middleware(['role:any', 'can:view,patient']);
 
     Route::group(['prefix' => 'patients/{patient}', 'middleware' => ['role:any', 'can:view,patient']], function () {
+        Route::get('history', [PatientController::class, 'history']);
+        Route::get('history/state', [PatientController::class, 'stateOnDate']);
+        Route::post('history/impact', [PatientController::class, 'historyImpact']);
         Route::get('insurance-company', [PatientController::class, 'insuranceCompany']);
         Route::get('doctor', [PatientController::class, 'doctor']);
         Route::get('diagnoses', [PatientController::class, 'diagnoses']);
@@ -248,6 +251,8 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
         Route::get('patient-points', [PatientController::class, 'patientPoints']);
         Route::get('documents', [PatientController::class, 'documents']);
     });
+    Route::post('patients/{patient}/history/corrections', [PatientController::class, 'correctHistory'])
+        ->middleware(['role:manager,superadmin', 'can:update,patient']);
 
     Route::apiResource('insurance-companies', InsuranceCompanyController::class)
         ->only(['index', 'show'])

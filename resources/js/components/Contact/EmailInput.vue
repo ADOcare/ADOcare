@@ -2,15 +2,18 @@
 import { computed, ref } from 'vue'
 import InputText from 'primevue/inputtext'
 import { isValidEmail } from '@/composables/companySettingsShared'
+import { patientHistoryHighlightPt } from '@/utils/patientHistoryHighlight'
 
 const props = withDefaults(defineProps<{
     modelValue?: string | null
     disabled?: boolean
     error?: string | null
+    highlighted?: boolean
 }>(), {
     modelValue: null,
     disabled: false,
     error: null,
+    highlighted: false,
 })
 
 const emit = defineEmits<{
@@ -58,6 +61,7 @@ function validate() {
             :disabled="disabled"
             :invalid="Boolean(displayedError)"
             :class="{ 'opacity-50!': disabled }"
+            :pt="patientHistoryHighlightPt(highlighted)"
             @blur="validate"
         />
 

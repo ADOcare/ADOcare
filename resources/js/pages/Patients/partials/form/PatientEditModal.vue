@@ -4,8 +4,10 @@ import EditPatientForm from './EditPatientForm.vue'
 const props = defineProps<{ patientId: number }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
 
-function handleSaved() {
-  emit('saved')
+function handleSaved(result?: unknown) {
+  if (result) {
+    emit('saved')
+  }
   emit('close')
 }
 </script>

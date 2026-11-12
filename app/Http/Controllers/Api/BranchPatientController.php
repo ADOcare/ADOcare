@@ -108,6 +108,22 @@ class BranchPatientController extends Controller
 
     public function store(BranchPatientStoreRequest $request, Branch $branch)
     {
+        $user = $request->user();
+        abort_unless(
+            $user && (
+                $user->hasGlobalRole('super-admin')
+                || (
+                    $user->isInCompany((int) $branch->company_id)
+                    && (
+                        $user->isInBranch((int) $branch->id)
+                        || $user->hasGlobalRole('manager')
+                        || $user->hasGlobalRole('admin')
+                    )
+                )
+            ),
+            403,
+        );
+
         $data = $request->validated();
         $data['branch_id'] = $branch->id;
 

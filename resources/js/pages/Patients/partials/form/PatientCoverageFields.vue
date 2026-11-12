@@ -5,6 +5,7 @@ import Select from 'primevue/select'
 
 import type { PatientCoverageForm } from '@/composables/patientCoverage'
 import api from '@/services/api'
+import { patientHistoryHighlightPt } from '@/utils/patientHistoryHighlight'
 
 type InsuranceCompanyOption = {
     id: number
@@ -29,6 +30,8 @@ const props = withDefaults(defineProps<{
     canLoadInsurance?: boolean
     canVerifyInsurance?: boolean
     verificationHasUnsavedChanges?: boolean
+    highlightedFields?: string[]
+    highlightPersonalNumber?: boolean
 }>(), {
     errors: () => ({}),
     disabled: false,
@@ -39,6 +42,8 @@ const props = withDefaults(defineProps<{
     canLoadInsurance: false,
     canVerifyInsurance: false,
     verificationHasUnsavedChanges: false,
+    highlightedFields: () => [],
+    highlightPersonalNumber: false,
 })
 
 const emit = defineEmits<{
@@ -107,6 +112,10 @@ const countryOptions = computed(() => countries.value
     .sort((left, right) => left.name.localeCompare(right.name, 'sk')))
 
 const showInsuranceActions = computed(() => isDomestic.value)
+
+function highlightPt(field: string) {
+    return patientHistoryHighlightPt(props.highlightedFields.includes(field))
+}
 
 function emitCoverage(next: PatientCoverageForm, errorKeys: string[] = []) {
     emit('update:modelValue', next)
@@ -248,6 +257,7 @@ onMounted(loadCountries)
                             'w-full!',
                             { 'opacity-50!': disabled },
                         ]"
+                        :pt="highlightPt('category')"
                         @update:model-value="selectCategory"
                     />
 
@@ -267,7 +277,7 @@ onMounted(loadCountries)
                                 disabled && 'opacity-50!',
                             ]"
                         >
-                            Rodné číslo alebo BIČ
+                            Rodné číslo / BIČ
                         </label>
 
                         <InputText
@@ -276,6 +286,7 @@ onMounted(loadCountries)
                             maxlength="20"
                             fluid
                             :invalid="Boolean(slovakIdentifierError)"
+                            :pt="patientHistoryHighlightPt(highlightPersonalNumber)"
                             @update:model-value="
                                 updateSlovakIdentifier(
                                     String($event || ''),
@@ -341,7 +352,10 @@ onMounted(loadCountries)
                                     ],
                                 )
                             "
-                            :class="{ 'opacity-50!': disabled }"
+                            :class="[
+                                { 'opacity-50!': disabled },
+                            ]"
+                            :pt="highlightPt('insurance_company_id')"
                             @update:model-value="
                                 updateField(
                                     'insurance_company_id',
@@ -389,6 +403,7 @@ onMounted(loadCountries)
                         placeholder="Vyberte kategóriu poistenca"
                         fluid
                         :invalid="Boolean(errors['coverage.category'])"
+                        :pt="highlightPt('category')"
                         @update:model-value="selectCategory"
                     />
 
@@ -418,6 +433,7 @@ onMounted(loadCountries)
                         option-value="id"
                         placeholder="Vyberte poisťovňu"
                         fluid
+                        :pt="highlightPt('insurance_company_id')"
                         :invalid="
                             Boolean(
                                 errors[
@@ -469,6 +485,7 @@ onMounted(loadCountries)
                         filter
                         placeholder="Vyberte štát"
                         fluid
+                        :pt="highlightPt('member_state_code')"
                         :invalid="
                             Boolean(
                                 errors[
@@ -510,6 +527,7 @@ onMounted(loadCountries)
                         :model-value="modelValue.foreign_insured_id"
                         maxlength="20"
                         fluid
+                        :pt="highlightPt('foreign_insured_id')"
                         :invalid="
                             Boolean(
                                 errors[
@@ -564,6 +582,7 @@ onMounted(loadCountries)
                         placeholder="Vyberte kategóriu poistenca"
                         fluid
                         :invalid="Boolean(errors['coverage.category'])"
+                        :pt="highlightPt('category')"
                         @update:model-value="selectCategory"
                     />
                 </div>
@@ -586,6 +605,7 @@ onMounted(loadCountries)
                         option-value="id"
                         placeholder="Vyberte poisťovňu"
                         fluid
+                        :pt="highlightPt('insurance_company_id')"
                         :invalid="
                             Boolean(
                                 errors[
@@ -620,6 +640,7 @@ onMounted(loadCountries)
                         option-value="value"
                         placeholder="Vyberte kategóriu"
                         fluid
+                        :pt="highlightPt('special_category')"
                         :invalid="
                             Boolean(
                                 errors[
@@ -669,6 +690,7 @@ onMounted(loadCountries)
                         option-value="value"
                         placeholder="Vyberte spôsob"
                         fluid
+                        :pt="highlightPt('identification_method')"
                         :invalid="
                             Boolean(
                                 errors[
@@ -706,7 +728,7 @@ onMounted(loadCountries)
                                 disabled && 'opacity-50!',
                             ]"
                         >
-                            Rodné číslo alebo BIČ
+                            Rodné číslo / BIČ
                         </label>
 
                         <InputText
@@ -717,6 +739,7 @@ onMounted(loadCountries)
                             :invalid="
                                 Boolean(slovakIdentifierError)
                             "
+                            :pt="patientHistoryHighlightPt(highlightPersonalNumber)"
                             @update:model-value="
                                 updateSlovakIdentifier(
                                     String($event || ''),
@@ -754,6 +777,7 @@ onMounted(loadCountries)
                             filter
                             placeholder="Vyberte štát"
                             fluid
+                            :pt="highlightPt('member_state_code')"
                             :invalid="
                                 Boolean(
                                     errors[
@@ -797,6 +821,7 @@ onMounted(loadCountries)
                             "
                             maxlength="20"
                             fluid
+                            :pt="highlightPt('foreign_insured_id')"
                             :invalid="
                                 Boolean(
                                     errors[

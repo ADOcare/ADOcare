@@ -181,6 +181,8 @@ class PatientSoftDeleteTest extends TestCase
             $table->string('member_state_code')->nullable();
             $table->string('foreign_insured_id')->nullable();
             $table->string('special_category')->nullable();
+            $table->date('valid_from')->nullable();
+            $table->date('valid_to')->nullable();
         });
         Schema::create('procedure_company_prices', function ($table) {
             $table->id();

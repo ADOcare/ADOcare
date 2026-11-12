@@ -223,7 +223,15 @@ class PointClaimSelectionService
             ->join('patients as p', 'p.id', '=', 'pp.patient_id')
             ->whereNull('p.deleted_at')
             ->leftJoin('doctors as d', 'd.id', '=', 'p.doctor_id')
-            ->join('patient_coverages as pc', 'pc.patient_id', '=', 'p.id')
+            ->join('patient_coverages as pc', function ($join) {
+                $join->on('pc.patient_id', '=', 'p.id')
+                    ->where(fn ($query) => $query
+                        ->whereNull('pc.valid_from')
+                        ->orWhereColumn('pc.valid_from', '<=', 'pp.date'))
+                    ->where(fn ($query) => $query
+                        ->whereNull('pc.valid_to')
+                        ->orWhereColumn('pc.valid_to', '>=', 'pp.date'));
+            })
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($context) {
                 $join->on('pcp.procedure_id', '=', 'pp.procedure_id')
                     ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')

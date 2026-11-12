@@ -17,6 +17,9 @@ class PatientCoverageResource extends JsonResource
             'foreign_insured_id' => $this->foreign_insured_id,
             'special_category' => $this->special_category?->value ?? $this->special_category,
             'is_verified' => $this->is_verified,
+            'valid_from' => $this->valid_from?->toDateString(),
+            'valid_to' => $this->valid_to?->toDateString(),
+            'verified_at' => $this->verified_at?->toISOString(),
             'insurance_company' => $this->whenLoaded('insuranceCompany', function () {
                 return $this->insuranceCompany
                     ? new InsuranceCompanyResource($this->insuranceCompany)

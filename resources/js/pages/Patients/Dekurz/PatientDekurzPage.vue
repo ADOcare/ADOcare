@@ -393,7 +393,7 @@ async function selectDekurzMonth(month: string | null): Promise<void> {
     await router.replace({ query })
     clearSnapshotEditMode()
     selectedCreationMonthKey.value = month
-    const [year, selectedMonthNumber] = month.split('-').map(Number)
+    const [year = 0, selectedMonthNumber = 1] = month.split('-').map(Number)
     selectedMonth.value = new Date(year, selectedMonthNumber - 1, 1)
     await loadAndInitialize()
 }
@@ -703,7 +703,8 @@ async function loadDocumentSnapshot(documentId: number) {
     previousSectionTextById.value = {}
     sectionsBeforeAiPrefill.value = null
 
-    const [year, month] = documentMonth.split('-').map(Number)
+    const year = Number(documentMonth.slice(0, 4))
+    const month = Number(documentMonth.slice(5, 7))
     selectedMonth.value = new Date(year, month - 1, 1)
 }
 

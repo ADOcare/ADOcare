@@ -32,12 +32,15 @@ class BranchPatientStoreRequest extends FormRequest
             'address' => 'nullable|string|max:255',
             'city' => 'nullable|string|max:255',
             'zip' => 'nullable|string|max:50',
+            'country_id' => 'nullable|integer|exists:countries,id',
 
             'latitude' => 'nullable|numeric',
             'longitude' => 'nullable|numeric',
 
             'reference_date' => 'nullable|date',
             'dekurz_number' => 'nullable|integer|min:1',
+            'effective_date' => 'nullable|date_format:Y-m-d',
+            'change_reason' => 'nullable|string|max:1000',
         ], $this->patientCoverageRules(required: true));
     }
 }

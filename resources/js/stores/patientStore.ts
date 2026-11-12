@@ -18,6 +18,10 @@ export type PatientCoverage = {
 
 export type PatientWithCoverage = Patient & {
     coverage?: PatientCoverage | null
+    effective_date?: string | null
+    effective_dates?: Partial<Record<string, string>>
+    change_type?: 'change' | 'correction'
+    change_reason?: string | null
 }
 
 type InsuranceCompanyVerification = {
@@ -77,11 +81,16 @@ function serializePatient(patient: PatientWithCoverage) {
         address: patient.address,
         city: patient.city,
         zip: patient.zip,
+        country_id: patient.country_id,
         latitude: patient.latitude,
         longitude: patient.longitude,
         reference_date: patient.reference_date,
         death_date: patient.death_date,
         dekurz_number: patient.dekurz_number,
+        effective_date: patient.effective_date,
+        effective_dates: patient.effective_dates,
+        change_type: patient.change_type,
+        change_reason: patient.change_reason,
         coverage: serializeCoverage(patient),
     }
 }

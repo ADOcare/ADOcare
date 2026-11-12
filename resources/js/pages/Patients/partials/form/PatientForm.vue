@@ -388,7 +388,7 @@ async function ensureSelectedDoctorOption(selectedId: number | null | undefined)
 const canEditAssignments = computed(
     () => (props.allowAssignmentEditing ?? (authStore.isManager || authStore.isSuperadmin)),
 )
-const canShowAssignments = computed(() => props.showAssignments ?? canEditAssignments.value)
+const canShowAssignments = computed(() => props.showAssignments || canEditAssignments.value)
 
 async function loadFavouriteDoctors() {
     const branchId = (localPatient.value.branch_id as unknown as number | null | undefined) ?? authStore.currentBranch?.id

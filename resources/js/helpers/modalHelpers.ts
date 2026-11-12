@@ -16,7 +16,9 @@ export async function openPatientDocumentsModal(patientId?: number) {
 export async function openPatientEditModal(patientId?: number) {
     if (!patientId) return
 
-    const isManagerView = useAuthStore().isManager;
+    const authStore = useAuthStore()
+    const isManagerView = authStore.isManager
+        || authStore.user?.role?.position === 'manager'
     // open via modal provider
     return await openModal(markRaw(EditPatientForm), { patientId, isManagerView }, {
         header: 'Upraviť pacienta',

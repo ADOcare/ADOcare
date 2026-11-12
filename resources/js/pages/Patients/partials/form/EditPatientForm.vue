@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { usePatientStore } from '@/stores/patientStore';
 import api from '@/services/api';
 import { useAuthStore } from '@/stores/auth';
@@ -9,7 +9,7 @@ import PatientEffectiveDateDialog from './PatientEffectiveDateDialog.vue';
 import PatientHistoryDialog from './PatientHistoryDialog.vue';
 import type { IModalContentProps } from '@/types/ui';
 import usePatientFormValidation from '@/composables/usePatientFormValidation';
-import type { Patient } from '@/types/models';
+import type { Branch, Doctor, Patient, User } from '@/types/models';
 import {
     detectPatientHistoryChanges,
     type PatientHistoryChangeGroup,
@@ -19,11 +19,18 @@ import {
     type PatientWithCoverage,
 } from '@/composables/patientCoverage';
 import AppButton from '@/components/AppButton.vue';
+import { formatBranchFullName, formatUserFullName } from '@/utils/formatUtils';
 
 
 const patientStore = usePatientStore();
 const authStore = useAuthStore();
 const props = defineProps<IModalContentProps & { patientId: number; isManagerView: boolean; }>();
+const canEditAssignments = computed(
+    () => props.isManagerView
+        || authStore.isManager
+        || authStore.isSuperadmin
+        || authStore.user?.role?.position === 'manager',
+);
 
 const patient = ref<PatientWithCoverage>(normalizePatientCoverage());
 const originalPatient = ref<PatientWithCoverage | null>(null);
@@ -39,7 +46,7 @@ function clonePatient(source: PatientWithCoverage): PatientWithCoverage {
 onMounted(async () => {
     try {
         const fetched = await api.fetchEntity<Patient>(`v1/patients/${props.patientId}`, {
-            with: ['nurse', 'doctor', 'insuranceCompany', 'currentCoverage.insuranceCompany'],
+            with: ['nurse', 'branch', 'doctor', 'insuranceCompany', 'currentCoverage.insuranceCompany'],
         });
         patient.value = normalizePatientCoverage(fetched);
         originalPatient.value = clonePatient(patient.value);
@@ -60,17 +67,92 @@ const onSubmit = async () => {
         return;
     }
 
-    const changes = originalPatient.value
+    const detectedChanges = originalPatient.value
         ? detectPatientHistoryChanges(originalPatient.value, patient.value)
         : [];
-    if (changes.length === 0) {
+    if (detectedChanges.length === 0) {
         await savePatient();
         return;
     }
 
-    pendingChanges.value = changes;
-    showEffectiveDateDialog.value = true;
+    try {
+        pendingChanges.value = await resolveAssignmentSummaries(detectedChanges);
+        showEffectiveDateDialog.value = true;
+    } catch (error) {
+        console.error('Failed to resolve patient assignment names', error);
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail: 'Názvy lekára, sestry alebo prevádzky sa nepodarilo načítať.',
+            life: 5000,
+        });
+    }
 };
+
+async function resolveAssignmentSummaries(
+    changes: PatientHistoryChangeGroup[],
+): Promise<PatientHistoryChangeGroup[]> {
+    return Promise.all(changes.map(async (change) => {
+        const field = `${change.category}_id`;
+        if (!['doctor', 'nurse', 'branch'].includes(change.category)) return change;
+
+        const previousId = numericId(change.previousValues[field]);
+        const newId = numericId(change.newValues[field]);
+        const [previousSummary, newSummary] = await Promise.all([
+            assignmentName(change.category, previousId, originalPatient.value),
+            assignmentName(change.category, newId, patient.value),
+        ]);
+
+        return {
+            ...change,
+            previousSummary,
+            newSummary,
+        };
+    }));
+}
+
+function numericId(value: unknown): number | null {
+    const id = Number(value)
+    return Number.isInteger(id) && id > 0 ? id : null
+}
+
+async function assignmentName(
+    category: PatientHistoryChangeGroup['category'],
+    id: number | null,
+    source: PatientWithCoverage | null,
+): Promise<string> {
+    if (!id) return '—'
+
+    if (category === 'doctor') {
+        const doctor = source?.doctor?.id === id
+            ? source.doctor
+            : await api.fetchEntity<Doctor>(`v1/doctors/${id}`)
+        return formatPersonName(doctor)
+    }
+
+    if (category === 'nurse') {
+        const nurse = source?.nurse?.id === id
+            ? source.nurse
+            : await api.fetchEntity<User>(`v1/users/${id}`)
+        return formatUserFullName(nurse)
+    }
+
+    if (category === 'branch') {
+        const branch = source?.branch?.id === id
+            ? source.branch
+            : await api.fetchEntity<Branch>(`v1/branches/${id}`)
+        return formatBranchFullName(branch)
+    }
+
+    throw new Error(`Unsupported assignment category: ${category}`)
+}
+
+function formatPersonName(person: Doctor): string {
+    return [person.title, person.first_name, person.last_name]
+        .map((part) => part?.trim())
+        .filter(Boolean)
+        .join(' ')
+}
 
 const savePatient = async (history?: {
     change_type: 'change' | 'correction';
@@ -151,7 +233,7 @@ function onCancel() {
 
     <PatientForm v-if="patient?.id" v-model:patient="patient" :submitted="submitted"
         :errors="errors" @clear-error="clearError"
-        :allow-assignment-editing="props.isManagerView || authStore.isSuperadmin" />
+        :allow-assignment-editing="canEditAssignments" />
 
     <PatientEffectiveDateDialog
         v-if="patient?.id"
@@ -165,7 +247,7 @@ function onCancel() {
         v-if="patient?.id"
         v-model:visible="showHistoryDialog"
         :patient-id="patient.id"
-        :allow-assignment-editing="props.isManagerView || authStore.isSuperadmin"
+        :allow-assignment-editing="canEditAssignments"
     />
 
     <div class="mt-6 flex items-center justify-between gap-3">

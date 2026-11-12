@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import Dialog from 'primevue/dialog'
-import DatePicker from 'primevue/datepicker'
 
 import api from '@/services/api'
 import AppButton from '@/components/AppButton.vue'
-import FormField from '@/components/FormField.vue'
 import PatientHistoryForm from './PatientHistoryForm.vue'
-import { toApiDate } from '@/utils/dateUtils'
+import Tag from 'primevue/tag'
 
 type HistoricalValue = {
     status: 'known' | 'unknown' | 'missing' | 'conflict'
@@ -40,6 +38,12 @@ type Revision = {
     items: RevisionItem[]
 }
 
+type TimelineEntry = {
+    key: string
+    revision: Revision
+    item: RevisionItem | null
+}
+
 const props = defineProps<{
     visible: boolean
     patientId: number
@@ -61,183 +65,159 @@ const categoryLabels: Record<string, string> = {
     contact: 'Kontaktné údaje',
 }
 
-const mode = ref<'revisions' | 'effective'>('revisions')
 const revisions = ref<Revision[]>([])
-const selectedRevisionId = ref<number | null>(null)
-const effectiveState = ref<Record<string, HistoricalValue> | null>(null)
-const selectedDate = ref<Date | null>(null)
+const selectedEntryKey = ref<string | null>(null)
+const displayedEntryKey = ref<string | null>(null)
+const displayedState = ref<Record<string, HistoricalValue | number | string> | null>(null)
 const revisionsLoading = ref(false)
-const effectiveLoading = ref(false)
-const revisionsError = ref('')
-const effectiveError = ref('')
+const stateLoading = ref(false)
+const error = ref('')
 const mobileDetail = ref(false)
 
-let revisionSequence = 0
-let effectiveSequence = 0
+let revisionsSequence = 0
+let stateSequence = 0
 
-const selectedRevision = computed(() =>
-    revisions.value.find((revision) => revision.id === selectedRevisionId.value) ?? null,
-)
+const timelineEntries = computed<TimelineEntry[]>(() => revisions.value
+    .flatMap<TimelineEntry>((revision) => revision.items.length > 0
+        ? revision.items.map((item) => ({
+            key: `${revision.id}:${item.id}`,
+            revision,
+            item,
+        }))
+        : [{
+            key: `${revision.id}:baseline`,
+            revision,
+            item: null,
+        }])
+    .sort((left, right) => {
+        const leftDate = left.item?.effective_date ?? ''
+        const rightDate = right.item?.effective_date ?? ''
+        if (leftDate !== rightDate) return rightDate.localeCompare(leftDate)
+        if (left.revision.recorded_at !== right.revision.recorded_at) {
+            return right.revision.recorded_at.localeCompare(left.revision.recorded_at)
+        }
+        return right.key.localeCompare(left.key)
+    }))
 
-const displayedState = computed(() =>
-    mode.value === 'revisions'
-        ? selectedRevision.value?.snapshot ?? null
-        : effectiveState.value,
+const selectedEntry = computed(() =>
+    timelineEntries.value.find((entry) => entry.key === displayedEntryKey.value) ?? null,
 )
 
 const changedCategories = computed(() =>
-    mode.value === 'revisions'
-        ? [...new Set(selectedRevision.value?.items.map((item) => item.category) ?? [])]
-        : [],
+    selectedEntry.value?.item ? [selectedEntry.value.item.category] : [],
 )
 
 const changedFields = computed<Record<string, string[]>>(() => {
-    if (mode.value !== 'revisions' || !selectedRevision.value) return {}
-    const byCategory: Record<string, Set<string>> = {}
-    for (const item of selectedRevision.value.items) {
-        byCategory[item.category] ??= new Set<string>()
-        for (const entry of changedItemFields(item)) byCategory[item.category].add(entry.field)
-    }
-    return Object.fromEntries(Object.entries(byCategory).map(([category, fields]) => [
-        category,
-        [...fields],
-    ]))
+    const item = selectedEntry.value?.item
+    if (!item) return {}
+    return { [item.category]: changedItemFields(item) }
 })
-
-const loading = computed(() => mode.value === 'revisions' ? revisionsLoading.value : effectiveLoading.value)
-const error = computed(() => mode.value === 'revisions' ? revisionsError.value : effectiveError.value)
-
-function localToday(): Date {
-    const now = new Date()
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate())
-}
 
 watch(
     [() => props.visible, () => props.patientId],
     ([visible]) => {
-        revisionSequence++
-        effectiveSequence++
+        revisionsSequence++
+        stateSequence++
         revisionsLoading.value = false
-        effectiveLoading.value = false
+        stateLoading.value = false
         if (!visible) return
 
-        mode.value = 'revisions'
-        mobileDetail.value = false
         revisions.value = []
-        selectedRevisionId.value = null
-        effectiveState.value = null
-        selectedDate.value = localToday()
-        revisionsError.value = ''
-        effectiveError.value = ''
-        void loadRevisions()
+        selectedEntryKey.value = null
+        displayedEntryKey.value = null
+        displayedState.value = null
+        error.value = ''
+        mobileDetail.value = false
+        void loadTimeline()
     },
     { immediate: true },
 )
 
-watch(selectedDate, () => {
-    if (props.visible && mode.value === 'effective') void loadEffectiveState()
-})
-
-async function loadRevisions() {
-    const sequence = ++revisionSequence
+async function loadTimeline() {
+    const sequence = ++revisionsSequence
     revisionsLoading.value = true
-    revisionsError.value = ''
+    error.value = ''
 
     try {
         const response = await api.get(`/v1/patients/${props.patientId}/history`)
-        if (sequence !== revisionSequence || !props.visible) return
+        if (sequence !== revisionsSequence || !props.visible) return
 
         revisions.value = Array.isArray(response.data.data) ? response.data.data : []
-        selectedRevisionId.value = revisions.value[0]?.id ?? null
+        const firstEntry = timelineEntries.value[0]
+        if (firstEntry) await selectEntry(firstEntry, false)
     } catch (requestError) {
-        if (sequence !== revisionSequence || !props.visible) return
-        revisionsError.value = 'Históriu zmien sa nepodarilo načítať.'
-        console.error('Failed to load patient revision history', requestError)
+        if (sequence !== revisionsSequence || !props.visible) return
+        error.value = 'Históriu zmien sa nepodarilo načítať.'
+        console.error('Failed to load patient history timeline', requestError)
     } finally {
-        if (sequence === revisionSequence) revisionsLoading.value = false
+        if (sequence === revisionsSequence) revisionsLoading.value = false
     }
 }
 
-async function loadEffectiveState() {
-    const date = toApiDate(selectedDate.value)
-    const sequence = ++effectiveSequence
-    effectiveState.value = null
-    effectiveError.value = ''
-    if (!date || !props.visible || mode.value !== 'effective') return
-    effectiveLoading.value = true
+async function selectEntry(entry: TimelineEntry, showMobileDetail = true) {
+    selectedEntryKey.value = entry.key
+    mobileDetail.value = showMobileDetail
+    error.value = ''
+
+    const effectiveDate = entry.item?.effective_date
+    if (!effectiveDate) {
+        stateSequence++
+        stateLoading.value = false
+        displayedState.value = entry.revision.snapshot
+        displayedEntryKey.value = entry.key
+        return
+    }
+
+    const sequence = ++stateSequence
+    stateLoading.value = true
 
     try {
         const response = await api.get(`/v1/patients/${props.patientId}/history/state`, {
-            params: { date },
+            params: { date: effectiveDate },
         })
-        if (sequence !== effectiveSequence || !props.visible || mode.value !== 'effective') return
-        effectiveState.value = response.data.data
+        if (sequence !== stateSequence || !props.visible || selectedEntryKey.value !== entry.key) return
+        displayedState.value = response.data.data
+        displayedEntryKey.value = entry.key
     } catch (requestError) {
-        if (sequence !== effectiveSequence || !props.visible || mode.value !== 'effective') return
-        effectiveError.value = 'Údaje platné k zvolenému dátumu sa nepodarilo načítať.'
-        console.error('Failed to load effective patient history', requestError)
+        if (sequence !== stateSequence || !props.visible) return
+        error.value = 'Údaje platné k dátumu zmeny sa nepodarilo načítať.'
+        console.error('Failed to load effective patient history state', requestError)
     } finally {
-        if (sequence === effectiveSequence) effectiveLoading.value = false
+        if (sequence === stateSequence) stateLoading.value = false
     }
 }
 
-function selectMode(nextMode: 'revisions' | 'effective') {
-    if (mode.value === nextMode) return
-    mode.value = nextMode
-    mobileDetail.value = false
-    if (nextMode === 'effective') void loadEffectiveState()
-    else effectiveSequence++
+function changedItemFields(item: RevisionItem): string[] {
+    const previous = item.previous_values ?? {}
+    const next = item.new_values ?? {}
+    return [...new Set([...Object.keys(previous), ...Object.keys(next)])]
+        .filter((field) => comparableValue(previous[field]) !== comparableValue(next[field]))
 }
 
-function selectRevision(revision: Revision) {
-    selectedRevisionId.value = revision.id
-    mobileDetail.value = true
+function comparableValue(value: unknown): string {
+    if (value === null || value === undefined) return ''
+    return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
-function formatDateTime(value: string) {
+function entryTitle(entry: TimelineEntry): string {
+    if (entry.item) return categoryLabels[entry.item.category] ?? entry.item.category
+    if (entry.revision.change_type === 'creation') return 'Vytvorenie pacienta'
+    return 'Počiatočný zaznamenaný stav'
+}
+
+function formatDate(value: string | null | undefined): string {
+    if (!value) return 'Neznáme'
+    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+    return parts ? `${parts[3]}.${parts[2]}.${parts[1]}` : value
+}
+
+function formatDateTime(value: string): string {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
     return new Intl.DateTimeFormat('sk-SK', {
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(date)
-}
-
-function formatDate(value: string | null) {
-    if (!value) return 'neznámy dátum'
-    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-    return parts ? `${parts[3]}.${parts[2]}.${parts[1]}` : value
-}
-
-function valueText(value: unknown): string {
-    if (value === null || value === undefined || value === '') return '—'
-    if (typeof value === 'boolean') return value ? 'Áno' : 'Nie'
-    if (typeof value === 'object') return JSON.stringify(value)
-    return String(value)
-}
-
-function changedItemFields(item: RevisionItem) {
-    const previous = item.previous_values ?? {}
-    const next = item.new_values ?? {}
-    const fields = [...new Set([...Object.keys(previous), ...Object.keys(next)])]
-    return fields
-        .filter((field) => valueText(previous[field]) !== valueText(next[field]))
-        .map((field) => ({ field, previous: previous[field], next: next[field] }))
-}
-
-function revisionTitle(revision: Revision) {
-    if (revision.change_type === 'creation') return 'Vytvorenie pacienta'
-    if (revision.change_type === 'baseline') return 'Počiatočný zaznamenaný stav'
-    if (revision.change_type === 'correction') return 'Oprava nesprávnych údajov'
-    if (revision.items.length === 1) {
-        const category = revision.items[0].category
-        return `Zmena: ${categoryLabels[category] ?? category}`
-    }
-    return `Zmena ${revision.items.length} skupín údajov`
-}
-
-function isRetrospective(item: RevisionItem, revision: Revision) {
-    return !!item.effective_date && item.effective_date < revision.recorded_at.slice(0, 10)
 }
 </script>
 
@@ -250,65 +230,66 @@ function isRetrospective(item: RevisionItem, revision: Revision) {
         :content-style="{ padding: '0' }"
         @update:visible="emit('update:visible', $event)"
     >
-        <div class="flex flex-wrap items-center gap-2 border-b border-tag3 px-4 py-3">
-            <AppButton
-                type="button"
-                label="Zaznamenané zmeny"
-                :variant="mode === 'revisions' ? 'accent' : 'secondary'"
-                @click="selectMode('revisions')"
-            />
-            <AppButton
-                type="button"
-                label="Platnosť údajov"
-                :variant="mode === 'effective' ? 'accent' : 'secondary'"
-                @click="selectMode('effective')"
-            />
-        </div>
-
         <p v-if="error" class="m-4 rounded-md bg-tag3 p-3 text-normal text-danger" role="alert">
             {{ error }}
         </p>
 
-        <div v-if="loading" class="flex min-h-64 items-center justify-center gap-2 text-normal text-darkgrey" role="status">
+        <div
+            v-if="revisionsLoading"
+            class="flex min-h-64 items-center justify-center gap-2 text-normal text-darkgrey"
+            role="status"
+        >
             <i class="bi bi-arrow-repeat animate-spin text-accent" aria-hidden="true" />
-            Načítavam údaje…
+            Načítavam históriu…
         </div>
 
-        <div v-else-if="mode === 'revisions'" class="grid min-h-[360px] md:grid-cols-[290px_minmax(0,1fr)]">
+        <div v-else class="grid min-h-[360px] md:grid-cols-[340px_minmax(0,1fr)]">
             <aside
-                class="max-h-[70dvh] min-w-0 overflow-y-auto border-r border-darkgrey bg-darkgrey p-3"
+                class="max-h-[75dvh] min-w-0 overflow-y-auto p-3"
                 :class="mobileDetail ? 'hidden md:block' : 'block'"
             >
-                <p v-if="!revisions.length" class="p-4 text-normal text-darkgrey/70">
+                <p v-if="!timelineEntries.length" class="p-4 text-normal text-darkgrey/70">
                     Zatiaľ nie sú zaznamenané žiadne zmeny.
                 </p>
 
                 <button
-                    v-for="revision in revisions"
-                    :key="revision.id"
+                    v-for="entry in timelineEntries"
+                    :key="entry.key"
                     type="button"
-                    class="mb-2 flex w-full flex-col gap-1 rounded-md p-3 text-left text-normal text-darkgrey transition-colors"
-                    :class="selectedRevisionId === revision.id ? 'bg-tag3!' : 'bg-white! hover:bg-tag3!'"
-                    @click="selectRevision(revision)"
+                    class="mb-2 flex w-full flex-col gap-2 rounded-md p-3 text-left text-normal text-darkgrey transition-colors bg-tag3 hover:scale-102 transition-transform animate-smooth cursor-pointer"
+                    @click="selectEntry(entry)"
                 >
-                    <span class="flex flex-wrap items-center gap-2">
-                        <span class="font-semibold text-accent">{{ revisionTitle(revision) }}</span>
-                        <span v-if="revision.change_type === 'correction'" class="rounded-md bg-tag3 px-2 py-0.5 text-mini text-darkgrey">
-                            Oprava
+                    <div class="flex gap-2">
+                        <Tag
+                            :value="formatDate(entry.item?.effective_date)"
+                            class="bg-darkgrey! w-fit!"
+                        />
+                        <span class="text-darkgrey">{{ entryTitle(entry) }}</span>
+                    </div>
+
+                    <div class="flex flex-col text-mini text-accent">
+                        <span>
+                            {{ formatDateTime(entry.revision.recorded_at) }}
                         </span>
-                    </span>
-                    <span class="text-mini">{{ formatDateTime(revision.recorded_at) }}</span>
-                    <span class="text-mini text-darkgrey/70">{{ revision.user?.name ?? 'Systém' }}</span>
-                    <span v-for="item in revision.items" :key="item.id" class="text-mini text-darkgrey/70">
-                        {{ categoryLabels[item.category] ?? item.category }} · od {{ formatDate(item.effective_date) }}
-                        <span v-if="isRetrospective(item, revision)" class="text-accent"> · Spätne</span>
-                    </span>
+
+                        <span>
+                            {{ entry.revision.user?.name ?? 'Systém' }}
+                        </span>
+
+                        <span
+                            v-if="entry.revision.change_type === 'correction'"
+                            class="text-mini text-darkgrey/60"
+                        >
+                            Oprava historických údajov
+                        </span>
+                    </div>
                 </button>
             </aside>
 
             <main
-                class="max-h-[70dvh] min-w-0 overflow-y-auto px-4 py-4 sm:px-6"
+                class="max-h-[75dvh] min-w-0 overflow-y-auto px-4 py-4 sm:px-6"
                 :class="mobileDetail ? 'block' : 'hidden md:block'"
+                :aria-busy="stateLoading"
             >
                 <AppButton
                     type="button"
@@ -319,36 +300,14 @@ function isRetrospective(item: RevisionItem, revision: Revision) {
                     @click="mobileDetail = false"
                 />
 
-                <template v-if="selectedRevision">
-                    <PatientHistoryForm
-                        :state="displayedState"
-                        :changed-categories="changedCategories"
-                        :changed-fields="changedFields"
-                        :allow-assignment-editing="allowAssignmentEditing"
-                    />
-                </template>
-            </main>
-        </div>
-
-        <div v-else class="flex max-h-[75dvh] flex-col gap-5 overflow-y-auto p-4 sm:p-6">
-            <FormField label="Údaje platné k dátumu" class="w-full max-w-xs" v-slot="{ id }">
-                <DatePicker
-                    :id="id"
-                    v-model="selectedDate"
-                    dateFormat="dd.mm.yy"
-                    :manualInput="false"
-                    :showIcon="false"
-                    class="w-full"
-                    inputClass="w-full! cursor-pointer!"
+                <PatientHistoryForm
+                    v-if="displayedState"
+                    :state="displayedState"
+                    :changed-categories="changedCategories"
+                    :changed-fields="changedFields"
+                    :allow-assignment-editing="allowAssignmentEditing"
                 />
-            </FormField>
-
-            <PatientHistoryForm
-                v-if="effectiveState"
-                :state="displayedState"
-                :allow-assignment-editing="allowAssignmentEditing"
-            />
-            <p v-else-if="!error" class="text-normal text-darkgrey/70">Vyberte dátum na zobrazenie údajov.</p>
+            </main>
         </div>
     </Dialog>
 </template>

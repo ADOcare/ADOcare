@@ -141,7 +141,13 @@ class ClaimExportService
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($companyId) {
                 $join->on('pcp.procedure_id', '=', 'proc.id')
                     ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')
-                    ->where('pcp.company_id', '=', $companyId);
+                    ->where('pcp.company_id', '=', $companyId)
+                    ->where(fn ($query) => $query
+                        ->whereNull('pcp.valid_from')
+                        ->orWhereColumn('pcp.valid_from', '<=', 'pp.date'))
+                    ->where(fn ($query) => $query
+                        ->whereNull('pcp.valid_to')
+                        ->orWhereColumn('pcp.valid_to', '>=', 'pp.date'));
             })
             ->where('pp.user_id', $userId)
             ->where('pp.branch_id', $branchId)

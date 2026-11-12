@@ -347,6 +347,10 @@ Route::prefix('v1')->middleware(['api.auth', 'subscription.active'])->group(func
     Route::apiResource('procedures', ProcedureController::class)
         ->only(['index', 'show'])
         ->middleware('role:any');
+    Route::get('procedures/{procedure}/price-history', [ProcedureController::class, 'priceHistory'])
+        ->middleware('role:manager');
+    Route::get('procedures/{procedure}/price-state', [ProcedureController::class, 'priceState'])
+        ->middleware('role:manager');
     Route::apiResource('procedures', ProcedureController::class)
         ->only(['update'])
         ->middleware('role:manager,superadmin');

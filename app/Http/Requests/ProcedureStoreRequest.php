@@ -23,6 +23,7 @@ class ProcedureStoreRequest extends FormRequest
             'prices' => ['required', 'array', 'min:1'],
             'prices.*.insurance_company_id' => ['required', 'integer', 'exists:insurance_companies,id'],
             'prices.*.price' => ['required', 'numeric', 'min:0'],
+            'prices.*.effective_date' => ['nullable', 'date_format:Y-m-d'],
         ];
     }
 }

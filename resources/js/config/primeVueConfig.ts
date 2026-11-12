@@ -32,6 +32,13 @@ const baseNoOutline =
     'outline-none! ring-0! shadow-none! ' +
     'focus:outline-none! focus:ring-0! focus:shadow-none!';
 
+type CheckboxPtOptions = {
+    context?: {
+        disabled?: boolean;
+        checked?: boolean;
+    };
+};
+
 export default {
     license: import.meta.env.VITE_PRIMEVUE_LICENSE_KEY,
     theme: {
@@ -55,14 +62,55 @@ export default {
             headercell: { class: 'bg-darkgrey! text-white! text-heading! px-4! py-2! border-r! border-r-white! last:border-r-0!' },
             sortIcon: { class: 'text-white! flex! items-center! justify-center!' },
             columnTitle: { class: 'text-white! text-heading!' },
+
             pcheadercheckbox: {
-                box: { class: 'bg-darkgrey! border-white!' },
-                root: { class: 'shadow-none! hover:shadow-none!' },
+                root: {
+                    class: 'shadow-none! hover:shadow-none! data-[p-disabled=true]:opacity-100! [&.p-disabled]:opacity-100!',
+                },
+                box: (options?: CheckboxPtOptions) => {
+                    const context = options?.context;
+
+                    return {
+                        class: [
+                            'rounded-sm! border! shadow-none!',
+                            context?.disabled
+                                ? 'bg-tag1! border-white!'
+                                : 'bg-darkgrey! border-white!',
+                        ].join(' '),
+                    };
+                },
+                icon: (options?: CheckboxPtOptions) => ({
+                    class: options?.context?.disabled
+                        ? 'text-darkgrey!'
+                        : 'text-white!',
+                }),
             },
+
             pcrowcheckbox: {
-                box: { class: 'border-darkgrey!' },
-                root: { class: 'shadow-none! hover:shadow-none!' },
+                root: {
+                    class: 'shadow-none! hover:shadow-none! data-[p-disabled=true]:opacity-100! [&.p-disabled]:opacity-100!',
+                },
+                box: (options?: CheckboxPtOptions) => {
+                    const context = options?.context;
+
+                    return {
+                        class: [
+                            'rounded-sm! border! shadow-none!',
+                            context?.disabled
+                                ? 'bg-tag1! border-darkgrey!'
+                                : context?.checked
+                                    ? 'bg-darkgrey! border-darkgrey!'
+                                    : 'bg-white! border-darkgrey!',
+                        ].join(' '),
+                    };
+                },
+                icon: (options?: CheckboxPtOptions) => ({
+                    class: options?.context?.disabled
+                        ? 'text-darkgrey!'
+                        : 'text-white!',
+                }),
             },
+
             bodycell: {
                 class: 'text-normal/5! text-darkgrey! px-4! py-1! border-0! border-r! border-r-white! last:border-r-0!',
             },
@@ -225,14 +273,24 @@ export default {
 
         checkbox: {
             root: {
-                class: `!shadow-none hover:!shadow-none ${baseNoOutline}`,
+                class: `!shadow-none hover:!shadow-none data-[p-disabled=true]:opacity-100! [&.p-disabled]:opacity-100! ${baseNoOutline}`,
             },
-            box: {
-                class: `
-            !border-darkgrey
-            data-[p-checked=true]:!bg-accent
-            data-[p-checked=true]:!border-accent
-            `,
+            
+            box: (options?: CheckboxPtOptions) => {
+                const context = options?.context;
+
+                return {
+                    class: [
+                        'rounded-sm! border! shadow-none!',
+                        context?.disabled
+                            ? context?.checked
+                                ? 'bg-tag1! border-tag1! cursor-not-allowed!'
+                                : 'bg-white! border-tag1! cursor-not-allowed!'
+                            : context?.checked
+                                ? 'bg-accent! border-accent!'
+                                : 'bg-white! border-darkgrey!',
+                    ].join(' '),
+                };
             },
             icon: {
                 class: '!text-darkgrey !fill-darkgrey',

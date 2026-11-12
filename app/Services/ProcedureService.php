@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\DB;
 
 class ProcedureService
 {
+    public function __construct(private ProcedurePriceHistoryService $priceHistory) {}
+
     public function createWithPrices(array $data, ?int $companyId = null): Procedure
     {
         return DB::transaction(function () use ($data, $companyId) {
@@ -17,7 +19,13 @@ class ProcedureService
             $procedure->roles()->sync($data['role_ids']);
 
             if (! empty($data['prices']) && $companyId) {
-                $this->syncPrices($procedure->id, $data['prices'], $companyId);
+                $this->priceHistory->applyPrices(
+                    $procedure->id,
+                    $data['prices'],
+                    $companyId,
+                    auth()->id(),
+                    true,
+                );
             }
 
             return Procedure::with(['insuranceCompaniesPricesMinimal', 'roles'])->find($procedure->id);
@@ -37,7 +45,12 @@ class ProcedureService
             }
 
             if (! empty($data['prices']) && $companyId) {
-                $this->syncPrices($procedure->id, $data['prices'], $companyId);
+                $this->priceHistory->applyPrices(
+                    $procedure->id,
+                    $data['prices'],
+                    $companyId,
+                    auth()->id(),
+                );
             }
 
             return Procedure::with(['insuranceCompaniesPricesMinimal', 'roles'])->find($procedure->id);
@@ -57,26 +70,4 @@ class ProcedureService
         Procedure::whereIn('id', $ids)->delete();
     }
 
-    private function syncPrices(int $procedureId, array $prices, int $companyId): void
-    {
-        $companyIds = array_column($prices, 'insurance_company_id');
-
-        // remove any prices not provided
-        DB::table('procedure_company_prices')
-            ->where('procedure_id', $procedureId)
-            ->where('company_id', $companyId)
-            ->whereNotIn('insurance_company_id', $companyIds)
-            ->delete();
-
-        foreach ($prices as $p) {
-            DB::table('procedure_company_prices')->updateOrInsert(
-                [
-                    'procedure_id' => $procedureId,
-                    'insurance_company_id' => $p['insurance_company_id'],
-                    'company_id' => $companyId,
-                ],
-                ['price' => $p['price']]
-            );
-        }
-    }
 }

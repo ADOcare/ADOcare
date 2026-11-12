@@ -39,8 +39,9 @@ class Procedure extends Model
     public function insuranceCompaniesPrices()
     {
         $relation = $this->belongsToMany(InsuranceCompany::class, 'procedure_company_prices')
-            ->withPivot(['price', 'company_id'])
+            ->withPivot(['price', 'company_id', 'valid_from', 'valid_to'])
             ->withTimestamps();
+        $this->scopePriceRelationToDate($relation);
 
         $user = auth()->user();
         if ($user && ! $user->hasGlobalRole('superadmin') && $user->company_id) {
@@ -54,8 +55,9 @@ class Procedure extends Model
     {
         $relation = $this->belongsToMany(InsuranceCompany::class, 'procedure_company_prices')
             ->select('insurance_companies.id')
-            ->withPivot(['price', 'company_id'])
+            ->withPivot(['price', 'company_id', 'valid_from', 'valid_to'])
             ->withTimestamps();
+        $this->scopePriceRelationToDate($relation);
 
         $user = auth()->user();
         if ($user && ! $user->hasGlobalRole('superadmin') && $user->company_id) {
@@ -63,5 +65,19 @@ class Procedure extends Model
         }
 
         return $relation;
+    }
+
+    private function scopePriceRelationToDate($relation): void
+    {
+        $today = now()->toDateString();
+        $relation
+            ->where(function ($query) use ($today): void {
+                $query->whereNull('procedure_company_prices.valid_from')
+                    ->orWhereDate('procedure_company_prices.valid_from', '<=', $today);
+            })
+            ->where(function ($query) use ($today): void {
+                $query->whereNull('procedure_company_prices.valid_to')
+                    ->orWhereDate('procedure_company_prices.valid_to', '>=', $today);
+            });
     }
 }

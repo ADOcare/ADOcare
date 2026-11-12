@@ -235,7 +235,13 @@ class PointClaimSelectionService
             ->leftJoin('procedure_company_prices as pcp', function ($join) use ($context) {
                 $join->on('pcp.procedure_id', '=', 'pp.procedure_id')
                     ->on('pcp.insurance_company_id', '=', 'pc.insurance_company_id')
-                    ->where('pcp.company_id', '=', $context['company_id']);
+                    ->where('pcp.company_id', '=', $context['company_id'])
+                    ->where(fn ($query) => $query
+                        ->whereNull('pcp.valid_from')
+                        ->orWhereColumn('pcp.valid_from', '<=', 'pp.date'))
+                    ->where(fn ($query) => $query
+                        ->whereNull('pcp.valid_to')
+                        ->orWhereColumn('pcp.valid_to', '>=', 'pp.date'));
             })
             ->where('pp.user_id', $context['healthcare_worker_id'])
             ->where('pp.branch_id', $context['branch_id'])

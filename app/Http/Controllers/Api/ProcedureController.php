@@ -10,6 +10,7 @@ use App\Http\Requests\ProcedureUpdateRequest;
 use App\Http\Resources\BaseCollection;
 use App\Models\Procedure;
 use App\Services\ProcedureRoleService;
+use App\Services\ProcedurePriceHistoryService;
 use App\Services\ProcedureService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -21,6 +22,7 @@ class ProcedureController extends Controller
     public function __construct(
         ProcedureService $service,
         private ProcedureRoleService $procedureRoles,
+        private ProcedurePriceHistoryService $priceHistory,
     ) {
         $this->service = $service;
     }
@@ -114,6 +116,31 @@ class ProcedureController extends Controller
         $procedure = $this->service->updateWithPrices($procedure, $data, $companyId);
 
         return $this->success($procedure, 'Updated');
+    }
+
+    public function priceHistory(Request $request, Procedure $procedure)
+    {
+        $companyId = $request->user()?->company_id;
+        abort_if($companyId === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Company is required.');
+
+        return $this->success(
+            $this->priceHistory->history($procedure, $companyId),
+            'Procedure price history retrieved',
+        );
+    }
+
+    public function priceState(Request $request, Procedure $procedure)
+    {
+        $data = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+        ]);
+        $companyId = $request->user()?->company_id;
+        abort_if($companyId === null, Response::HTTP_UNPROCESSABLE_ENTITY, 'Company is required.');
+
+        return $this->success(
+            $this->priceHistory->state($procedure, $companyId, $data['date']),
+            'Procedure price state retrieved',
+        );
     }
 
     /**

@@ -1,20 +1,42 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import api from '@/services/api'
 import type { InsuranceCompany, Role } from '@/types/models'
 import { useAuthStore } from '@/stores/auth'
+import { useToast } from 'primevue/usetoast'
+import AppButton from '@/components/AppButton.vue'
+import FormField from '@/components/FormField.vue'
+import ProcedurePriceEffectiveDateDialog, {
+    type ProcedurePriceChange,
+} from './ProcedurePriceEffectiveDateDialog.vue'
+import ProcedurePriceHistoryDialog from './ProcedurePriceHistoryDialog.vue'
 
-const props = defineProps({
-    procedure: { type: Object, default: null },
-    modalResolve: { type: Function, required: false },
+type HistoricalPrice = {
+    insurance_company_id: number
+    price: string | number | null
+}
+
+const props = withDefaults(defineProps<{
+    procedure?: Record<string, any> | null
+    modalResolve?: (value?: any) => void
+    historyMode?: boolean
+    historicalPrices?: HistoricalPrice[] | null
+    highlightedInsuranceCompanyIds?: number[]
+}>(), {
+    procedure: null,
+    modalResolve: undefined,
+    historyMode: false,
+    historicalPrices: null,
+    highlightedInsuranceCompanyIds: () => [],
 })
 
 const emit = defineEmits(['save', 'close'])
 const authStore = useAuthStore()
+const toast = useToast()
 
-const canEditBaseFields = computed(() => authStore.isSuperadmin)
-const canEditPrices = computed(() => authStore.isManager)
-const showPrices = computed(() => !authStore.isSuperadmin)
+const canEditBaseFields = computed(() => !props.historyMode && authStore.isSuperadmin)
+const canEditPrices = computed(() => !props.historyMode && authStore.isManager)
+const showPrices = computed(() => props.historyMode || !authStore.isSuperadmin)
 
 const baseFieldClass = computed(() =>
     canEditBaseFields.value
@@ -22,17 +44,14 @@ const baseFieldClass = computed(() =>
         : 'w-full border-lightgrey! text-lightgrey!'
 )
 
-const labelClass = computed(() =>
-    canEditBaseFields.value
-        ? 'block text-normal text-dark mb-1'
-        : 'block text-normal text-lightgrey mb-1'
-)
-
 const loading = ref(false)
 const insuranceCompanies = ref<InsuranceCompany[]>([])
 const branchRoles = ref<Role[]>([])
 const _originalSnapshot = ref<string | null>(null)
 const priceValues = ref<Record<number, number>>({})
+const originalPriceValues = ref<Record<number, number>>({})
+const effectiveDateDialogVisible = ref(false)
+const historyDialogVisible = ref(false)
 
 const model = ref({
     id: null as number | null,
@@ -41,6 +60,16 @@ const model = ref({
     prices: [] as Array<{ insurance_company_id: number; price: number }>,
     role_ids: [] as number[],
 })
+
+const procedureRoleLabels: Record<string, string> = {
+    nurse: 'Zdravotná sestra',
+    physiotherapist: 'Fyzioterapeut',
+}
+
+function procedureRoleLabel(role: Role): string {
+    const position = String(role.position ?? '').toLowerCase()
+    return procedureRoleLabels[position] ?? role.name ?? role.position
+}
 
 function normalizePrice(value: unknown): number {
     const n = Number(value)
@@ -57,6 +86,20 @@ function buildPricesPayload() {
     })
 }
 
+const changedPrices = computed<ProcedurePriceChange[]>(() =>
+    insuranceCompanies.value
+        .map((insuranceCompany) => {
+            const id = Number(insuranceCompany.id)
+            return {
+                insuranceCompanyId: id,
+                insuranceCompanyName: insuranceCompany.name ?? String(id),
+                previousPrice: normalizePrice(originalPriceValues.value[id]),
+                newPrice: normalizePrice(priceValues.value[id]),
+            }
+        })
+        .filter((change) => change.previousPrice !== change.newPrice),
+)
+
 function makeSnapshot() {
     return JSON.stringify({
         code: model.value.code,
@@ -67,6 +110,65 @@ function makeSnapshot() {
             price: Number(p.price),
         })),
     })
+}
+
+function initializeModel() {
+    const existing = props.historicalPrices
+        ? props.historicalPrices.map((price) => ({
+            id: price.insurance_company_id,
+            pivot: { price: price.price },
+        }))
+        : (props.procedure?.insurance_companies_prices_minimal ?? [])
+
+    model.value.id = props.procedure?.id ?? null
+    model.value.code = props.procedure?.code ?? ''
+    model.value.description = props.procedure?.description ?? ''
+    model.value.role_ids = (props.procedure?.roles ?? []).map((role: Role) => Number(role.id))
+
+    model.value.prices = insuranceCompanies.value.map((insuranceCompany) => {
+        const found = existing.find(
+            (price: any) => Number(price.id) === Number(insuranceCompany.id),
+        )
+
+        return {
+            insurance_company_id: Number(insuranceCompany.id),
+            price: normalizePrice(found?.pivot?.price),
+        }
+    })
+
+    const nextPriceValues: Record<number, number> = {}
+    model.value.prices.forEach((price) => {
+        nextPriceValues[Number(price.insurance_company_id)] = normalizePrice(price.price)
+    })
+    priceValues.value = nextPriceValues
+    originalPriceValues.value = { ...nextPriceValues }
+    _originalSnapshot.value = makeSnapshot()
+}
+
+function priceHighlightPt(insuranceCompanyId: number) {
+    if (!props.highlightedInsuranceCompanyIds.includes(insuranceCompanyId)) return undefined
+
+    return {
+        pcInputText: {
+            root: {
+                style: [
+                    'background-color: var(--c-tag-3) !important',
+                ].join('; '),
+            },
+        },
+    }
+}
+
+function saveErrorDetail(error: any): string {
+    const errors = error?.response?.data?.errors
+    if (errors && typeof errors === 'object') {
+        const firstError = Object.values(errors)
+            .flat()
+            .find((message) => typeof message === 'string')
+        if (typeof firstError === 'string') return firstError
+    }
+
+    return error?.response?.data?.message || 'Výkon sa nepodarilo uložiť.'
 }
 
 onMounted(async () => {
@@ -85,31 +187,16 @@ onMounted(async () => {
 
     insuranceCompanies.value = companies
 
-    const existing = props.procedure?.insurance_companies_prices_minimal ?? []
-
-    model.value.id = props.procedure?.id ?? null
-    model.value.code = props.procedure?.code ?? ''
-    model.value.description = props.procedure?.description ?? ''
-    model.value.role_ids = (props.procedure?.roles ?? []).map((role: Role) => Number(role.id))
-
-    model.value.prices = companies.map((ic: any) => {
-        const found = existing.find((p: any) => Number(p.id) === Number(ic.id))
-        const price = found ? (found.pivot?.price ?? 0) : 0
-
-        return {
-            insurance_company_id: Number(ic.id),
-            price: Number(price),
-        }
-    })
-
-    const nextPriceValues: Record<number, number> = {}
-    model.value.prices.forEach((p) => {
-        nextPriceValues[Number(p.insurance_company_id)] = normalizePrice(p.price)
-    })
-    priceValues.value = nextPriceValues
-
-    _originalSnapshot.value = makeSnapshot()
+    initializeModel()
 })
+
+watch(
+    () => props.historicalPrices,
+    () => {
+        if (props.historyMode && insuranceCompanies.value.length > 0) initializeModel()
+    },
+    { deep: true },
+)
 
 function close() {
     if (props.modalResolve) {
@@ -122,6 +209,20 @@ function close() {
 }
 
 async function save() {
+    if (model.value.id && canEditPrices.value && changedPrices.value.length > 0) {
+        effectiveDateDialogVisible.value = true
+        return
+    }
+
+    await persist()
+}
+
+async function confirmEffectiveDates(effectiveDates: Record<number, string>) {
+    effectiveDateDialogVisible.value = false
+    await persist(effectiveDates)
+}
+
+async function persist(effectiveDates: Record<number, string> = {}) {
     loading.value = true
 
     try {
@@ -134,7 +235,10 @@ async function save() {
         }
 
         if (authStore.isManager) {
-            payload.prices = buildPricesPayload()
+            payload.prices = buildPricesPayload().map((price) => ({
+                ...price,
+                effective_date: effectiveDates[price.insurance_company_id] ?? null,
+            }))
         }
 
         if (model.value.id) {
@@ -161,8 +265,20 @@ async function save() {
         } else {
             emit('save')
         }
+        toast.add({
+            severity: 'success',
+            summary: 'Uložené',
+            detail: 'Výkon bol uložený.',
+            life: 3000,
+        })
     } catch (e) {
-        console.error(e)
+        console.error('Failed to save procedure', e, (e as any)?.response?.data)
+        toast.add({
+            severity: 'error',
+            summary: 'Chyba',
+            detail: saveErrorDetail(e),
+            life: 4000,
+        })
     } finally {
         loading.value = false
     }
@@ -172,27 +288,15 @@ async function save() {
 <template>
     <div class="p-4">
         <div class="flex flex-col gap-4">
-            <div class="col-span-6">
-                <label :class="labelClass">Kód</label>
+            <FormField label="Kód" :disabled="!canEditBaseFields">
                 <InputText
                     v-model.trim="model.code"
                     :class="baseFieldClass"
                     :disabled="!canEditBaseFields"
                 />
-            </div>
+            </FormField>
 
-            <div v-if="canEditBaseFields" class="mt-4">
-                <label class="block text-normal text-dark mb-2">Povolené roly</label>
-                <div class="flex flex-col gap-2">
-                    <label v-for="role in branchRoles" :key="role.id" class="flex items-center gap-2">
-                        <Checkbox v-model="model.role_ids" :value="Number(role.id)" />
-                        <span>{{ role.name || role.position }}</span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="col-span-6">
-                <label :class="labelClass">Popis</label>
+            <FormField label="Popis" :disabled="!canEditBaseFields">
                 <Textarea
                     v-model.trim="model.description"
                     :rows="3"
@@ -200,7 +304,26 @@ async function save() {
                     :class="baseFieldClass"
                     :disabled="!canEditBaseFields"
                 />
-            </div>
+            </FormField>
+
+            <FormField
+                label="Povolené roly"
+                class="mt-4"
+                :disabled="!canEditBaseFields"
+            >
+                <div class="flex flex-col gap-2">
+                    <label v-for="role in branchRoles" :key="role.id" class="flex items-center gap-2">
+                        <Checkbox
+                            v-model="model.role_ids"
+                            :value="Number(role.id)"
+                            :disabled="!canEditBaseFields"
+                        />
+                        <span :class="!canEditBaseFields ? 'text-tag1!' : ''">
+                            {{ procedureRoleLabel(role) }}
+                        </span>
+                    </label>
+                </div>
+            </FormField>
         </div>
 
         <div v-if="showPrices" class="mt-4">
@@ -214,23 +337,29 @@ async function save() {
 
                             <td class="p-2 pr-0">
                                 <div class="flex justify-end">
-                                    <div class="relative">
-                                        <InputNumber
-                                            v-model="priceValues[Number(ic.id)]"
-                                            :min="0"
-                                            :minFractionDigits="2"
-                                            :maxFractionDigits="2"
-                                            :useGrouping="false"
-                                            locale="en-US"
-                                            class="w-full price-input"
-                                            :disabled="!canEditPrices"
-                                        />
-                                        <span
-                                            class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-lightgrey pointer-events-none"
-                                        >
-                                            &euro;
-                                        </span>
-                                    </div>
+                                    <FormField class="max-w-56">
+                                        <template #default="{ id }">
+                                            <div class="relative">
+                                                <InputNumber
+                                                    :input-id="id"
+                                                    v-model="priceValues[Number(ic.id)]"
+                                                    :min="0"
+                                                    :minFractionDigits="2"
+                                                    :maxFractionDigits="2"
+                                                    :useGrouping="false"
+                                                    locale="en-US"
+                                                    class="w-full price-input"
+                                                    :disabled="!canEditPrices"
+                                                    :pt="priceHighlightPt(Number(ic.id))"
+                                                />
+                                                <span
+                                                    class="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-lightgrey pointer-events-none"
+                                                >
+                                                    &euro;
+                                                </span>
+                                            </div>
+                                        </template>
+                                    </FormField>
                                 </div>
                             </td>
                         </tr>
@@ -239,39 +368,45 @@ async function save() {
             </div>
         </div>
 
-        <div class="mt-4 flex justify-end gap-2">
-            <Button label="Zrušiť" text class="text-accent! px-2!" @click="close" />
-            <Button
-                label="Uložiť"
-                class="bg-accent! border-accent! px-2! hover:bg-darkgrey! hover:border-darkgrey! text-white!"
-                @click="save"
-                :loading="loading"
+        <div v-if="!historyMode" class="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <AppButton
+                v-if="model.id && canEditPrices"
+                label="História cien"
+                icon="bi bi-clock-history"
+                variant="dark"
+                @click="historyDialogVisible = true"
+                :expand-on-hover="true"
+
             />
+            <span v-else />
+
+            <div class="flex justify-end gap-2">
+                <AppButton
+                    label="Zrušiť"
+                    variant="secondary"
+                    @click="close"
+                />
+
+                <AppButton
+                    label="Uložiť"
+                    @click="save"
+                    :loading="loading"
+                />
+            </div>
         </div>
+
+        <ProcedurePriceEffectiveDateDialog
+            v-if="!historyMode"
+            v-model:visible="effectiveDateDialogVisible"
+            :changes="changedPrices"
+            @confirm="confirmEffectiveDates"
+        />
+
+        <ProcedurePriceHistoryDialog
+            v-if="!historyMode && model.id"
+            v-model:visible="historyDialogVisible"
+            :procedure-id="model.id"
+            :procedure="procedure"
+        />
     </div>
 </template>
-
-<style scoped>
-.input {
-    padding: 0.5rem;
-    border: 1px solid #d1d5db;
-    border-radius: 0.375rem;
-}
-
-.btn {
-    padding: 0.4rem 0.75rem;
-    background: transparent;
-    border: 1px solid #d1d5db;
-    border-radius: 0.375rem;
-}
-
-.btn-primary {
-    background: #0ea5a4;
-    color: white;
-    border: none;
-}
-
-.text-danger {
-    color: #dc2626;
-}
-</style>

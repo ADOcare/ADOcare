@@ -26,6 +26,7 @@ class ProcedureUpdateRequest extends FormRequest
             'prices' => ['sometimes', 'array', 'min:1'],
             'prices.*.insurance_company_id' => ['required_with:prices', 'integer', 'exists:insurance_companies,id'],
             'prices.*.price' => ['required_with:prices', 'numeric', 'min:0'],
+            'prices.*.effective_date' => ['nullable', 'date_format:Y-m-d'],
         ];
     }
 }
